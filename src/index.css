@@ -1,0 +1,271 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 所见即所得编辑器中的附注样式 */
+.note {
+  border-bottom: 1px dotted #f59e0b;
+  cursor: help;
+  position: relative;
+}
+.note:hover {
+  background: rgba(245, 158, 11, 0.1);
+}
+.note:hover::after {
+  content: attr(data-note);
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  max-width: 300px;
+  z-index: 9999;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+:root {
+  --color-primary: #6366f1;
+  --color-primary-light: #818cf8;
+  --color-primary-dark: #4f46e5;
+  --color-bg: #020617;
+  --color-surface: #0f172a;
+  --color-surface-light: #1e293b;
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-border: #1e293b;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+/* ── Surface & Primary variables (space-separated RGB for Tailwind) ── */
+/* Role: 950=page bg 900=overlay 800=card/input 700=active toggle 600=border
+   500=placeholder 400=body 300=emphasized 200=heading 100/50=bright */
+:root {
+  --surface-50: 248 250 252;   --surface-100: 241 245 249;
+  --surface-200: 226 232 240;  --surface-300: 203 213 225;
+  --surface-400: 148 163 184;  --surface-500: 100 116 139;
+  --surface-600: 71 85 105;    --surface-700: 51 65 85;
+  --surface-800: 30 41 59;     --surface-850: 22 32 48;
+  --surface-900: 17 24 39;     --surface-950: 8 12 24;
+  --primary-50: 238 242 255;   --primary-100: 224 231 255;
+  --primary-200: 199 210 254;  --primary-300: 165 180 252;
+  --primary-400: 129 140 248;  --primary-500: 99 102 241;
+  --primary-600: 79 70 229;    --primary-700: 67 56 202;
+  --primary-800: 55 48 163;    --primary-900: 49 46 129;
+  --primary-950: 30 27 75;
+}
+/* ── 原初色彩 ── #EDEBE9 #D8D1C9 大面积暖色 + #34353F #49474A 局部深色 + #3A529D 蓝点缀 ── */
+[data-theme="slate"] {
+  --surface-50: 248 246 243;   --surface-100: 240 237 233;
+  --surface-200: 232 228 223;  --surface-300: 218 213 207;
+  --surface-400: 195 188 181;  --surface-500: 162 155 147;
+  --surface-600: 125 118 112;  --surface-700: 90 85 80;
+  --surface-800: 73 71 74;     --surface-850: 60 58 63;
+  --surface-900: 52 53 63;     --surface-950: 35 36 44;
+  --primary-50: 240 243 255;   --primary-100: 222 228 252;
+  --primary-200: 185 198 245;  --primary-300: 140 160 228;
+  --primary-400: 100 125 200;  --primary-500: 72 100 175;
+  --primary-600: 58 82 157;    --primary-700: 46 66 130;
+  --primary-800: 34 48 100;    --primary-900: 24 32 70;
+  --primary-950: 14 18 45;
+}
+/* ── 开拓金 ── 沉稳黑金主题 灰#B6AEB1 金#E4CBB0 黑#2C2B34 青#80CBB5 ── */
+[data-theme="trailblaze"] {
+  --surface-50: 240 238 239;   --surface-100: 222 219 221;
+  --surface-200: 202 196 199;  --surface-300: 182 174 177;
+  --surface-400: 155 151 162;  --surface-500: 125 122 132;
+  --surface-600: 95 92 102;    --surface-700: 70 68 78;
+  --surface-800: 56 54 64;     --surface-850: 44 43 52;
+  --surface-900: 35 34 43;     --surface-950: 26 25 34;
+  --primary-50: 250 242 228;   --primary-100: 242 228 205;
+  --primary-200: 232 212 180;  --primary-300: 220 195 155;
+  --primary-400: 200 172 125;  --primary-500: 172 145 92;
+  --primary-600: 142 118 72;   --primary-700: 110 92 56;
+  --primary-800: 82 68 42;     --primary-900: 58 48 32;
+  --primary-950: 38 32 24;
+}
+/* ── 丽都橙 ── 硬核嘻哈风格 橙#E28234 黑#242424 边框#2E2F31 黄#E9E34C ── */
+[data-theme="lidu"] {
+  --surface-50: 245 245 246;   --surface-100: 228 228 229;
+  --surface-200: 205 205 206;  --surface-300: 175 176 177;
+  --surface-400: 135 136 138;  --surface-500: 98 99 101;
+  --surface-600: 66 67 69;     --surface-700: 46 47 49;
+  --surface-800: 36 36 36;     --surface-850: 28 28 28;
+  --surface-900: 22 22 22;     --surface-950: 16 16 16;
+  --primary-50: 250 230 205;   --primary-100: 242 195 145;
+  --primary-200: 235 160 95;   --primary-300: 226 130 52;
+  --primary-400: 210 120 50;   --primary-500: 190 100 44;
+  --primary-600: 155 82 36;    --primary-700: 120 65 30;
+  --primary-800: 90 48 22;     --primary-900: 65 32 14;
+  --primary-950: 45 20 8;
+}
+/* ── 原初暗色 ── 靛蓝石板暗色主题 ── */
+[data-theme="classic"] {
+  --surface-50: 248 250 252;   --surface-100: 241 245 249;
+  --surface-200: 226 232 240;  --surface-300: 203 213 225;
+  --surface-400: 148 163 184;  --surface-500: 100 116 139;
+  --surface-600: 71 85 105;    --surface-700: 51 65 85;
+  --surface-800: 30 41 59;     --surface-850: 22 32 48;
+  --surface-900: 17 24 39;     --surface-950: 8 12 24;
+  --primary-50: 238 242 255;   --primary-100: 224 231 255;
+  --primary-200: 199 210 254;  --primary-300: 165 180 252;
+  --primary-400: 129 140 248;  --primary-500: 99 102 241;
+  --primary-600: 79 70 229;    --primary-700: 67 56 202;
+  --primary-800: 55 48 163;    --primary-900: 49 46 129;
+  --primary-950: 30 27 75;
+}
+/* ── 翡翠绿 ── 中性灰表面 + 绿点缀 ── */
+[data-theme="emerald"] {
+  --surface-50: 245 247 246;   --surface-100: 235 240 237;
+  --surface-200: 218 226 222;  --surface-300: 190 202 196;
+  --surface-400: 150 165 158;  --surface-500: 110 125 118;
+  --surface-600: 75 88 82;     --surface-700: 50 62 56;
+  --surface-800: 34 44 38;     --surface-850: 26 34 30;
+  --surface-900: 18 26 22;     --surface-950: 10 15 12;
+  --primary-50: 236 252 243;   --primary-100: 210 248 222;
+  --primary-200: 165 235 185;  --primary-300: 110 215 140;
+  --primary-400: 62 195 108;   --primary-500: 38 165 85;
+  --primary-600: 26 135 68;    --primary-700: 18 105 52;
+  --primary-800: 14 78 38;     --primary-900: 10 52 25;
+  --primary-950: 5 28 12;
+}
+/* ── 日落暖橙 ── 中性灰表面 + 暖橙点缀 ── */
+[data-theme="sunset"] {
+  --surface-50: 248 245 243;   --surface-100: 240 236 232;
+  --surface-200: 228 222 216;  --surface-300: 205 197 190;
+  --surface-400: 172 162 154;  --surface-500: 132 122 115;
+  --surface-600: 95 86 80;     --surface-700: 65 58 52;
+  --surface-800: 44 38 34;     --surface-850: 34 30 26;
+  --surface-900: 26 22 19;     --surface-950: 14 12 10;
+  --primary-50: 255 245 235;   --primary-100: 255 232 210;
+  --primary-200: 252 208 170;  --primary-300: 245 175 120;
+  --primary-400: 235 140 72;   --primary-500: 210 100 42;
+  --primary-600: 178 80 30;    --primary-700: 138 60 20;
+  --primary-800: 102 42 15;    --primary-900: 70 28 10;
+  --primary-950: 40 15 5;
+}
+/* ── 紫晶 ── 中性灰表面 + 紫点缀 ── */
+[data-theme="amethyst"] {
+  --surface-50: 247 245 249;   --surface-100: 238 235 244;
+  --surface-200: 224 219 232;  --surface-300: 200 194 210;
+  --surface-400: 165 157 178;  --surface-500: 125 117 140;
+  --surface-600: 88 82 102;    --surface-700: 60 55 72;
+  --surface-800: 40 36 52;     --surface-850: 32 28 42;
+  --surface-900: 24 21 32;     --surface-950: 13 11 18;
+  --primary-50: 250 240 255;   --primary-100: 242 218 255;
+  --primary-200: 228 185 250;  --primary-300: 208 145 242;
+  --primary-400: 178 100 232;  --primary-500: 145 62 208;
+  --primary-600: 118 40 175;   --primary-700: 90 28 140;
+  --primary-800: 66 18 102;    --primary-900: 44 10 72;
+  --primary-950: 24 5 42;
+}
+/* ── 自定义 ── 变量由 JS 动态写入 */
+[data-theme="custom"] { /* see ThemeContext */ }
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-light);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Selection */
+::selection {
+  background: rgba(99, 102, 241, 0.3);
+  color: #fff;
+}
+
+/* Focus styles */
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Smooth drag region for Electron */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in { animation: fadeIn 0.2s ease-out; }
+.animate-slide-up { animation: slideUp 0.3s ease-out; }
+.animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
+.animate-scale-in { animation: scaleIn 0.2s ease-out; }
+
+@keyframes rainbowBorder {
+  0%   { border-color: #ef4444; }
+  16%  { border-color: #f97316; }
+  33%  { border-color: #eab308; }
+  50%  { border-color: #22c55e; }
+  66%  { border-color: #3b82f6; }
+  83%  { border-color: #a855f7; }
+  100% { border-color: #ef4444; }
+}
+.animate-rainbow-border {
+  animation: rainbowBorder 4s linear infinite;
+}
