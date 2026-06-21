@@ -7,9 +7,8 @@ release/
 .env.local
 .reasonix/
 .codegraph/
-#Mac.command
-#Win.command
+Mac.command
+Win.command
 运行.command
 依赖项.txt
 更新初始化.txt
-#Win+Mac.txt
