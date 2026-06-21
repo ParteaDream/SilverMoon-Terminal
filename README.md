@@ -101,7 +101,7 @@ SilverMoon Terminal（银月终端）是一款基于 Electron 的原神桌面端
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/ParteaDream/silvermoon-terminal.git
+git clone [https://github.com/ParteaDream/silvermoon-terminal.git](https://github.com/ParteaDream/SilverMoon-Terminal.git)
 cd silvermoon-terminal
 
 # 2. 安装依赖
