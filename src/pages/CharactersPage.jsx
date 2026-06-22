@@ -49,7 +49,7 @@ export default function CharactersPage() {
       const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
       if (defs.characters) return defs.characters
     } catch (_) {}
-    return 'table'
+    return 'gallery'
   })
   const [selected, setSelected] = useState(new Set())
   const restoringScroll = useRef(false)
@@ -66,8 +66,13 @@ export default function CharactersPage() {
         if (saved?.viewMode) setViewMode(saved.viewMode)
       })
     } else {
+      // 从侧边栏进入：使用全局默认视图模式，重置滚动位置
       const main = document.querySelector('main')
       if (main) main.scrollTo(0, 0)
+      try {
+        const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
+        if (defs.characters) setViewMode(defs.characters)
+      } catch (_) {}
       loadData()
     }
   }, [])
@@ -127,13 +132,39 @@ export default function CharactersPage() {
 
   async function loadData() {
     try {
-      const [chars, elems, wtypes, regs] = await Promise.all([
+      const [chars, elems, wtypes, regs, fits] = await Promise.all([
         query('SELECT * FROM characters ORDER BY id'),
         query('SELECT * FROM elements'),
         query('SELECT * FROM weapon_types'),
         query('SELECT * FROM regions ORDER BY sort_order, id'),
+        query('SELECT id, character_id, avatar_image FROM character_outfits WHERE avatar_image IS NOT NULL AND avatar_image != \'\''),
       ])
-      setCharacters(chars.data || [])
+      // 构建 char_id → active outfit avatar 映射
+      const outfitAvatarMap = {}
+      const charsData = chars.data || []
+      const fitsData = fits.data || []
+
+      // 从 user.json 读取 outfit 选择（回退用）
+      let outfitSelections = {}
+      try {
+        const uRes = await window.electronAPI?.getUserConfig()
+        if (uRes?.success && uRes.config?.outfitSelections) {
+          outfitSelections = uRes.config.outfitSelections
+        }
+      } catch (_) {}
+
+      for (const c of charsData) {
+        const outfitId = c.active_outfit_id || outfitSelections[c.id]
+        if (outfitId) {
+          const fit = fitsData.find(f => f.id === outfitId)
+          if (fit?.avatar_image) outfitAvatarMap[c.id] = fit.avatar_image
+        }
+      }
+      // 附加 displayCardArt 计算属性
+      for (const c of charsData) {
+        c._displayCardArt = outfitAvatarMap[c.id] || c.card_art
+      }
+      setCharacters(charsData)
       setElements(elems.data || [])
       setWeaponTypes(wtypes.data || [])
       setRegions(regs.data || [])
@@ -250,7 +281,7 @@ export default function CharactersPage() {
   const columns = [
     {
       key: 'image', label: '', width: '64px', minWidth: '64px',
-      render: row => <CharThumb filename={row.card_art || row.splash_art} />,
+      render: row => <CharThumb filename={row._displayCardArt || row.splash_art} />,
     },
     {
       key: 'id', label: 'ID',
@@ -449,8 +480,8 @@ export default function CharactersPage() {
               >
                 {/* Card image */}
                 <div className="aspect-[3/4] bg-surface-800 flex items-end justify-center overflow-hidden relative">
-                  {char.card_art ? (
-                    <CardImage filename={char.card_art} className="w-full h-auto max-h-full object-contain object-bottom" />
+                  {char._displayCardArt ? (
+                    <CardImage filename={char._displayCardArt} className="w-full h-auto max-h-full object-contain object-bottom" />
                   ) : char.splash_art ? (
                     <CardImage filename={char.splash_art} className="w-full h-auto max-h-full object-contain object-bottom" />
                   ) : (

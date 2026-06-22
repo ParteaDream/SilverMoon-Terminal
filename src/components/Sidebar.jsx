@@ -89,7 +89,7 @@ export default function Sidebar() {
       <div className={`h-12 flex items-center border-b border-surface-800 flex-shrink-0 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
         {!collapsed && (
           <div className="flex items-center gap-2 no-drag">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary-500 to-accent-gold flex items-center justify-center overflow-hidden">
+            <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden app-icon-bg">
               {appIcon ? (
                 <img src={appIcon} alt="" className="w-full h-full object-cover" />
               ) : (
@@ -100,7 +100,7 @@ export default function Sidebar() {
           </div>
         )}
         {collapsed && (
-          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary-500 to-accent-gold flex items-center justify-center overflow-hidden no-drag">
+          <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden no-drag app-icon-bg">
             {appIcon ? (
               <img src={appIcon} alt="" className="w-full h-full object-cover" />
             ) : (

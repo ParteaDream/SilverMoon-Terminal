@@ -63,6 +63,11 @@
   --primary-600: 79 70 229;    --primary-700: 67 56 202;
   --primary-800: 55 48 163;    --primary-900: 49 46 129;
   --primary-950: 30 27 75;
+  --app-icon-from: 99 102 241;   --app-icon-to: 165 180 252;
+}
+/* App icon 背景渐变（使用主题 CSS 变量，支持定制） */
+.app-icon-bg {
+  background: linear-gradient(to bottom right, rgb(var(--app-icon-from)), rgb(var(--app-icon-to)));
 }
 /* ── 原初色彩 ── #EDEBE9 #D8D1C9 大面积暖色 + #34353F #49474A 局部深色 + #3A529D 蓝点缀 ── */
 [data-theme="slate"] {
@@ -78,8 +83,9 @@
   --primary-600: 58 82 157;    --primary-700: 46 66 130;
   --primary-800: 34 48 100;    --primary-900: 24 32 70;
   --primary-950: 14 18 45;
+  --app-icon-from: 216 209 201;   --app-icon-to: 58 82 157;
 }
-/* ── 开拓金 ── 沉稳黑金主题 灰#B6AEB1 金#E4CBB0 黑#2C2B34 青#80CBB5 ── */
+/* ── 开拓金 ── 沉稳黑金主题 */
 [data-theme="trailblaze"] {
   --surface-50: 240 238 239;   --surface-100: 222 219 221;
   --surface-200: 202 196 199;  --surface-300: 182 174 177;
@@ -93,6 +99,7 @@
   --primary-600: 142 118 72;   --primary-700: 110 92 56;
   --primary-800: 82 68 42;     --primary-900: 58 48 32;
   --primary-950: 38 32 24;
+  --app-icon-from: 228 203 176;   --app-icon-to: 44 43 52;
 }
 /* ── 丽都橙 ── 硬核嘻哈风格 橙#E28234 黑#242424 边框#2E2F31 黄#E9E34C ── */
 [data-theme="lidu"] {
@@ -108,6 +115,23 @@
   --primary-600: 155 82 36;    --primary-700: 120 65 30;
   --primary-800: 90 48 22;     --primary-900: 65 32 14;
   --primary-950: 45 20 8;
+  --app-icon-from: 226 130 52;   --app-icon-to: 28 28 28;
+}
+/* ── 奥赫马风尚 ── 紫金配色 紫#6D349E 金#D1B347 灰白#C1C4DE 淡蓝#7690AD ── */
+[data-theme="raiden"] {
+  --surface-50: 250 249 240;   --surface-100: 242 238 220;
+  --surface-200: 230 222 190;  --surface-300: 215 200 155;
+  --surface-400: 190 172 125;  --surface-500: 155 138 95;
+  --surface-600: 115 100 68;   --surface-700: 80 68 45;
+  --surface-800: 55 42 58;     --surface-850: 42 32 46;
+  --surface-900: 48 42 22;     --surface-950: 22 14 35;
+  --primary-50: 250 242 228;   --primary-100: 245 220 170;
+  --primary-200: 240 205 130;  --primary-300: 230 190 100;
+  --primary-400: 220 185 85;   --primary-500: 209 179 71;
+  --primary-600: 170 140 55;   --primary-700: 130 105 42;
+  --primary-800: 95 78 32;     --primary-900: 65 55 22;
+  --primary-950: 40 35 14;
+  --app-icon-from: 209 179 71;   --app-icon-to: 109 52 158;
 }
 /* ── 原初暗色 ── 靛蓝石板暗色主题 ── */
 [data-theme="classic"] {
@@ -123,6 +147,7 @@
   --primary-600: 79 70 229;    --primary-700: 67 56 202;
   --primary-800: 55 48 163;    --primary-900: 49 46 129;
   --primary-950: 30 27 75;
+  --app-icon-from: 99 102 241;   --app-icon-to: 2 6 23;
 }
 /* ── 翡翠绿 ── 中性灰表面 + 绿点缀 ── */
 [data-theme="emerald"] {
@@ -138,6 +163,7 @@
   --primary-600: 26 135 68;    --primary-700: 18 105 52;
   --primary-800: 14 78 38;     --primary-900: 10 52 25;
   --primary-950: 5 28 12;
+  --app-icon-from: 38 165 85;   --app-icon-to: 12 20 12;
 }
 /* ── 日落暖橙 ── 中性灰表面 + 暖橙点缀 ── */
 [data-theme="sunset"] {
@@ -153,6 +179,7 @@
   --primary-600: 178 80 30;    --primary-700: 138 60 20;
   --primary-800: 102 42 15;    --primary-900: 70 28 10;
   --primary-950: 40 15 5;
+  --app-icon-from: 210 104 40;   --app-icon-to: 15 11 9;
 }
 /* ── 紫晶 ── 中性灰表面 + 紫点缀 ── */
 [data-theme="amethyst"] {
@@ -168,6 +195,7 @@
   --primary-600: 118 40 175;   --primary-700: 90 28 140;
   --primary-800: 66 18 102;    --primary-900: 44 10 72;
   --primary-950: 24 5 42;
+  --app-icon-from: 145 64 208;   --app-icon-to: 13 9 17;
 }
 /* ── 自定义 ── 变量由 JS 动态写入 */
 [data-theme="custom"] { /* see ThemeContext */ }

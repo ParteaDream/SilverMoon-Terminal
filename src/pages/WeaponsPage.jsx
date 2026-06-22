@@ -37,7 +37,7 @@ export default function WeaponsPage() {
       const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
       if (defs.weapons) return defs.weapons
     } catch (_) {}
-    return 'table'
+    return 'gallery'
   })
   const [selected, setSelected] = useState(new Set())
   const [saving, setSaving] = useState(false)
@@ -71,8 +71,13 @@ export default function WeaponsPage() {
         }
       })
     } else {
+      // 从侧边栏进入：使用全局默认视图模式，重置滚动位置
       const main = document.querySelector('main')
       if (main) main.scrollTo(0, 0)
+      try {
+        const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
+        if (defs.weapons) setViewMode(defs.weapons)
+      } catch (_) {}
       loadData()
     }
   }, [])

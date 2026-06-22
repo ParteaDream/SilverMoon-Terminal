@@ -8,7 +8,7 @@ import { useImageDrag } from '../hooks/useImageDrag'
 import { useDetailScroll } from '../hooks/useDetailState'
 import {
   ArrowLeft, Star, Edit3, Plus, Trash2, Image, ChevronDown, ChevronRight, X,
-  Zap, BookOpen, Crown, Sparkles, User, Info, MapPin, Calendar, Sword, Shirt, UtensilsCrossed, FileText, FlaskConical
+  Zap, BookOpen, Crown, Sparkles, User, Info, MapPin, Calendar, Sword, Shirt, UtensilsCrossed, FileText, FlaskConical, Upload, CheckCircle2
 } from 'lucide-react'
 import EditModal, { FormInput, FormSelect, SearchSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
@@ -106,6 +106,8 @@ function CharacterDetailContent() {
   const [dish, setDish] = useState({ name_zh: '', description_zh: '', effect: '', image: null })
   const [gallery, setGallery] = useState([])   // 自定义图库 [{label, filename}]
   const [saving, setSaving] = useState(false)
+  const [activeOutfitId, setActiveOutfitId] = useState(null)  // 当前激活的时装 ID
+  const [outfitDragOver, setOutfitDragOver] = useState({})   // { [outfitId]: true } — 时装卡片的拖放高亮
   const [statLevel, setStatLevel] = useDetailState('statLevel', 90) // 属性查看等级: 80/90/95/100
   const [travelerElement, setTravelerElement] = useDetailState('travelerElement', null) // 旅行者当前选中的元素
   useDetailScroll('character', id)  // 保存/恢复详情页滚动位置
@@ -164,6 +166,17 @@ function CharacterDetailContent() {
         // 旅行者默认选中第一个元素（useDetailState 已处理恢复，此处只处理首次进入）
         if (c.character_type === 'traveler' && !travelerElement) {
           setTravelerElement(TRAVELER_ELEMENTS[0])
+        }
+        if (c.active_outfit_id) {
+          setActiveOutfitId(c.active_outfit_id)
+        } else {
+          // 回退：从 user.json 的 outfitSelections 读取
+          try {
+            const uRes = await window.electronAPI?.getUserConfig()
+            if (uRes?.success && uRes.config?.outfitSelections?.[c.id]) {
+              setActiveOutfitId(uRes.config.outfitSelections[c.id])
+            }
+          } catch (_) {}
         }
         if (c.dish_name) {
           setDish({ name_zh: c.dish_name || '', description_zh: c.dish_description || '', effect: c.dish_effect || '', image: c.dish_image || null })
@@ -418,11 +431,11 @@ function CharacterDetailContent() {
     setSaving(true)
     try {
       if (editOutfit.id) {
-        await query('UPDATE character_outfits SET name_zh=?, description_zh=?, image=? WHERE id=?',
-          [editOutfit.name_zh, editOutfit.description_zh || null, editOutfit.image || null, editOutfit.id])
+        await query('UPDATE character_outfits SET name_zh=?, description_zh=?, image=?, avatar_image=? WHERE id=?',
+          [editOutfit.name_zh, editOutfit.description_zh || null, editOutfit.image || null, editOutfit.avatar_image || null, editOutfit.id])
       } else {
-        await query('INSERT INTO character_outfits (character_id, name_zh, description_zh, image, is_default) VALUES (?,?,?,?,?)',
-          [character.id, editOutfit.name_zh, editOutfit.description_zh || null, editOutfit.image || null, outfits.length === 0 ? 1 : 0])
+        await query('INSERT INTO character_outfits (character_id, name_zh, description_zh, image, avatar_image, is_default) VALUES (?,?,?,?,?,?)',
+          [character.id, editOutfit.name_zh, editOutfit.description_zh || null, editOutfit.image || null, editOutfit.avatar_image || null, outfits.length === 0 ? 1 : 0])
       }
       setEditOutfit(null)
       await loadAll()
@@ -599,11 +612,14 @@ function CharacterDetailContent() {
             <div
               className={`w-28 h-28 rounded-2xl bg-surface-800/50 border ${elemColor.border} flex items-center justify-center flex-shrink-0 overflow-hidden ${elemColor.glow} shadow-lg cursor-pointer hover:scale-105 transition-transform`}
               onClick={() => {
-                const img = character.card_art || character.splash_art
+                const activeOutfit = outfits.find(o => o.id === activeOutfitId)
+                const img = (activeOutfit?.avatar_image) || character.card_art || character.splash_art
                 if (img) setLightbox({ filename: img, label: character.name_zh })
               }}
             >
-              {character.card_art ? (
+              {(outfits.find(o => o.id === activeOutfitId)?.avatar_image) ? (
+                <LocalImage filename={outfits.find(o => o.id === activeOutfitId).avatar_image} className="w-full h-full object-cover" />
+              ) : character.card_art ? (
                 <LocalImage filename={character.card_art} className="w-full h-full object-cover" />
               ) : character.splash_art ? (
                 <LocalImage filename={character.splash_art} className="w-full h-full object-cover" />
@@ -913,29 +929,136 @@ function CharacterDetailContent() {
             count={outfits.length}
           >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {outfits.map(o => (
-                <div key={o.id} className="rounded-xl bg-surface-800/50 border border-surface-700 overflow-hidden group hover:border-surface-600 transition-colors">
+              {outfits.map(o => {
+                const isSelected = o.id === activeOutfitId
+                const isDragOver = !!outfitDragOver[o.id]
+                // 默认时装自动继承角色默认立绘和头像
+                const displayImage = o.image || (o.is_default ? character.splash_art : null)
+                const displayAvatar = o.avatar_image || (o.is_default ? character.card_art : null)
+                return (
+                <div key={o.id} className={`rounded-xl bg-surface-800/50 border overflow-hidden group transition-all duration-200 flex flex-col
+                  ${isSelected
+                    ? 'border-primary-500 ring-1 ring-primary-500/30 shadow-lg shadow-primary-500/10'
+                    : isDragOver
+                    ? 'border-primary-400 ring-1 ring-primary-400/20 bg-primary-500/5'
+                    : 'border-surface-700 hover:border-surface-600'}
+                `}>
+                  {/* 时装主图（点击放大） */}
                   <div
                     className="aspect-[3/4] bg-surface-700 flex items-center justify-center overflow-hidden relative cursor-pointer"
-                    onClick={() => o.image && setLightbox({ filename: o.image, label: o.name_zh })}
+                    onClick={() => displayImage && setLightbox({ filename: displayImage, label: o.name_zh })}
                   >
-                    {o.image ? (
-                      <LocalImage filename={o.image} className="w-full h-full object-cover" />
+                    {displayImage ? (
+                      <LocalImage filename={displayImage} className="w-full h-full object-cover" />
                     ) : (
                       <Image className="w-8 h-8 text-surface-500" />
+                    )}
+                    {/* 头像缩略图（左下角，可点击放大） */}
+                    {displayAvatar && (
+                      <div
+                        className="absolute left-2 bottom-2 w-10 h-10 rounded-lg border-2 border-surface-500/60 overflow-hidden bg-surface-800 shadow-md cursor-pointer hover:scale-110 transition-transform z-10"
+                        onClick={e => { e.stopPropagation(); setLightbox({ filename: displayAvatar, label: `${o.name_zh} 头像` }) }}
+                      >
+                        <LocalImage filename={displayAvatar} className="w-full h-full object-cover" />
+                      </div>
                     )}
                     <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={e => { e.stopPropagation(); setEditOutfit({ ...o }) }} className="p-1.5 rounded-lg bg-black/60 text-white/80 hover:text-white"><Edit3 className="w-3 h-3" /></button>
                       <button onClick={e => { e.stopPropagation(); deleteOutfit(o.id) }} className="p-1.5 rounded-lg bg-black/60 text-white/80 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
                     </div>
+                    {/* 拖放导入头像覆盖层 */}
+                    <div
+                      className={`absolute inset-0 flex items-center justify-center transition-colors pointer-events-none
+                        ${isDragOver ? 'bg-primary-500/20 z-10' : ''}`}
+                    >
+                      {isDragOver && (
+                        <div className="flex flex-col items-center gap-1 pointer-events-none">
+                          <Upload className="w-6 h-6 text-primary-300" />
+                          <span className="text-[10px] text-primary-300 font-medium">导入头像</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="p-3">
-                    <p className="text-xs font-medium">{o.name_zh}</p>
-                    {o.description_zh && <p className="text-[10px] text-surface-500 mt-0.5"><ColoredText text={o.description_zh} /></p>}
-                    {o.is_default ? <span className="text-[10px] text-primary-400 mt-1 inline-block">默认时装</span> : null}
+                  {/* 信息栏（点击切换激活时装，支持拖放导入头像） */}
+                  <div
+                    className={`p-3 transition-colors cursor-pointer flex-1
+                      ${isSelected
+                        ? 'bg-primary-500/5'
+                        : isDragOver
+                        ? 'bg-primary-500/5'
+                        : 'hover:bg-surface-700/40'}
+                    `}
+                    onClick={async () => {
+                      const newId = isSelected ? null : o.id
+                      setActiveOutfitId(newId)
+                      try {
+                        setCharacter(prev => ({ ...prev, active_outfit_id: newId }))
+                        await query('UPDATE characters SET active_outfit_id = ? WHERE id = ?', [newId, character.id])
+                        // 同步到 user.json
+                        const uRes = await window.electronAPI?.getUserConfig()
+                        const prevSelections = uRes?.config?.outfitSelections || {}
+                        const nextSelections = { ...prevSelections, [character.id]: newId }
+                        if (!newId) delete nextSelections[character.id]
+                        await window.electronAPI?.setUserConfig('outfitSelections', nextSelections)
+                      } catch (_) {}
+                    }}
+                    onDragOver={e => {
+                      e.preventDefault(); e.stopPropagation()
+                      setOutfitDragOver(prev => ({ ...prev, [o.id]: true }))
+                    }}
+                    onDragLeave={e => {
+                      e.preventDefault(); e.stopPropagation()
+                      if (!e.currentTarget.contains(e.relatedTarget)) {
+                        setOutfitDragOver(prev => ({ ...prev, [o.id]: false }))
+                      }
+                    }}
+                    onDrop={async e => {
+                      e.preventDefault(); e.stopPropagation()
+                      setOutfitDragOver(prev => ({ ...prev, [o.id]: false }))
+                      const files = e.dataTransfer?.files
+                      if (!files || files.length === 0) return
+                      for (const file of files) {
+                        if (!file.type.startsWith('image/')) continue
+                        try {
+                          const result = await window.electronAPI?.importImageFile(file.path)
+                          if (result?.filename) {
+                            await query('UPDATE character_outfits SET avatar_image = ? WHERE id = ?', [result.filename, o.id])
+                            if (isSelected) setCharacter(prev => ({ ...prev }))
+                            await loadAll()
+                          }
+                        } catch (_) {}
+                      }
+                    }}
+                  >
+                    <p className="text-xs font-medium pointer-events-none">{o.name_zh}</p>
+                    <p className={`text-[10px] mt-0.5 pointer-events-none ${isSelected ? 'text-primary-300' : 'text-surface-500'}`}>
+                      <ColoredText text={o.description_zh || '无描述'} />
+                    </p>
+                    {/* 导入头像按钮（非默认时装且无头像时显示） */}
+                    {!o.is_default && !o.avatar_image && (
+                      <button
+                        onClick={async e => {
+                          e.stopPropagation()
+                          const filename = await importImage()
+                          if (!filename) return
+                          await query('UPDATE character_outfits SET avatar_image = ? WHERE id = ?', [filename, o.id])
+                          if (isSelected) setCharacter(prev => ({ ...prev }))
+                          await loadAll()
+                        }}
+                        className="mt-1.5 text-[10px] text-surface-500 hover:text-primary-400 transition-colors flex items-center gap-1"
+                      >
+                        <Upload className="w-2.5 h-2.5" />导入头像
+                      </button>
+                    )}
+                    {isSelected && (
+                      <p className="text-[10px] text-primary-300 mt-1 flex items-center gap-1 pointer-events-none">
+                        <CheckCircle2 className="w-3 h-3" />已作为头像
+                      </p>
+                    )}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
             {outfits.length === 0 && <Empty text="暂无时装数据" />}
           </SectionCard>
@@ -1022,6 +1145,10 @@ function CharacterDetailContent() {
               {character.splash_art && <ImageTile label="立绘" filename={character.splash_art} large onClick={() => setLightbox({ filename: character.splash_art, label: '立绘' })} />}
               {character.namecard_art && <ImageTile label="名片" filename={character.namecard_art} large onClick={() => setLightbox({ filename: character.namecard_art, label: '名片' })} />}
               {character.card_art && <ImageTile label="头像" filename={character.card_art} onClick={() => setLightbox({ filename: character.card_art, label: '头像' })} />}
+              {/* 时装头像 */}
+              {outfits.filter(o => o.avatar_image).map(o => (
+                <ImageTile key={`outfit-avatar-${o.id}`} label={`${o.name_zh} 头像`} filename={o.avatar_image} onClick={() => setLightbox({ filename: o.avatar_image, label: `${o.name_zh} 头像` })} />
+              ))}
               {dish.image && <ImageTile label="特殊料理" filename={dish.image} onClick={() => setLightbox({ filename: dish.image, label: dish.name_zh || '特殊料理' })} />}
               {/* 自定义图库图片 */}
               {gallery.map((img, i) => (
@@ -1051,7 +1178,7 @@ function CharacterDetailContent() {
                 </span>
               </button>
             </div>
-            {!character.splash_art && !character.card_art && !character.namecard_art && !dish.image && gallery.length === 0 && (
+            {!character.splash_art && !character.card_art && !character.namecard_art && !dish.image && !outfits.some(o => o.avatar_image) && gallery.length === 0 && (
               <Empty text="暂无图片" />
             )}
           </SectionCard>
@@ -1179,7 +1306,8 @@ function CharacterDetailContent() {
         <EditModal isOpen={!!editOutfit} onClose={() => setEditOutfit(null)} onSave={handleSaveOutfit} saving={saving} title={editOutfit.id ? '编辑时装' : '添加时装'}>
           <FormInput label="名称" value={editOutfit.name_zh} onChange={v => setEditOutfit({ ...editOutfit, name_zh: v })} />
           <FormInput label="描述" value={editOutfit.description_zh} onChange={v => setEditOutfit({ ...editOutfit, description_zh: v })} multiline />
-          <ImagePicker label="图片" currentImage={editOutfit.image} onSelect={v => setEditOutfit({ ...editOutfit, image: v })} onRemove={() => setEditOutfit({ ...editOutfit, image: null })} />
+          <ImagePicker label="时装图片" currentImage={editOutfit.image} onSelect={v => setEditOutfit({ ...editOutfit, image: v })} onRemove={() => setEditOutfit({ ...editOutfit, image: null })} />
+          <ImagePicker label="头像图片" currentImage={editOutfit.avatar_image} onSelect={v => setEditOutfit({ ...editOutfit, avatar_image: v })} onRemove={() => setEditOutfit({ ...editOutfit, avatar_image: null })} />
         </EditModal>
       )}
 

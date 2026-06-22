@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { autoUpdater } = require('electron-updater');
+const { shell } = require('electron');
 
 // ── 数据库引擎: sql.js (纯 JS, 无原生模块) ──
 const initSqlJs = require('sql.js');
@@ -30,6 +32,30 @@ function beijingDateStr() {
   const now = new Date();
   const bj = new Date(now.getTime() + 8 * 60 * 60 * 1000);
   return bj.toISOString().split('T')[0];
+}
+
+const DATA_VERSION = '6.7.0';
+
+// 从 seed.sql 文件中读取数据版本
+function readSeedVersion() {
+  const searchDirs = [
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'electron'),
+    path.join(__dirname, '..', 'electron'),
+    path.join(__dirname),
+  ];
+  for (const d of searchDirs) {
+    const fp = path.join(d, 'seed.sql');
+    if (!fs.existsSync(fp)) continue;
+    try {
+      // 只读取头部若干行（避免加载整个大文件）
+      const head = fs.readFileSync(fp, { encoding: 'utf-8' }).split('\n').slice(0, 10);
+      for (const line of head) {
+        const m = line.match(/^--\s*数据版本:\s*(.+)/);
+        if (m) return m[1].trim();
+      }
+    } catch (_) {}
+  }
+  return DATA_VERSION; // 回退
 }
 
 // ── 路径工具 ──
@@ -76,8 +102,70 @@ function getFolderSize(folderPath) {
 
 function clearSizeCache() { _packSizeCache.clear(); }
 
-// 解析 "images-版本号-类型" 格式，如 "images-1.2.0-Extreme"
+// ── 图片路径解析（按文件名匹配，忽略扩展名，递归搜索子目录，同名取最大）──
+let _imagePathCache = null; // Map<imagesDir, Map<baseName, { path, size }>>
+
+function clearImagePathCache() {
+  _imagePathCache = null;
+}
+
+function buildImagePathCache(imagesDir) {
+  if (_imagePathCache && _imagePathCache.has(imagesDir)) return _imagePathCache.get(imagesDir);
+
+  const map = new Map(); // baseName → { path, size }
+  function walk(dir) {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) {
+          walk(fullPath);
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name);
+          const base = path.basename(entry.name, ext);
+          try {
+            const stat = fs.statSync(fullPath);
+            const existing = map.get(base);
+            if (!existing || stat.size > existing.size) {
+              map.set(base, { path: fullPath, size: stat.size });
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+  walk(imagesDir);
+
+  if (!_imagePathCache) _imagePathCache = new Map();
+  _imagePathCache.set(imagesDir, map);
+  return map;
+}
+
+/**
+ * 根据存储的图片名（可能带扩展名）在图包中递归定位实际文件
+ * - 去除扩展名后按文件名匹配
+ * - 递归搜索整个图包目录（含所有子文件夹）
+ * - 同名文件取体积最大的
+ * @returns {string|null} 完整路径或 null
+ */
+function resolveImagePath(imagesDir, storedName) {
+  if (!storedName) return null;
+  const ext = path.extname(storedName);
+  const baseName = ext ? path.basename(storedName, ext) : storedName;
+  const cache = buildImagePathCache(imagesDir);
+  const entry = cache.get(baseName);
+  return entry ? entry.path : null;
+}
+function parseOfficialPackName(name) {
+  const m = name.match(/^images-(extreme|medium|lite)$/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// 解析图片包名称格式（官方包 images-{type} 优先级最高）
 function parseImagePackName(name) {
+  const official = parseOfficialPackName(name);
+  if (official) return { version: [9999], type: official };
   const match = name.match(/^images-(.+)-(extreme|medium|lite)$/i);
   if (!match) return null;
   const versionStr = match[1];
@@ -336,6 +424,24 @@ function migrateSchema() {
 
     // 删除旧的 image_cache 表（base64 图片缓存会撑爆 WASM 内存）
     try { db.exec('DROP TABLE IF EXISTS image_cache'); } catch (_) {}
+
+    // 为 character_outfits 添加 avatar_image 列
+    {
+      const outfitCols = dbAll('PRAGMA table_info(character_outfits)', []);
+      if (!outfitCols.some(c => c.name === 'avatar_image')) {
+        console.log('[migrate] adding avatar_image column to character_outfits');
+        dbRun('ALTER TABLE character_outfits ADD COLUMN avatar_image TEXT');
+      }
+    }
+
+    // 为 characters 添加 active_outfit_id 列
+    {
+      const charCols = dbAll('PRAGMA table_info(characters)', []);
+      if (!charCols.some(c => c.name === 'active_outfit_id')) {
+        console.log('[migrate] adding active_outfit_id column to characters');
+        dbRun('ALTER TABLE characters ADD COLUMN active_outfit_id INTEGER');
+      }
+    }
   } catch (e) {
     console.error('[migrate] error:', e.message);
   }
@@ -402,6 +508,9 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+
+  // 启动时自动检查更新（如果用户开启）
+  setTimeout(() => checkUpdateOnStartup(), 3000);
 
   // macOS 保留标准菜单，Windows 移除菜单栏
   if (process.platform === 'darwin') {
@@ -502,13 +611,16 @@ ipcMain.handle('get-app-version', () => {
   return { success: true, version: getAppVersion() };
 });
 
+ipcMain.handle('get-data-version', () => {
+  return { success: true, version: readSeedVersion() };
+});
+
 // ── 图片包管理 ──
 ipcMain.handle('list-image-packs', () => {
   try {
     if (!dbDir) return { success: true, packs: [], active: 'images' };
     const packs = findImagePacks(dbDir);
     const active = getActiveImagePackName(dbDir);
-    // 按需计算大小用于UI展示（使用缓存加速）
     const formatted = packs.map(p => {
       const size = getFolderSize(p.path);
       let sizeStr;
@@ -516,11 +628,332 @@ ipcMain.handle('list-image-packs', () => {
       else if (size >= 1048576) sizeStr = (size / 1048576).toFixed(1) + ' MB';
       else if (size >= 1024) sizeStr = (size / 1024).toFixed(0) + ' KB';
       else sizeStr = size + ' B';
-      return { name: p.name, path: p.path, size, sizeFormatted: sizeStr };
+      const oType = parseOfficialPackName(p.name);
+      return { name: p.name, path: p.path, size, sizeFormatted: sizeStr, officialType: oType };
+    });
+    // 官方包置顶排序
+    formatted.sort((a, b) => {
+      if (a.officialType && !b.officialType) return -1;
+      if (!a.officialType && b.officialType) return 1;
+      if (a.officialType && b.officialType) return IMAGE_TYPE_PRIORITY[b.officialType] - IMAGE_TYPE_PRIORITY[a.officialType];
+      return 0;
     });
     return { success: true, packs: formatted, active };
   } catch (e) {
     return { success: false, error: e.message, packs: [], active: 'images' };
+  }
+});
+
+// ── 删除图包 ──
+ipcMain.handle('delete-image-pack', (_event, packPath) => {
+  try {
+    if (!packPath || !fs.existsSync(packPath)) return { success: false, error: '文件夹不存在' };
+    fs.rmSync(packPath, { recursive: true, force: true });
+    clearSizeCache();
+    clearImagePathCache();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 生成 manifest ──
+const crypto = require('crypto');
+ipcMain.handle('generate-manifest', (_event, packPath) => {
+  try {
+    if (!packPath || !fs.existsSync(packPath)) return { success: false, error: '文件夹不存在' };
+    const files = {};
+    function walk(dir, base) {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isSymbolicLink()) continue;
+        const fp = path.join(dir, e.name);
+        const rel = base ? base + '/' + e.name : e.name;
+        if (e.isDirectory()) { walk(fp, rel); }
+        else if (e.isFile() && !e.name.endsWith('.json')) {
+          const buf = fs.readFileSync(fp);
+          files[rel] = { hash: crypto.createHash('sha256').update(buf).digest('hex'), size: buf.length };
+        }
+      }
+    }
+    walk(packPath, '');
+    const manifest = { generated: new Date().toISOString(), files };
+    fs.writeFileSync(path.join(packPath, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    return { success: true, fileCount: Object.keys(files).length, manifest };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 下载图包 / 更新 ──
+const PACK_DOWNLOAD_URLS = {
+  lite: 'https://gofile.me/7gOZs/uEqjvLqpk',
+  medium: 'https://gofile.me/7gOZs/1XBiYLXvh',
+};
+
+// 从 gofile.me 文件夹 URL 获取 API 参数
+function parseGofileUrl(url) {
+  const m = url.match(/gofile\.me\/([^/]+)\/([^/]+)/);
+  return m ? { accountId: m[1], contentId: m[2] } : null;
+}
+
+// 从 gofile.me 获取文件夹内容（先尝试公开 API，失败则从页面提取）
+async function fetchGofileContents(folderUrl) {
+  const params = parseGofileUrl(folderUrl);
+  if (!params) return null;
+
+  // 方法1: 公开 API（无需 token）
+  let data = await downloadJsonFile(`https://api.gofile.io/contents/${params.contentId}`);
+  if (data?.status === 'ok') return data.data;
+
+  // 方法2: 从 gofile.me 页面中提取 app 状态 JSON
+  const html = await downloadTextFile(folderUrl);
+  if (html) {
+    // 尝试匹配 window.__INITIAL_STATE__ 或类似模式
+    const jsonMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.+?});/s)
+      || html.match(/<script[^>]*>\s*window\.__INITIAL_STATE__\s*=\s*(.+?);\s*<\/script>/s)
+      || html.match(/"children"\s*:\s*\{/);
+    if (jsonMatch) {
+      try {
+        // 尝试从完整页面提取 JSON
+        const bigJson = html.match(/\{[^}]*"children"\s*:\s*\{[^}]*"id"[^}]*\}[^}]*\}/);
+        if (bigJson) {
+          const parsed = JSON.parse(bigJson[0]);
+          if (parsed.children) return { children: parsed.children };
+        }
+      } catch (_) {}
+    }
+  }
+  return null;
+}
+
+// 从 gofile 文件夹下载指定文件
+async function downloadGofileFile(folderUrl, filename) {
+  const contents = await fetchGofileContents(folderUrl);
+  if (!contents) return null;
+  // 在子文件中查找
+  function findFile(children) {
+    for (const [name, info] of Object.entries(children)) {
+      if (name === filename && info.link) return info.link;
+    }
+    return null;
+  }
+  const link = findFile(contents.children || {});
+  if (!link) return null;
+  return await downloadBinaryFile(link);
+}
+
+// 从 gofile 文件夹下载并解析 JSON 文件
+async function downloadGofileJson(folderUrl, filename) {
+  const contents = await fetchGofileContents(folderUrl);
+  if (!contents) return null;
+  function findFile(children) {
+    for (const [name, info] of Object.entries(children)) {
+      if (name === filename && info.link) return info.link;
+    }
+    return null;
+  }
+  const link = findFile(contents.children || {});
+  if (!link) return null;
+  return await downloadJsonFile(link);
+}
+
+ipcMain.handle('check-pack-update', async (_event, packPath, packType) => {
+  try {
+    const baseUrl = PACK_DOWNLOAD_URLS[packType];
+    if (!baseUrl) return { success: false, error: '未知的包类型' };
+    // 尝试下载远程 manifest
+    const remote = await downloadGofileJson(baseUrl, 'manifest.json');
+    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认 NAS 上已上传 manifest.json' };
+    // 读取本地 manifest
+    const localPath = path.join(packPath, 'manifest.json');
+    let local = { files: {} };
+    if (fs.existsSync(localPath)) {
+      local = JSON.parse(fs.readFileSync(localPath, 'utf-8'));
+    }
+    // 比对差异
+    const newFiles = [];
+    for (const [f, info] of Object.entries(remote.files)) {
+      if (!local.files[f] || local.files[f].hash !== info.hash) {
+        newFiles.push({ path: f, size: info.size });
+      }
+    }
+    return { success: true, newFiles, totalRemote: Object.keys(remote.files).length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('download-pack-files', async (_event, packPath, packType, fileList) => {
+  try {
+    const baseUrl = PACK_DOWNLOAD_URLS[packType];
+    if (!baseUrl) return { success: false, error: '未知的包类型' };
+    const contents = await fetchGofileContents(baseUrl);
+    const children = contents?.children || {};
+    let downloaded = 0;
+    for (const f of fileList) {
+      try {
+        const destPath = path.join(packPath, f.path);
+        const destDir = path.dirname(destPath);
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        const fileInfo = children[f.path];
+        const link = fileInfo?.link;
+        const data = link ? await downloadBinaryFile(link) : null;
+        if (data) { fs.writeFileSync(destPath, data); downloaded++; }
+      } catch (_) {}
+    }
+    clearSizeCache();
+    clearImagePathCache();
+    // 下载远程 manifest 作为本地 manifest
+    try {
+      const manifestInfo = children['manifest.json'];
+      if (manifestInfo?.link) {
+        const manifestText = await downloadTextFile(manifestInfo.link);
+        if (manifestText) fs.writeFileSync(path.join(packPath, 'manifest.json'), manifestText);
+      }
+    } catch (_) {}
+    return { success: true, downloaded };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+async function downloadTextFile(url) {
+  return new Promise((resolve) => {
+    const proto = url.startsWith('https') ? require('https') : require('http');
+    proto.get(url, (res) => {
+      if (res.statusCode !== 200) { resolve(null); return; }
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => resolve(data));
+    }).on('error', () => resolve(null)).setTimeout(15000, function() { this.destroy(); resolve(null); });
+  });
+}
+
+async function downloadJsonFile(url) {
+  const text = await downloadTextFile(url);
+  if (!text) return null;
+  try { return JSON.parse(text); } catch (_) { return null; }
+}
+
+async function downloadBinaryFile(url) {
+  return new Promise((resolve) => {
+    const proto = url.startsWith('https') ? require('https') : require('http');
+    proto.get(url, (res) => {
+      if (res.statusCode !== 200) { resolve(null); return; }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    }).on('error', () => resolve(null)).setTimeout(30000, function() { this.destroy(); resolve(null); });
+  });
+}
+
+ipcMain.handle('download-full-pack', async (_event, packType) => {
+  try {
+    if (!dbDir) return { success: false, error: '数据库未初始化' };
+    const baseUrl = PACK_DOWNLOAD_URLS[packType];
+    if (!baseUrl) return { success: false, error: '未知的包类型' };
+    const label = packType.charAt(0).toUpperCase() + packType.slice(1);
+    const packPath = path.join(dbDir, `images-${label}`);
+    if (!fs.existsSync(packPath)) fs.mkdirSync(packPath, { recursive: true });
+    const remote = await downloadGofileJson(baseUrl, 'manifest.json');
+    if (!remote) return { success: false, error: '无法获取远程文件列表，请确认 NAS 上已上传 manifest.json' };
+    // 获取 gofile 内容列表（一次请求，供后续下载用）
+    const contents = await fetchGofileContents(baseUrl);
+    const children = contents?.children || {};
+    let downloaded = 0;
+    for (const [f, info] of Object.entries(remote.files)) {
+      try {
+        const destPath = path.join(packPath, f);
+        const destDir = path.dirname(destPath);
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        const fileInfo = children[f];
+        const link = fileInfo?.link;
+        const data = link ? await downloadBinaryFile(link) : null;
+        if (data) { fs.writeFileSync(destPath, data); downloaded++; }
+      } catch (_) {}
+    }
+    // 保存 manifest
+    try {
+      const manifestText = await (async () => {
+        const cnt = await fetchGofileContents(baseUrl);
+        const manifestInfo = cnt?.children?.['manifest.json'];
+        return manifestInfo?.link ? await downloadTextFile(manifestInfo.link) : null;
+      })();
+      if (manifestText) fs.writeFileSync(path.join(packPath, 'manifest.json'), manifestText);
+    } catch (_) {}
+    clearSizeCache();
+    clearImagePathCache();
+    return { success: true, downloaded };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 图包差异导出 ──
+ipcMain.handle('diff-pack', async (_event, packPath, packType) => {
+  try {
+    const baseUrl = PACK_DOWNLOAD_URLS[packType];
+    if (!baseUrl) return { success: false, error: '未知的包类型' };
+    const remote = await downloadGofileJson(baseUrl, 'manifest.json');
+    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认 NAS 上已上传 manifest.json' };
+    const localManifestPath = path.join(packPath, 'manifest.json');
+    let local = { files: {} };
+    if (fs.existsSync(localManifestPath)) {
+      local = JSON.parse(fs.readFileSync(localManifestPath, 'utf-8'));
+    }
+    const localOnly = [];
+    const remoteOnly = [];
+    for (const f of Object.keys(local.files)) {
+      if (!remote.files[f]) localOnly.push(f);
+    }
+    for (const f of Object.keys(remote.files)) {
+      if (!local.files[f]) remoteOnly.push(f);
+    }
+    return { success: true, localOnly, remoteOnly };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('export-pack-diff', async (_event, packPath, packType) => {
+  try {
+    const baseUrl = PACK_DOWNLOAD_URLS[packType];
+    if (!baseUrl) return { success: false, error: '未知的包类型' };
+    const remote = await downloadGofileJson(baseUrl, 'manifest.json');
+    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认 NAS 上已上传 manifest.json' };
+    const localManifestPath = path.join(packPath, 'manifest.json');
+    let local = { files: {} };
+    if (fs.existsSync(localManifestPath)) {
+      local = JSON.parse(fs.readFileSync(localManifestPath, 'utf-8'));
+    }
+    const localOnly = [], remoteOnly = [];
+    for (const f of Object.keys(local.files)) { if (!remote.files[f]) localOnly.push(f); }
+    for (const f of Object.keys(remote.files)) { if (!local.files[f]) remoteOnly.push(f); }
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择差异导出目录', properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { success: false, message: '已取消' };
+    const baseDir = path.join(result.filePaths[0], 'Img_Diff');
+    const newDir = path.join(baseDir, 'New');
+    const delDir = path.join(baseDir, 'Del');
+    if (!fs.existsSync(newDir)) fs.mkdirSync(newDir, { recursive: true });
+    if (!fs.existsSync(delDir)) fs.mkdirSync(delDir, { recursive: true });
+    let copied = 0;
+    for (const f of localOnly) {
+      try {
+        const src = path.join(packPath, f), dest = path.join(newDir, f);
+        const ddir = path.dirname(dest);
+        if (!fs.existsSync(ddir)) fs.mkdirSync(ddir, { recursive: true });
+        if (fs.existsSync(src)) { fs.copyFileSync(src, dest); copied++; }
+      } catch (_) {}
+    }
+    if (remoteOnly.length > 0) {
+      fs.writeFileSync(path.join(delDir, 'missing_files.txt'), remoteOnly.join('\n'), 'utf-8');
+    }
+    return { success: true, newCount: copied, delCount: remoteOnly.length, outputDir: baseDir };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 
@@ -531,6 +964,7 @@ ipcMain.handle('set-active-image-pack', (_event, packName) => {
     userConfig.activeImagePack = packName;
     saveUserConfig(userConfig);
     clearSizeCache();
+    clearImagePathCache();
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -544,6 +978,7 @@ ipcMain.handle('clear-active-image-pack', () => {
     delete userConfig.activeImagePack;
     saveUserConfig(userConfig);
     clearSizeCache();
+    clearImagePathCache();
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -553,9 +988,11 @@ ipcMain.handle('clear-active-image-pack', () => {
 // ── 获取种子数据各表条目统计（无需数据库即可调用）──
 function getSeedStats() {
   const searchDirs = [
-    path.join(__dirname),
+    // asarUnpack 解出路径
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'electron'),
+    // 开发模式路径
     path.join(__dirname, '..', 'electron'),
-    path.join(process.resourcesPath || '', 'electron'),
+    path.join(__dirname),
   ];
   let sqlDir = null;
   for (const d of searchDirs) {
@@ -569,23 +1006,75 @@ function getSeedStats() {
   const stats = {};
   for (const t of tables) stats[t] = 0;
 
-  function countInFile(filePath) {
-    if (!fs.existsSync(filePath)) return;
-    const sql = fs.readFileSync(filePath, 'utf-8');
-    for (const t of tables) {
-      const regex = new RegExp(`INSERT\\s+(?:OR\\s+IGNORE\\s+)?INTO\\s+"?${t}"?\\s*\\([^)]*\\)\\s*VALUES\\s*([^;]+)`, 'gi');
-      let match;
-      while ((match = regex.exec(sql)) !== null) {
-        const valuesBlock = match[1];
-        const rowCount = (valuesBlock.match(/\)\s*,\s*\(/g) || []).length + 1;
-        stats[t] += rowCount;
-      }
+  function countInFile(filename) {
+    for (const d of searchDirs) {
+      const p = path.join(d, filename);
+      if (!fs.existsSync(p)) continue;
+      try {
+        let sql;
+        if (p.includes('.asar')) {
+          // asar 内路径：直接走原始归档提取
+          sql = extractFromAsar(p);
+          if (!sql) continue;
+        } else {
+          // 非 asar 路径
+          try { sql = fs.readFileSync(p, 'utf-8'); } catch (_) {}
+          if (!sql) {
+            try {
+              const chunks = [];
+              const fd = fs.openSync(p, 'r');
+              const buf = Buffer.alloc(1024 * 1024);
+              let bytesRead;
+              while ((bytesRead = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+                chunks.push(buf.subarray(0, bytesRead).toString('utf-8'));
+              }
+              fs.closeSync(fd);
+              sql = chunks.join('');
+            } catch (_) {}
+          }
+        }
+        if (!sql) continue;
+        for (const t of tables) {
+          const regex = new RegExp(`INSERT\\s+(?:OR\\s+IGNORE\\s+)?INTO\\s+"?${t}"?\\s*\\([^)]*\\)\\s*VALUES\\s*([^;]+)`, 'gi');
+          let match;
+          while ((match = regex.exec(sql)) !== null) {
+            const valuesBlock = match[1];
+            const rowCount = (valuesBlock.match(/\)\s*,\s*\(/g) || []).length + 1;
+            stats[t] += rowCount;
+          }
+        }
+        return;
+      } catch (_) {}
     }
   }
 
-  countInFile(path.join(sqlDir, 'seed.sql'));
+  // 从 asar 归档中提取文件内容
+  function extractFromAsar(filePath) {
+    try {
+      const asarPath = filePath.slice(0, filePath.indexOf('.asar') + 5);
+      const internalPath = filePath.slice(filePath.indexOf('.asar') + 6);
+      if (!fs.existsSync(asarPath)) return null;
+      const buf = fs.readFileSync(asarPath);
+      const headerSize = buf.readUInt32LE(0);
+      const headerStr = buf.subarray(4, 4 + headerSize).toString('utf-8');
+      const header = JSON.parse(headerStr);
+      const contentStart = 4 + headerSize + ((4 - ((headerSize + 4) % 4)) % 4);
+      function findInAsar(files, target) {
+        for (const [name, info] of Object.entries(files)) {
+          if (target.startsWith(name + '/')) return findInAsar(info.files || {}, target.slice(name.length + 1));
+          if (name === target && info.size != null) return { offset: contentStart + parseInt(info.offset || '0'), size: info.size };
+        }
+        return null;
+      }
+      const fi = findInAsar(header.files, internalPath);
+      if (fi) return buf.subarray(fi.offset, fi.offset + fi.size).toString('utf-8');
+    } catch (_) {}
+    return null;
+  }
+
+  countInFile('seed.sql');
   for (let i = 1; i <= 5; i++) {
-    countInFile(path.join(sqlDir, `seed_part${i}.sql`));
+    countInFile(`seed_part${i}.sql`);
   }
 
   return stats;
@@ -607,9 +1096,11 @@ function seedDatabase() {
   migrateSchema();  // 先执行增量迁移，再导入种子数据
 
   const searchDirs = [
-    path.join(__dirname),
+    // asarUnpack 解出路径
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'electron'),
+    // 开发模式路径
     path.join(__dirname, '..', 'electron'),
-    path.join(process.resourcesPath || '', 'electron'),
+    path.join(__dirname),
   ];
 
   let sqlDir = null;
@@ -620,13 +1111,62 @@ function seedDatabase() {
     throw new Error(`找不到SQL初始化文件。路径: ${searchDirs.join(', ')}`);
   }
 
+  // 读取 SQL 文件的辅助函数（多层容错，处理 asar 内大文件读取限制）
+  function readSqlFile(filename) {
+    for (const d of searchDirs) {
+      const p = path.join(d, filename);
+      if (!fs.existsSync(p)) continue;
+      // 如果是 asar 内路径，直接走原始归档提取（避开虚拟文件系统）
+      if (p.includes('.asar')) {
+        try {
+          const asarPath = p.slice(0, p.indexOf('.asar') + 5);
+          const internalPath = p.slice(p.indexOf('.asar') + 6);
+          if (!fs.existsSync(asarPath)) { console.log('[readSqlFile] asar not found:', asarPath); continue; }
+          const buf = fs.readFileSync(asarPath);
+          const headerSize = buf.readUInt32LE(0);
+          const headerStr = buf.subarray(4, 4 + headerSize).toString('utf-8');
+          const header = JSON.parse(headerStr);
+          const contentStart = 4 + headerSize + ((4 - ((headerSize + 4) % 4)) % 4);
+          function findInAsar(files, target) {
+            for (const [name, info] of Object.entries(files)) {
+              if (target.startsWith(name + '/')) return findInAsar(info.files || {}, target.slice(name.length + 1));
+              if (name === target && info.size != null) return { offset: contentStart + parseInt(info.offset || '0'), size: info.size };
+            }
+            return null;
+          }
+          const fi = findInAsar(header.files, internalPath);
+          if (fi) {
+            console.log('[readSqlFile] asar-extract OK:', filename, `offset=${fi.offset} size=${fi.size}`);
+            return buf.subarray(fi.offset, fi.offset + fi.size).toString('utf-8');
+          }
+          console.log('[readSqlFile] not found in asar:', internalPath, 'keys:', Object.keys(header.files || {}).join(', '));
+        } catch (e) { console.log('[readSqlFile] asar-extract error:', e.message); }
+        continue;
+      }
+      // 非 asar 路径：标准读取 + 分块读取回退
+      try { return fs.readFileSync(p, 'utf-8'); } catch (_) {}
+      try {
+        const chunks = [];
+        const fd = fs.openSync(p, 'r');
+        const buf = Buffer.alloc(1024 * 1024);
+        let bytesRead;
+        while ((bytesRead = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+          chunks.push(buf.subarray(0, bytesRead).toString('utf-8'));
+        }
+        fs.closeSync(fd);
+        return chunks.join('');
+      } catch (_) {}
+    }
+    throw new Error(`无法读取: ${filename}`);
+  }
+
   const countTables = ['characters','weapons','artifacts','materials','wishes','challenges','game_data',
     'character_talents','character_constellations','enemies','element_reactions'];
 
   db.run('BEGIN TRANSACTION');
   try {
     // 1. 建表
-    const schemaSql = fs.readFileSync(path.join(sqlDir, 'schema.sql'), 'utf-8');
+    const schemaSql = readSqlFile('schema.sql');
     dbExec(schemaSql);
 
     // 2. 统计更新前数据量
@@ -638,16 +1178,15 @@ function seedDatabase() {
     // 3. 种子数据导入（FK 关闭，INSERT OR IGNORE）
     db.exec('PRAGMA foreign_keys = OFF');
     try {
-      const seedPath = path.join(sqlDir, 'seed.sql');
-      if (fs.existsSync(seedPath)) {
-        let seedSql = fs.readFileSync(seedPath, 'utf-8');
+      if (fs.existsSync(path.join(sqlDir, 'seed.sql'))) {
+        let seedSql = readSqlFile('seed.sql');
         seedSql = seedSql.replace(/INSERT INTO /gi, 'INSERT OR IGNORE INTO ');
         dbExec(seedSql);
       }
       for (let i = 1; i <= 5; i++) {
-        const partPath = path.join(sqlDir, `seed_part${i}.sql`);
-        if (!fs.existsSync(partPath)) continue;
-        let seedSql = fs.readFileSync(partPath, 'utf-8');
+        const partName = `seed_part${i}.sql`;
+        if (!fs.existsSync(path.join(sqlDir, partName))) continue;
+        let seedSql = readSqlFile(partName);
         seedSql = seedSql.replace(/INSERT INTO /gi, 'INSERT OR IGNORE INTO ');
         dbExec(seedSql);
       }
@@ -807,6 +1346,7 @@ ipcMain.handle('save-image', (_event, { filename, buffer }) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');
     fs.writeFileSync(path.join(getImagesDir(dbDir), filename), Buffer.from(buffer));
+    clearImagePathCache();
     return { success: true };
   } catch (e) { return { error: e.message }; }
 });
@@ -829,14 +1369,16 @@ ipcMain.handle('import-image', async () => {
       return { success: true, filename: originalName, existed: true };
     }
 
-    const dest = path.join(imagesDir, originalName);
-
-    // 目标已存在 → 直接使用已有文件
-    if (fs.existsSync(dest)) {
-      return { success: true, filename: originalName, existed: true };
+    // 检查是否已有同名图片（忽略扩展名）
+    const existing = resolveImagePath(imagesDir, originalName);
+    if (existing) {
+      return { success: true, filename: path.basename(existing), existed: true };
     }
 
+    const dest = path.join(imagesDir, originalName);
+
     fs.copyFileSync(src, dest);
+    clearImagePathCache();
     return { success: true, filename: originalName, path: dest };
   } catch (e) { return { error: e.message }; }
 });
@@ -853,21 +1395,31 @@ ipcMain.handle('import-image-file', (_event, srcPath) => {
       return { success: true, filename: originalName, existed: true };
     }
 
-    const dest = path.join(imagesDir, originalName);
-
-    // 目标已存在 → 直接使用已有文件
-    if (fs.existsSync(dest)) {
-      return { success: true, filename: originalName, existed: true };
+    // 检查是否已有同名图片（忽略扩展名）
+    const existing = resolveImagePath(imagesDir, originalName);
+    if (existing) {
+      return { success: true, filename: path.basename(existing), existed: true };
     }
 
+    const dest = path.join(imagesDir, originalName);
+
     fs.copyFileSync(srcPath, dest);
+    clearImagePathCache();
     return { success: true, filename: originalName };
   } catch (e) { return { error: e.message }; }
 });
 
 ipcMain.handle('delete-image', (_event, filename) => {
   try {
-    return { success: true };
+    if (!dbDir) throw new Error('数据库未初始化');
+    const imagesDir = getImagesDir(dbDir);
+    const fp = resolveImagePath(imagesDir, filename);
+    if (fp && fs.existsSync(fp)) {
+      fs.unlinkSync(fp);
+      clearImagePathCache();
+      return { success: true, deleted: true };
+    }
+    return { success: true, deleted: false };
   } catch (e) { return { error: e.message }; }
 });
 
@@ -876,10 +1428,11 @@ ipcMain.handle('read-image', (_event, filename) => {
     if (!db) throw new Error('数据库未初始化');
     if (!dbDir) throw new Error('数据库路径未设置');
 
-    // 先尝试用户 images 目录，再回退到应用自带 public/dist 目录
-    let fp = path.join(getImagesDir(dbDir), filename);
-    if (!fs.existsSync(fp)) {
-      // 回退：public/（开发）或 dist/（打包）
+    // 按文件名匹配（忽略扩展名，递归搜索图包子目录，同名取最大）
+    const imagesDir = getImagesDir(dbDir);
+    let fp = resolveImagePath(imagesDir, filename);
+    if (!fp) {
+      // 回退：public/（开发）或 dist/（打包）— 这些目录仍需精确文件名
       const fallbackDirs = [
         path.join(__dirname, '..', 'public'),
         path.join(__dirname, '..', 'dist'),
@@ -889,7 +1442,7 @@ ipcMain.handle('read-image', (_event, filename) => {
         const candidate = path.join(d, filename);
         if (fs.existsSync(candidate)) { fp = candidate; break; }
       }
-      if (!fs.existsSync(fp)) return { error: '文件不存在' };
+      if (!fp) return { error: '文件不存在' };
     }
 
     return readImageFile(fp);
@@ -939,8 +1492,8 @@ ipcMain.handle('export-image-file', async (_event, { data, defaultName }) => {
 ipcMain.handle('start-image-drag', async (_event, filename) => {
   try {
     if (!dbDir) throw new Error('数据库路径未设置');
-    const fp = path.join(getImagesDir(dbDir), filename);
-    if (!fs.existsSync(fp)) return { error: '文件不存在' };
+    const fp = resolveImagePath(getImagesDir(dbDir), filename);
+    if (!fp || !fs.existsSync(fp)) return { error: '文件不存在' };
     const icon = await nativeImage.createThumbnailFromPath(fp, { width: 64, height: 64 });
     mainWindow.webContents.startDrag({ file: fp, icon });
     return { success: true };
@@ -2278,12 +2831,15 @@ ipcMain.handle('download-material-image', async (_event, iconName) => {
     if (!url) return { success: false, error: '无效的图标名称' };
     
     const filename = getImageFilename(iconName);
-    const destPath = path.join(getImagesDir(dbDir), filename);
+    const imagesDir = getImagesDir(dbDir);
     
-    // 如果图片已存在，直接返回
-    if (fs.existsSync(destPath)) {
-      return { success: true, filename, existed: true };
+    // 如果已有同名图片（忽略扩展名），直接返回
+    const existing = resolveImagePath(imagesDir, filename);
+    if (existing) {
+      return { success: true, filename: path.basename(existing), existed: true };
     }
+    
+    const destPath = path.join(imagesDir, filename);
     
     // 下载图片
     const imageData = await new Promise((resolve, reject) => {
@@ -2305,8 +2861,7 @@ ipcMain.handle('download-material-image', async (_event, iconName) => {
     });
     
     fs.writeFileSync(destPath, imageData);
-    return { success: true, filename };
-    
+    clearImagePathCache();
     return { success: true, filename };
   } catch (e) {
     console.error('[download-material-image] error:', e.message);
@@ -2318,8 +2873,13 @@ ipcMain.handle('download-material-image', async (_event, iconName) => {
 ipcMain.handle('download-banner-image', async (_event, url, filename) => {
   try {
     if (!dbDir || !url || !filename) return { success: false, error: '参数不完整' };
-    const destPath = path.join(getImagesDir(dbDir), filename);
-    if (fs.existsSync(destPath)) return { success: true, filename, existed: true };
+    const imagesDir = getImagesDir(dbDir);
+    
+    // 如果已有同名图片（忽略扩展名），直接返回
+    const existing = resolveImagePath(imagesDir, filename);
+    if (existing) return { success: true, filename: path.basename(existing), existed: true };
+    
+    const destPath = path.join(imagesDir, filename);
 
     const imageData = await new Promise((resolve, reject) => {
       const proto = url.startsWith('https') ? require('https') : require('http');
@@ -2334,6 +2894,7 @@ ipcMain.handle('download-banner-image', async (_event, url, filename) => {
     });
 
     fs.writeFileSync(destPath, imageData);
+    clearImagePathCache();
     console.log('[download-banner-image] saved:', filename);
     return { success: true, filename };
   } catch (e) {
@@ -2346,8 +2907,12 @@ ipcMain.handle('download-banner-image', async (_event, url, filename) => {
 async function downloadImage(url, iconName, ext = 'png') {
   if (!dbDir || !url || !iconName) return;
   const filename = `${iconName}.${ext}`;
-  const destPath = path.join(getImagesDir(dbDir), filename);
-  if (fs.existsSync(destPath)) return;
+  const imagesDir = getImagesDir(dbDir);
+  
+  // 如果已有同名图片（忽略扩展名），跳过下载
+  if (resolveImagePath(imagesDir, filename)) return;
+  
+  const destPath = path.join(imagesDir, filename);
   try {
     const imageData = await new Promise((resolve, reject) => {
       const proto = url.startsWith('https') ? require('https') : require('http');
@@ -2361,6 +2926,7 @@ async function downloadImage(url, iconName, ext = 'png') {
       req.setTimeout(15000, () => { req.destroy(); reject(new Error(`Timeout: ${url}`)); });
     });
     fs.writeFileSync(destPath, imageData);
+    clearImagePathCache();
     console.log('[downloadImage] saved:', filename);
   } catch (e) {
     console.error('[downloadImage] error:', url, e.message);
@@ -2690,7 +3256,7 @@ function normalizeDate(str) {
 }
 
 // ── 导出种子数据：从当前 db 更新 seed.sql ──
-ipcMain.handle('export-seed', async () => {
+ipcMain.handle('export-seed', async (_event, newVersion) => {
 
   try {
     if (!dbDir || !db) throw new Error('数据库未初始化');
@@ -2754,8 +3320,10 @@ ipcMain.handle('export-seed', async () => {
     );
 
     const dateStr = beijingDateStr();
+    const version = newVersion || DATA_VERSION;
     let out = `-- ============================================================================\n`;
     out += `-- 银月终端数据库 - 种子数据（导出于 ${dateStr}）\n`;
+    out += `-- 数据版本: ${version}\n`;
     out += `-- 来源: ${getDbPath(dbDir)}\n`;
     out += `-- 不含 image_cache 表数据\n`;
     out += `-- ============================================================================\n\n`;
@@ -2773,11 +3341,11 @@ ipcMain.handle('export-seed', async () => {
       }
     }
 
-    // 写入 seed.sql
+    // 写入 seed.sql（asarUnpack 解出路径；asar 内只读不可写）
     const searchDirs = [
-      path.join(__dirname),
+      path.join(process.resourcesPath || '', 'app.asar.unpacked', 'electron'),
       path.join(__dirname, '..', 'electron'),
-      path.join(process.resourcesPath || '', 'electron'),
+      path.join(__dirname),
     ];
     let outputDir = null;
     for (const d of searchDirs) {
@@ -2811,14 +3379,21 @@ ipcMain.handle('clean-unused-images', () => {
       return { success: true, deleted: 0, message: '图片文件夹不存在' };
     }
     
-    // 获取数据库中被引用的所有图片文件名
+    // 辅助：从存储的图片名提取基名（去除扩展名）
+    const toBase = (name) => {
+      if (!name) return '';
+      const ext = path.extname(name);
+      return ext ? path.basename(name, ext) : name;
+    };
+    
+    // 获取数据库中被引用的所有图片文件名 → 转为基名集合
     const referenced = new Set();
     const tables = [
       { table: 'characters', cols: ['splash_art', 'card_art', 'namecard_art', 'dish_image'] },
       { table: 'weapons', cols: ['image', 'simple_art'] },
       { table: 'artifacts', cols: ['image', 'flower_image', 'plume_image', 'sands_image', 'goblet_image', 'circlet_image'] },
       { table: 'materials', cols: ['image'] },
-      { table: 'character_outfits', cols: ['image'] },
+      { table: 'character_outfits', cols: ['image', 'avatar_image'] },
       { table: 'character_talents', cols: ['icon'] },
       { table: 'character_constellations', cols: ['icon'] },
       { table: 'elements', cols: ['icon'] },
@@ -2837,7 +3412,7 @@ ipcMain.handle('clean-unused-images', () => {
           const rows = dbAll(`SELECT DISTINCT ${col} FROM ${table} WHERE ${col} IS NOT NULL AND ${col} != ''`, []);
           for (const row of rows) {
             const val = row[col];
-            if (val) referenced.add(val);
+            if (val) referenced.add(toBase(val));
           }
         } catch (_) { /* table or column may not exist */ }
       }
@@ -2854,7 +3429,7 @@ ipcMain.handle('clean-unused-images', () => {
               const arr = JSON.parse(row.gallery_images);
               if (Array.isArray(arr)) {
                 for (const item of arr) {
-                  if (item.filename) referenced.add(item.filename);
+                  if (item.filename) referenced.add(toBase(item.filename));
                 }
               }
             } catch (_) {}
@@ -2869,7 +3444,7 @@ ipcMain.handle('clean-unused-images', () => {
             const arr = JSON.parse(row.images);
             if (Array.isArray(arr)) {
               for (const item of arr) {
-                if (typeof item === 'string') referenced.add(item);
+                if (typeof item === 'string') referenced.add(toBase(item));
               }
             }
           } catch (_) {}
@@ -2877,19 +3452,49 @@ ipcMain.handle('clean-unused-images', () => {
       } catch (_) {}
     } catch (_) {}
     
-    // 列出图片文件夹中的文件
-    const files = fs.readdirSync(imagesDir);
+    // 递归列出图片文件夹中所有文件
+    let totalFiles = 0;
     let deleted = 0;
-    for (const file of files) {
-      if (!referenced.has(file)) {
-        try {
-          fs.unlinkSync(path.join(imagesDir, file));
-          deleted++;
-        } catch (_) {}
-      }
+    const emptyDirs = [];
+    
+    function walkAndClean(dir) {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        let hasFiles = false;
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isSymbolicLink()) continue;
+          if (entry.isDirectory()) {
+            const subHasFiles = walkAndClean(fullPath);
+            if (!subHasFiles) emptyDirs.push(fullPath);
+            else hasFiles = true;
+          } else if (entry.isFile()) {
+            totalFiles++;
+            hasFiles = true;
+            const ext = path.extname(entry.name);
+            const base = path.basename(entry.name, ext);
+            if (!referenced.has(base)) {
+              try {
+                fs.unlinkSync(fullPath);
+                deleted++;
+              } catch (_) {}
+            }
+          }
+        }
+        return hasFiles;
+      } catch (_) { return false; }
     }
     
-    return { success: true, deleted, total: files.length, message: `扫描 ${files.length} 个文件，删除 ${deleted} 个未被引用的图片` };
+    walkAndClean(imagesDir);
+    
+    // 清理空子目录（倒序删除，从深到浅）
+    for (const d of emptyDirs.reverse()) {
+      try { if (fs.readdirSync(d).length === 0) fs.rmdirSync(d); } catch (_) {}
+    }
+    
+    clearImagePathCache();
+    
+    return { success: true, deleted, total: totalFiles, message: `扫描 ${totalFiles} 个文件，删除 ${deleted} 个未被引用的图片` };
   } catch (e) {
     console.error('[clean-unused-images] error:', e.message);
     return { success: false, error: e.message };
@@ -2914,6 +3519,81 @@ ipcMain.handle('set-user-config', (_event, key, value) => {
     return { success: false, error: e.message };
   }
 });
+
+// ── 自动更新 ──
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
+autoUpdater.allowPrerelease = true;
+
+autoUpdater.on('checking-for-update', () => {
+  mainWindow?.webContents?.send('update-status', { event: 'checking' });
+});
+autoUpdater.on('update-available', (info) => {
+  mainWindow?.webContents?.send('update-status', { event: 'available', version: info.version });
+});
+autoUpdater.on('update-not-available', () => {
+  mainWindow?.webContents?.send('update-status', { event: 'not-available' });
+});
+autoUpdater.on('download-progress', (p) => {
+  mainWindow?.webContents?.send('update-status', { event: 'progress', percent: Math.floor(p.percent) });
+});
+autoUpdater.on('update-downloaded', () => {
+  mainWindow?.webContents?.send('update-status', { event: 'downloaded' });
+});
+autoUpdater.on('error', () => {
+  mainWindow?.webContents?.send('update-status', { event: 'error', message: '检查更新失败，请确认网络连接' });
+});
+
+ipcMain.handle('check-for-update', async () => {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { success: true, version: result?.updateInfo?.version };
+  } catch (e) {
+    return { success: false, error: '未找到可用更新（请确认 GitHub 已发布正式 Release）' };
+  }
+});
+ipcMain.handle('download-update', async () => {
+  try {
+    await autoUpdater.downloadUpdate();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+ipcMain.handle('install-update', () => {
+  autoUpdater.quitAndInstall();
+  return { success: true };
+});
+ipcMain.handle('get-update-auto-check', () => {
+  try {
+    const config = loadUserConfig();
+    // 默认开启（首次使用时 config 中无此 key）
+    return { success: true, enabled: config.autoCheckUpdate !== false };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+ipcMain.handle('set-update-auto-check', (_event, enabled) => {
+  try {
+    const config = loadUserConfig();
+    config.autoCheckUpdate = !!enabled;
+    saveUserConfig(config);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('open-external', (_event, url) => {
+  shell.openExternal(url);
+});
+
+function checkUpdateOnStartup() {
+  const config = loadUserConfig();
+  if (config.autoCheckUpdate) {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }
+}
 
 // ── 页面状态持久化（最近5页的滚动+滑块信息）──
 ipcMain.handle('load-page-states', () => {

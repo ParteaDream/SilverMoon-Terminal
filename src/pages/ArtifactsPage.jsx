@@ -25,7 +25,7 @@ export default function ArtifactsPage() {
       const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
       if (defs.artifacts) return defs.artifacts
     } catch (_) {}
-    return 'table'
+    return 'gallery'
   })
   const [selected, setSelected] = useState(new Set())
   const restoringScroll = useRef(false)
@@ -58,8 +58,13 @@ export default function ArtifactsPage() {
         }
       })
     } else {
+      // 从侧边栏进入：使用全局默认视图模式，重置滚动位置
       const main = document.querySelector('main')
       if (main) main.scrollTo(0, 0)
+      try {
+        const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
+        if (defs.artifacts) setViewMode(defs.artifacts)
+      } catch (_) {}
       loadData()
     }
   }, [])

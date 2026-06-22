@@ -60,11 +60,30 @@ export default function WishesPage() {
   useEffect(() => { loadWishes() }, [bannerType, sortAsc])
 
   async function loadAll() {
-    const [chars, weps] = await Promise.all([
-      query('SELECT id, name_zh, card_art, splash_art, rarity FROM characters'),
+    const [chars, weps, fits] = await Promise.all([
+      query('SELECT id, name_zh, card_art, splash_art, rarity, active_outfit_id FROM characters'),
       query('SELECT id, name_zh, image, simple_art, rarity FROM weapons'),
+      query('SELECT id, character_id, avatar_image FROM character_outfits WHERE avatar_image IS NOT NULL AND avatar_image != \'\''),
     ])
-    const cm = {}; for (const c of (chars.data || [])) cm[c.id] = c
+    // 构建 outfit avatar 映射
+    const fitsData = fits.data || []
+    const outfitAvatarMap = {}
+    for (const f of fitsData) {
+      outfitAvatarMap[f.id] = f.avatar_image
+    }
+    // 从 user.json 读取 outfit 选择（回退用）
+    let outfitSelections = {}
+    try {
+      const uRes = await window.electronAPI?.getUserConfig()
+      if (uRes?.success && uRes.config?.outfitSelections) {
+        outfitSelections = uRes.config.outfitSelections
+      }
+    } catch (_) {}
+    const cm = {}; for (const c of (chars.data || [])) {
+      const outfitId = c.active_outfit_id || outfitSelections[c.id]
+      c._displayCardArt = (outfitId && outfitAvatarMap[outfitId]) || c.card_art
+      cm[c.id] = c
+    }
     const wm = {}; for (const w of (weps.data || [])) wm[w.id] = w
     setCharMap(cm)
     setWeaponMap(wm)
@@ -659,7 +678,7 @@ function SearchableSelect({ value, onChange, items, itemType, readImage }) {
     setQuery('')
   }
 
-  const previewFile = itemType === 'character' ? selected?.card_art : selected?.simple_art || selected?.image
+  const previewFile = itemType === 'character' ? selected?._displayCardArt : selected?.simple_art || selected?.image
 
   return (
     <div ref={containerRef} className="relative flex-1 min-w-0">
@@ -708,7 +727,7 @@ function SearchableSelect({ value, onChange, items, itemType, readImage }) {
 }
 
 function ThumbOption({ item, itemType, readImage, onClick }) {
-  const imageFile = itemType === 'character' ? item.card_art : item.simple_art || item.image
+  const imageFile = itemType === 'character' ? item._displayCardArt : item.simple_art || item.image
   return (
     <button
       type="button"
@@ -881,7 +900,7 @@ function BannerCard({ banner, items, charMap, weaponMap, showImages, compactMode
 function ItemThumb({ item, charMap, weaponMap, small, compact }) {
   const navigate = useNavigate()
   const entity = item.item_type === 'character' ? charMap[item.item_id] : weaponMap[item.item_id]
-  const imageFile = item.item_type === 'character' ? entity?.card_art : entity?.simple_art || entity?.image
+  const imageFile = item.item_type === 'character' ? entity?._displayCardArt : entity?.simple_art || entity?.image
   const { ref, src } = useLazyImage(imageFile, '300px')
 
   const size = compact ? 'w-10 h-10' : (small ? 'w-12 h-12' : 'w-16 h-16')

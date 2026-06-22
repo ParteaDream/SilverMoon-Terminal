@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createBackup: (note) => ipcRenderer.invoke('create-backup', note),
   restoreBackup: (filename) => ipcRenderer.invoke('restore-backup', filename),
   deleteBackup: (filename) => ipcRenderer.invoke('delete-backup', filename),
-  exportSeed: () => ipcRenderer.invoke('export-seed'),
+  exportSeed: (version) => ipcRenderer.invoke('export-seed', version),
   crawlCharacter: (characterName, options) => ipcRenderer.invoke('crawl-character', characterName, options),
   crawlWeapon: (weaponName, options) => ipcRenderer.invoke('crawl-weapon', weaponName, options),
   checkMissingWeapons: () => ipcRenderer.invoke('check-missing-weapons'),
@@ -45,9 +45,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadPageStates: () => ipcRenderer.invoke('load-page-states'),
   savePageStates: (states) => ipcRenderer.invoke('save-page-states', states),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getDataVersion: () => ipcRenderer.invoke('get-data-version'),
   listImagePacks: () => ipcRenderer.invoke('list-image-packs'),
   setActiveImagePack: (packName) => ipcRenderer.invoke('set-active-image-pack', packName),
   clearActiveImagePack: () => ipcRenderer.invoke('clear-active-image-pack'),
+  deleteImagePack: (packPath) => ipcRenderer.invoke('delete-image-pack', packPath),
+  generateManifest: (packPath) => ipcRenderer.invoke('generate-manifest', packPath),
+  checkPackUpdate: (packPath, packType) => ipcRenderer.invoke('check-pack-update', packPath, packType),
+  downloadPackFiles: (packPath, packType, fileList) => ipcRenderer.invoke('download-pack-files', packPath, packType, fileList),
+  downloadFullPack: (packType) => ipcRenderer.invoke('download-full-pack', packType),
+  exportPackDiff: (packPath, packType) => ipcRenderer.invoke('export-pack-diff', packPath, packType),
 
   // 窗口控制
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
@@ -58,5 +65,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onRequestDbLocation: (callback) => {
     ipcRenderer.on('request-db-location', callback);
     return () => ipcRenderer.removeAllListeners('request-db-location');
+  },
+
+  // 自动更新
+  checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  getUpdateAutoCheck: () => ipcRenderer.invoke('get-update-auto-check'),
+  setUpdateAutoCheck: (enabled) => ipcRenderer.invoke('set-update-auto-check', enabled),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  onUpdateStatus: (callback) => {
+    ipcRenderer.on('update-status', (_e, status) => callback(status));
+    return () => ipcRenderer.removeAllListeners('update-status');
   },
 });

@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 
 /**
- * 懒加载图片 — 仅当元素进入视口时才发起 readImage IPC
- * 大幅减少画廊/卡池图模式下的并发图片加载
+ * 懒加载图片 — 元素有任何部分进入视口即加载
+ * 使用 scroll 事件检测（避免 Electron 中 IntersectionObserver 不可靠）
  */
-export function useLazyImage(filename, rootMargin = '200px') {
+export function useLazyImage(filename, rootMargin = 100) {
   const [src, setSrc] = useState(null)
   const { readImage } = useDb()
   const ref = useRef(null)
@@ -19,6 +19,8 @@ export function useLazyImage(filename, rootMargin = '200px') {
     const el = ref.current
     if (!el) return
 
+    const margin = typeof rootMargin === 'number' ? rootMargin : parseInt(rootMargin) || 100
+
     function doLoad() {
       if (loaded.current) return
       loaded.current = true
@@ -28,26 +30,40 @@ export function useLazyImage(filename, rootMargin = '200px') {
       })
     }
 
-    // Already in viewport? Load immediately
-    const rect = el.getBoundingClientRect()
-    const margin = parseInt(rootMargin) || 200
-    if (rect.top < window.innerHeight + margin && rect.bottom > -margin) {
+    function isInView() {
+      const rect = el.getBoundingClientRect()
+      return rect.bottom > -margin && rect.top < window.innerHeight + margin
+    }
+
+    // Already visible → load immediately
+    if (isInView()) {
       doLoad()
       return
     }
 
-    // Otherwise wait for intersection
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          observer.disconnect()
-          doLoad()
+    // Listen to scroll on main element
+    const main = document.querySelector('main')
+    const scrollTarget = main || window
+
+    function onScroll() {
+      if (isInView()) {
+        if (scrollTarget === window) {
+          window.removeEventListener('scroll', onScroll)
+        } else {
+          main.removeEventListener('scroll', onScroll)
         }
-      },
-      { rootMargin }
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
+        doLoad()
+      }
+    }
+
+    scrollTarget.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      if (scrollTarget === window) {
+        window.removeEventListener('scroll', onScroll)
+      } else if (main) {
+        main.removeEventListener('scroll', onScroll)
+      }
+    }
   }, [filename, readImage, rootMargin])
 
   return { ref, src }

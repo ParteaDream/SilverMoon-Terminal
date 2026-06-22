@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS character_outfits (
   name_zh TEXT NOT NULL,
   description_zh TEXT,
   image TEXT,                         -- 时装图片文件名
+  avatar_image TEXT,                  -- 时装头像文件名（用于替换角色默认头像）
   is_default INTEGER DEFAULT 0
 );
 
@@ -137,7 +138,8 @@ CREATE TABLE IF NOT EXISTS characters (
   character_type TEXT DEFAULT 'normal', -- 角色类型（normal / traveler）
   gallery_images TEXT,                -- 图库自定义图片 JSON: [{label, filename}]
   namecard_name TEXT,                 -- 名片名称
-  namecard_description TEXT           -- 名片简介（富文本标记）
+  namecard_description TEXT,          -- 名片简介（富文本标记）
+  active_outfit_id INTEGER            -- 当前活动的时装 ID（用于切换头像显示）
 );
 
 CREATE TABLE IF NOT EXISTS element_reactions (

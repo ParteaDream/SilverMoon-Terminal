@@ -20,6 +20,12 @@ export const THEMES = {
     desc: '硬核嘻哈 · 绝区零风格',
     colors: ['#E28234', '#242424', '#2E2F31', '#E9E34C', '#1C1C1C'],
   },
+  raiden: {
+    id: 'raiden',
+    label: '奥赫马风尚',
+    desc: '雷电将军 · 紫金配色',
+    colors: ['#C1C4DE', '#7690AD', '#6D349E', '#D1B347', '#1a1428'],
+  },
   classic: {
     id: 'classic',
     label: '原初暗色',
@@ -64,6 +70,8 @@ const DEFAULT_CUSTOM_COLORS = {
   surface500: '162 155 147',
   surface400: '195 188 181',
   primary500: '72 100 175',
+  iconFrom: '72 100 175',
+  iconTo: '140 160 228',
 }
 
 // Interpolate full palette from key colors
@@ -106,11 +114,26 @@ export function ThemeProvider({ children }) {
     } catch (_) { return { ...DEFAULT_CUSTOM_COLORS } }
   })
 
+  const [savedThemes, setSavedThemes] = useState([])  // [{id, label, colors}]
+
   // Apply theme attribute
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem(THEME_STORAGE_KEY, theme)
   }, [theme])
+
+  // Apply app icon gradient colors
+  useEffect(() => {
+    const root = document.documentElement
+    if (theme === 'custom') {
+      root.style.setProperty('--app-icon-from', customColors.iconFrom || customColors.primary500 || '99 102 241')
+      root.style.setProperty('--app-icon-to', customColors.iconTo || customColors.primary300 || '165 180 252')
+    } else {
+      // Preset themes: CSS [data-theme] blocks define these, clear inline
+      root.style.removeProperty('--app-icon-from')
+      root.style.removeProperty('--app-icon-to')
+    }
+  }, [theme, customColors])
 
   // Apply custom CSS variables when theme is 'custom'
   useEffect(() => {
@@ -121,6 +144,7 @@ export function ThemeProvider({ children }) {
         '--surface-950','--surface-900','--surface-850','--surface-800','--surface-700','--surface-600',
         '--surface-500','--surface-400','--surface-300','--surface-200','--surface-100','--surface-50',
         '--primary-500','--primary-400','--primary-600','--primary-300','--primary-700',
+        '--app-icon-from','--app-icon-to',
       ]
       for (const key of keys) root.style.removeProperty(key)
       return
@@ -134,10 +158,13 @@ export function ThemeProvider({ children }) {
   const persistToDb = useCallback(async (t, c) => {
     try {
       if (window.electronAPI) {
+        // 写入 SQLite（保持兼容）
         await window.electronAPI.dbQuery(
           "INSERT OR REPLACE INTO settings (key, value) VALUES ('theme', ?)",
           [JSON.stringify({ id: t, custom: c || null })]
         )
+        // 写入 user.json（统一配置）
+        await window.electronAPI.setUserConfig('theme', { id: t, custom: c || null })
       }
     } catch (_) {}
   }, [])
@@ -154,31 +181,90 @@ export function ThemeProvider({ children }) {
     persistToDb('custom', next)
   }, [customColors, persistToDb])
 
-  // Load from DB on mount
+  // ── Saved themes CRUD ──
+  const persistSavedThemes = useCallback(async (updated) => {
+    try {
+      if (window.electronAPI) {
+        await window.electronAPI.setUserConfig('savedThemes', updated)
+      }
+    } catch (_) {}
+  }, [])
+
+  const saveNewTheme = useCallback(async (label, colors) => {
+    const id = 'saved_' + Date.now()
+    const entry = { id, label, colors: { ...colors } }
+    const updated = [...savedThemes, entry]
+    setSavedThemes(updated)
+    await persistSavedThemes(updated)
+    return entry
+  }, [savedThemes, persistSavedThemes])
+
+  const renameSavedTheme = useCallback(async (id, newLabel) => {
+    const updated = savedThemes.map(t => t.id === id ? { ...t, label: newLabel } : t)
+    setSavedThemes(updated)
+    await persistSavedThemes(updated)
+  }, [savedThemes, persistSavedThemes])
+
+  const editSavedThemeColors = useCallback(async (id, colors) => {
+    const updated = savedThemes.map(t => t.id === id ? { ...t, colors: { ...colors } } : t)
+    setSavedThemes(updated)
+    await persistSavedThemes(updated)
+  }, [savedThemes, persistSavedThemes])
+
+  const deleteSavedTheme = useCallback(async (id) => {
+    const updated = savedThemes.filter(t => t.id !== id)
+    setSavedThemes(updated)
+    await persistSavedThemes(updated)
+  }, [savedThemes, persistSavedThemes])
+
+  // Apply saved theme colors (sets custom mode with saved colors)
+  const applySavedTheme = useCallback((entry) => {
+    setThemeState('custom')
+    const colors = { ...entry.colors }
+    setCustomColors(colors)
+    localStorage.setItem(CUSTOM_COLORS_KEY, JSON.stringify(colors))
+    persistToDb('custom', colors)
+  }, [persistToDb])
+
+  // Load from DB / user.json on mount
   useEffect(() => {
     if (!window.electronAPI) return
-    window.electronAPI.dbQuery("SELECT value FROM settings WHERE key = 'theme'")
+    // 优先从 user.json 读取（统一配置位置）
+    window.electronAPI.getUserConfig()
       .then(res => {
-        if (res?.data?.length > 0) {
-          try {
-            const stored = JSON.parse(res.data[0].value)
-            if (typeof stored === 'string' && THEMES[stored]) {
-              setThemeState(stored)
-            } else if (stored === 'genshin') {
-              // Backward compat: migrate old "genshin" theme to "slate"
-              setThemeState('slate')
-            } else if (stored && typeof stored === 'object') {
-              setThemeState(stored.id === 'genshin' ? 'slate' : (stored.id || DEFAULT_THEME))
-              if (stored.custom) setCustomColors(stored.custom)
-            }
-          } catch (_) {}
+        if (res?.success && res.config?.theme) {
+          const stored = res.config.theme
+          if (stored && typeof stored === 'object') {
+            setThemeState(stored.id === 'genshin' ? 'slate' : (stored.id || DEFAULT_THEME))
+            if (stored.custom) setCustomColors(stored.custom)
+          }
         }
+        if (res?.success && res.config?.savedThemes) {
+          setSavedThemes(res.config.savedThemes)
+        }
+        if (res?.success && res.config?.theme) return // 已加载，跳过 SQLite
+        // 回退：从 SQLite 读取
+        return window.electronAPI.dbQuery("SELECT value FROM settings WHERE key = 'theme'")
+      })
+      .then(res => {
+        if (!res?.data || res.data.length === 0) return
+        try {
+          const stored = JSON.parse(res.data[0].value)
+          if (typeof stored === 'string' && THEMES[stored]) {
+            setThemeState(stored)
+          } else if (stored === 'genshin') {
+            setThemeState('slate')
+          } else if (stored && typeof stored === 'object') {
+            setThemeState(stored.id === 'genshin' ? 'slate' : (stored.id || DEFAULT_THEME))
+            if (stored.custom) setCustomColors(stored.custom)
+          }
+        } catch (_) {}
       })
       .catch(() => {})
   }, [])
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, themes: THEMES, customColors, updateCustomColors }}>
+    <ThemeContext.Provider value={{ theme, setTheme, themes: THEMES, customColors, updateCustomColors, savedThemes, saveNewTheme, renameSavedTheme, editSavedThemeColors, deleteSavedTheme, applySavedTheme }}>
       {children}
     </ThemeContext.Provider>
   )

@@ -186,7 +186,7 @@ export default function SetupWizard() {
   return (
     <div className="h-screen flex items-center justify-center bg-surface-950 p-8">
       <div className="max-w-md w-full text-center animate-scale-in">
-        <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-gold flex items-center justify-center shadow-lg shadow-primary-500/20 overflow-hidden">
+        <div className="w-20 h-20 mx-auto mb-6 rounded-2xl app-icon-bg flex items-center justify-center shadow-lg shadow-primary-500/20 overflow-hidden">
           <AppWizardIcon />
         </div>
         <h1 className="text-2xl font-bold mb-2 tracking-tight">银月终端</h1>

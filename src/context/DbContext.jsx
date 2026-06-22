@@ -14,6 +14,7 @@ export function DbProvider({ children }) {
   const [imagesDir, setImagesDir] = useState(null)
   const [needsSetup, setNeedsSetup] = useState(false)
   const [devMode, setDevMode] = useState(false)
+  const [defaultViewMode, setDefaultViewMode] = useState(null) // 全局默认视图模式
 
   const query = useCallback(async (sql, params = []) => {
     if (!window.electronAPI) {
@@ -251,6 +252,17 @@ export function DbProvider({ children }) {
           const res = await window.electronAPI.getUserConfig()
           if (res?.success && res.config) {
             setDevMode(!!res.config.devMode)
+            const DEFAULT_VIEWS = { characters: 'gallery', weapons: 'gallery', artifacts: 'gallery', materials: 'gallery', wishes: 'images' }
+            if (res.config.defaultViewMode) {
+              const merged = { ...DEFAULT_VIEWS, ...res.config.defaultViewMode }
+              setDefaultViewMode(merged)
+              localStorage.setItem('default_view_mode', JSON.stringify(merged))
+            } else {
+              // 新文件夹没有默认视图设置 → 写入默认值，清除旧文件夹残留
+              setDefaultViewMode(DEFAULT_VIEWS)
+              localStorage.setItem('default_view_mode', JSON.stringify(DEFAULT_VIEWS))
+              await window.electronAPI.setUserConfig('defaultViewMode', DEFAULT_VIEWS)
+            }
           }
         }
       } catch (_) { /* non-fatal */ }
@@ -260,7 +272,7 @@ export function DbProvider({ children }) {
 
   return (
     <DbContext.Provider value={{
-      dbReady, dbPath, imagesDir, needsSetup, devMode,
+      dbReady, dbPath, imagesDir, needsSetup, devMode, defaultViewMode,
       query, selectLocation, initSchema,
       readImage, importImage, deleteImage,
       getDbPath, updateDatabase, backupDatabase, importDatabase, exportSeed,

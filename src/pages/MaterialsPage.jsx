@@ -32,7 +32,7 @@ export default function MaterialsPage() {
       const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
       if (defs.materials) return defs.materials
     } catch (_) {}
-    return 'table'
+    return 'gallery'
   })
   const [selected, setSelected] = useState(new Set())
   const restoringScroll = useRef(false)
@@ -47,8 +47,13 @@ export default function MaterialsPage() {
         if (saved?.viewMode) setViewMode(saved.viewMode)
       })
     } else {
+      // 从侧边栏进入：使用全局默认视图模式，重置滚动位置
       const main = document.querySelector('main')
       if (main) main.scrollTo(0, 0)
+      try {
+        const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
+        if (defs.materials) setViewMode(defs.materials)
+      } catch (_) {}
       loadData()
     }
   }, [])
