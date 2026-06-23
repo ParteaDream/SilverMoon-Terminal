@@ -3563,11 +3563,18 @@ autoUpdater.on('error', (err) => {
       event: 'error',
       message: `服务器尚未发布更新元数据（${ymlFile}），请等待新版本发布`,
     });
-  } else if (msg.includes('Code signature') || msg.includes('SQRLCodeSignatureError')) {
-    mainWindow?.webContents?.send('update-status', {
-      event: 'error',
-      message: '更新安装失败：代码签名验证未通过。请手动下载新版本覆盖安装，或配置 Apple Developer 签名证书后重新发布。',
-    });
+  } else if (msg.toLowerCase().includes('code signature') || msg.includes('SQRLCodeSignatureError')) {
+    // 当前运行的应用没有正式签名 → 文件实际已下载到 ShipIt 缓存
+    // macOS: 直接显示"已下载"让用户点"打开并退出"手动安装
+    // Windows: quitAndInstall 不需要签名验证，不应走到这里
+    if (isMac) {
+      mainWindow?.webContents?.send('update-status', { event: 'downloaded' });
+    } else {
+      mainWindow?.webContents?.send('update-status', {
+        event: 'error',
+        message: '更新安装失败：代码签名验证未通过。请手动下载新版本覆盖安装。',
+      });
+    }
   } else {
     mainWindow?.webContents?.send('update-status', {
       event: 'error',
