@@ -1,6 +1,6 @@
 {
   "name": "silvermoon-terminal",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "SilverMoon Terminal - 银月终端",
   "main": "electron/main.js",
   "scripts": {

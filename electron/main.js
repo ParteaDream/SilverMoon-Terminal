@@ -3556,10 +3556,12 @@ autoUpdater.on('update-downloaded', () => {
 });
 autoUpdater.on('error', (err) => {
   const msg = err && err.message ? err.message : '';
-  if (msg.includes('latest-mac.yml') || msg.includes('404')) {
+  const isMac = process.platform === 'darwin';
+  const ymlFile = isMac ? 'latest-mac.yml' : 'latest.yml';
+  if (msg.includes(ymlFile) || msg.includes('404')) {
     mainWindow?.webContents?.send('update-status', {
       event: 'error',
-      message: '服务器尚未发布更新元数据（latest-mac.yml），请等待新版本发布',
+      message: `服务器尚未发布更新元数据（${ymlFile}），请等待新版本发布`,
     });
   } else if (msg.includes('Code signature') || msg.includes('SQRLCodeSignatureError')) {
     mainWindow?.webContents?.send('update-status', {
@@ -3575,21 +3577,31 @@ autoUpdater.on('error', (err) => {
 });
 
 ipcMain.handle('install-update', () => {
-  // macOS 无 Developer ID 证书时，ShipIt 重启会因签名验证失败而卡住
-  // 打开 ShipIt 缓存目录，用户可手动将新 .app 拖入 /Applications
-  const shipItDir = path.join(app.getPath('caches'), 'com.silvermoon.terminal.ShipIt');
-  try {
-    shell.openPath(shipItDir);
-  } catch (_) {}
-  setImmediate(() => app.quit());
+  if (process.platform === 'darwin') {
+    // macOS 无 Developer ID 证书时，ShipIt 重启会因签名验证失败而卡住
+    // 打开 ShipIt 缓存目录，用户可手动将新 .app 拖入 /Applications
+    const cachesDir = path.dirname(app.getPath('cache'));
+    const shipItDir = path.join(cachesDir, 'com.silvermoon.terminal.ShipIt');
+    if (fs.existsSync(shipItDir)) {
+      try { shell.openPath(shipItDir); } catch (_) {}
+    }
+    setImmediate(() => app.quit());
+  } else {
+    // Windows: NSIS 安装器原生支持更新，直接调用 quitAndInstall
+    autoUpdater.quitAndInstall();
+  }
 });
 
 ipcMain.handle('check-for-update', async () => {
   try {
-    const result = await autoUpdater.checkForUpdates();
+    // 设置 20s 超时，避免 GitHub API 无响应时永久卡住
+    const result = await Promise.race([
+      autoUpdater.checkForUpdates(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('检查超时，请检查网络连接')), 20000)),
+    ]);
     return { success: true, version: result?.updateInfo?.version };
   } catch (e) {
-    return { success: false, error: '未找到可用更新（请确认 GitHub 已发布正式 Release）' };
+    return { success: false, error: e.message || '未找到可用更新' };
   }
 });
 ipcMain.handle('download-update', async () => {
@@ -3606,6 +3618,24 @@ ipcMain.handle('get-update-auto-check', () => {
     const config = loadUserConfig();
     // 默认开启（首次使用时 config 中无此 key）
     return { success: true, enabled: config.autoCheckUpdate !== false };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// 清理更新缓存（解决关闭后重开卡住/报错的问题）
+ipcMain.handle('clear-update-cache', async () => {
+  try {
+    const updaterCacheDir = path.join(app.getPath('userData'), '..', 'silvermoon-terminal-updater');
+    if (fs.existsSync(updaterCacheDir)) {
+      fs.rmSync(updaterCacheDir, { recursive: true, force: true });
+    }
+    // Windows Squirrel 缓存
+    const squirrelCache = path.join(app.getPath('cache'), '..', 'silvermoon-terminal-updater');
+    if (fs.existsSync(squirrelCache)) {
+      fs.rmSync(squirrelCache, { recursive: true, force: true });
+    }
+    return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -3627,8 +3657,12 @@ ipcMain.handle('open-external', (_event, url) => {
 
 function checkUpdateOnStartup() {
   const config = loadUserConfig();
-  if (config.autoCheckUpdate) {
-    autoUpdater.checkForUpdates().catch(() => {});
+  // 默认开启：仅当用户明确关闭时才跳过
+  if (config.autoCheckUpdate !== false) {
+    autoUpdater.checkForUpdates().catch(() => {
+      // 启动检查失败（网络问题/GitHub API限流），静默忽略
+      // 用户可在设置页手动重试
+    });
   }
 }
 

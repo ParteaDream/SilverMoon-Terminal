@@ -1294,8 +1294,13 @@ function VersionInfoModule() {
       setUpdateStatus(prev => prev || { event: 'not-available' })
     }, 15000)
     try {
-      await window.electronAPI?.checkForUpdate()
+      const r = await window.electronAPI?.checkForUpdate()
       clearTimeout(fallback)
+      if (!r?.success) {
+        setUpdateChecking(false)
+        setUpdateStatus({ event: 'error', message: r?.error || '检查失败' })
+      }
+      // success case handled by onUpdateStatus event
     } catch (_) {
       clearTimeout(fallback)
       setUpdateChecking(false)
@@ -1418,7 +1423,17 @@ function VersionInfoModule() {
           <p className="text-xs text-surface-500 px-1">当前已是最新版本</p>
         )}
         {updateStatus?.event === 'error' && (
-          <p className="text-xs text-red-400 px-1">检查失败: {updateStatus.message}</p>
+          <div className="space-y-2">
+            <p className="text-xs text-red-400 px-1">检查失败: {updateStatus.message}</p>
+            <button onClick={async () => {
+              await window.electronAPI?.clearUpdateCache()
+              setUpdateStatus(null)
+              handleCheckUpdate()
+            }}
+              className="px-3 py-1.5 rounded-lg text-xs bg-surface-800/60 border border-surface-700 text-surface-300 hover:text-white transition-colors">
+              清除缓存并重试
+            </button>
+          </div>
         )}
         {!updateStatus && !updateChecking && (
           <button onClick={handleCheckUpdate}

@@ -85,6 +85,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate: () => ipcRenderer.invoke('install-update'),
   getUpdateAutoCheck: () => ipcRenderer.invoke('get-update-auto-check'),
   setUpdateAutoCheck: (enabled) => ipcRenderer.invoke('set-update-auto-check', enabled),
+  clearUpdateCache: () => ipcRenderer.invoke('clear-update-cache'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onUpdateStatus: (callback) => {
     ipcRenderer.on('update-status', (_e, status) => callback(status));
