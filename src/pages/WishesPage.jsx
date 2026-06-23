@@ -61,7 +61,7 @@ export default function WishesPage() {
 
   async function loadAll() {
     const [chars, weps, fits] = await Promise.all([
-      query('SELECT id, name_zh, card_art, splash_art, rarity, active_outfit_id FROM characters'),
+      query('SELECT id, name_zh, card_art, splash_art, rarity FROM characters'),
       query('SELECT id, name_zh, image, simple_art, rarity FROM weapons'),
       query('SELECT id, character_id, avatar_image FROM character_outfits WHERE avatar_image IS NOT NULL AND avatar_image != \'\''),
     ])
@@ -80,7 +80,7 @@ export default function WishesPage() {
       }
     } catch (_) {}
     const cm = {}; for (const c of (chars.data || [])) {
-      const outfitId = c.active_outfit_id || outfitSelections[c.id]
+      const outfitId = outfitSelections[c.id]
       c._displayCardArt = (outfitId && outfitAvatarMap[outfitId]) || c.card_art
       cm[c.id] = c
     }

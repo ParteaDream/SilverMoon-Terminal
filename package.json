@@ -1,6 +1,6 @@
 {
   "name": "silvermoon-terminal",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "SilverMoon Terminal - 银月终端",
   "main": "electron/main.js",
   "scripts": {
@@ -46,8 +46,7 @@
         "dmg",
         "zip"
       ],
-      "icon": "assets/icon.icns",
-      "identity": null
+      "icon": "assets/icon.icns"
     },
     "win": {
       "target": [

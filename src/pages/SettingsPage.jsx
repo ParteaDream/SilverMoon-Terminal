@@ -776,8 +776,7 @@ function AppearanceModule() {
     setBatchLoading(true)
     try {
       if (mode === 'default') {
-        await query("UPDATE characters SET active_outfit_id = NULL")
-        // 同步清除 user.json 的 outfitSelections
+        // 只修改 user.json
         await window.electronAPI?.setUserConfig('outfitSelections', {})
       } else {
         const selections = {}
@@ -786,7 +785,6 @@ function AppearanceModule() {
           const fits = await query("SELECT id FROM character_outfits WHERE character_id = ? ORDER BY id DESC LIMIT 1", [c.id])
           if (fits.data?.length > 0) {
             selections[c.id] = fits.data[0].id
-            await query("UPDATE characters SET active_outfit_id = ? WHERE id = ?", [fits.data[0].id, c.id])
           }
         }
         await window.electronAPI?.setUserConfig('outfitSelections', selections)

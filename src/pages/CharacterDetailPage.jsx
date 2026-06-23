@@ -167,17 +167,13 @@ function CharacterDetailContent() {
         if (c.character_type === 'traveler' && !travelerElement) {
           setTravelerElement(TRAVELER_ELEMENTS[0])
         }
-        if (c.active_outfit_id) {
-          setActiveOutfitId(c.active_outfit_id)
-        } else {
-          // 回退：从 user.json 的 outfitSelections 读取
-          try {
-            const uRes = await window.electronAPI?.getUserConfig()
-            if (uRes?.success && uRes.config?.outfitSelections?.[c.id]) {
-              setActiveOutfitId(uRes.config.outfitSelections[c.id])
-            }
-          } catch (_) {}
-        }
+        // 从 user.json 的 outfitSelections 读取（user.json 是唯一来源）
+        try {
+          const uRes = await window.electronAPI?.getUserConfig()
+          if (uRes?.success && uRes.config?.outfitSelections?.[c.id]) {
+            setActiveOutfitId(uRes.config.outfitSelections[c.id])
+          }
+        } catch (_) {}
         if (c.dish_name) {
           setDish({ name_zh: c.dish_name || '', description_zh: c.dish_description || '', effect: c.dish_effect || '', image: c.dish_image || null })
         }
@@ -992,9 +988,7 @@ function CharacterDetailContent() {
                       const newId = isSelected ? null : o.id
                       setActiveOutfitId(newId)
                       try {
-                        setCharacter(prev => ({ ...prev, active_outfit_id: newId }))
-                        await query('UPDATE characters SET active_outfit_id = ? WHERE id = ?', [newId, character.id])
-                        // 同步到 user.json
+                        // 只写入 user.json（单一来源）
                         const uRes = await window.electronAPI?.getUserConfig()
                         const prevSelections = uRes?.config?.outfitSelections || {}
                         const nextSelections = { ...prevSelections, [character.id]: newId }

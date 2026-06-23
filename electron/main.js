@@ -3527,6 +3527,7 @@ ipcMain.handle('set-user-config', (_event, key, value) => {
 });
 
 // ── 自动更新 ──
+autoUpdater.setMaxListeners(20); // prevent MaxListenersExceededWarning
 autoUpdater.setFeedURL({
   provider: 'github',
   owner: 'ParteaDream',

@@ -154,7 +154,7 @@ export default function CharactersPage() {
       } catch (_) {}
 
       for (const c of charsData) {
-        const outfitId = c.active_outfit_id || outfitSelections[c.id]
+        const outfitId = outfitSelections[c.id]
         if (outfitId) {
           const fit = fitsData.find(f => f.id === outfitId)
           if (fit?.avatar_image) outfitAvatarMap[c.id] = fit.avatar_image
