@@ -1,6 +1,6 @@
 {
   "name": "silvermoon-terminal",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "SilverMoon Terminal - 银月终端",
   "main": "electron/main.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder --mac --arm64",
     "electron:build:win": "vite build && electron-builder --win --x64",
+    "electron:publish": "vite build && electron-builder --mac --arm64 --win --x64 --publish always",
     "start": "electron ."
   },
   "dependencies": {
@@ -34,15 +35,19 @@
   },
   "build": {
     "appId": "com.silvermoon.terminal",
-    "productName": "SilverMoon Terminal",
+    "productName": "SilverMoon-Terminal",
     "electronLanguages": [
       "zh-CN",
       "en-US"
     ],
     "mac": {
       "category": "public.app-category.reference",
-      "target": "dmg",
-      "icon": "assets/icon.icns"
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "assets/icon.icns",
+      "identity": null
     },
     "win": {
       "target": [
@@ -69,7 +74,9 @@
     "publish": {
       "provider": "github",
       "owner": "ParteaDream",
-      "repo": "SilverMoon-Terminal"
+      "repo": "SilverMoon-Terminal",
+      "releaseType": "release",
+      "vPrefixedTagName": true
     }
   }
 }

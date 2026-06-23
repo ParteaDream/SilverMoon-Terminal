@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, ArrowUp, Minus, Square, X } from 'lucide-rea
 import SetupWizard from './components/SetupWizard'
 import Sidebar from './components/Sidebar'
 import DevToolbar from './components/DevToolbar'
+import UpdateToast from './components/UpdateToast'
 import CharactersPage from './pages/CharactersPage'
 import CharacterDetailPage from './pages/CharacterDetailPage'
 import WeaponsPage from './pages/WeaponsPage'
@@ -122,6 +123,7 @@ export default function App() {
         </div>
       </main>
       <DevToolbar />
+      <UpdateToast />
     </div>
   )
 

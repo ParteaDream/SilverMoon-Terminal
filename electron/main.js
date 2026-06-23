@@ -3527,6 +3527,13 @@ ipcMain.handle('set-user-config', (_event, key, value) => {
 });
 
 // ── 自动更新 ──
+autoUpdater.setFeedURL({
+  provider: 'github',
+  owner: 'ParteaDream',
+  repo: 'SilverMoon-Terminal',
+  vPrefixedTagName: true,
+  releaseType: 'release',
+});
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = false;
 autoUpdater.allowPrerelease = true;
