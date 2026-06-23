@@ -1244,29 +1244,11 @@ function ColorPresetsModule() {
 function VersionInfoModule() {
   const [appVersion, setAppVersion] = useState('1.0')
   const [dataVersion, setDataVersion] = useState('6.7.0')
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState(null)
-
-  // Update states
   const [autoCheck, setAutoCheck] = useState(false)
-  const [updateStatus, setUpdateStatus] = useState(null) // { event, version, percent, message }
-  const [updateChecking, setUpdateChecking] = useState(false)
-  const [updateDownloading, setUpdateDownloading] = useState(false)
 
   useEffect(() => {
     loadVersionInfo()
     loadUpdateSettings()
-    // Listen for update events
-    const cleanup = window.electronAPI?.onUpdateStatus?.((status) => {
-      console.log('[update-status]', status)
-      setUpdateStatus(status)
-      if (status.event === 'checking') setUpdateChecking(true)
-      else if (status.event === 'not-available' || status.event === 'error') setUpdateChecking(false)
-      else if (status.event === 'available') setUpdateChecking(false)
-      else if (status.event === 'progress') setUpdateDownloading(true)
-      else if (status.event === 'downloaded') setUpdateDownloading(false)
-    })
-    return () => { if (cleanup) cleanup() }
   }, [])
 
   async function loadUpdateSettings() {
@@ -1286,43 +1268,6 @@ function VersionInfoModule() {
     } catch (_) {}
   }
 
-  async function handleCheckUpdate() {
-    setUpdateChecking(true)
-    setUpdateStatus(null)
-    const fallback = setTimeout(() => {
-      setUpdateChecking(false)
-      setUpdateStatus(prev => prev || { event: 'not-available' })
-    }, 15000)
-    try {
-      const r = await window.electronAPI?.checkForUpdate()
-      clearTimeout(fallback)
-      if (!r?.success) {
-        setUpdateChecking(false)
-        setUpdateStatus({ event: 'error', message: r?.error || '检查失败' })
-      }
-      // success case handled by onUpdateStatus event
-    } catch (_) {
-      clearTimeout(fallback)
-      setUpdateChecking(false)
-      setUpdateStatus({ event: 'error', message: '检查失败，请确认网络连接' })
-    }
-  }
-
-  async function handleDownloadUpdate() {
-    setUpdateDownloading(true)
-    try {
-      await window.electronAPI?.downloadUpdate()
-    } catch (_) {
-      setUpdateDownloading(false)
-    }
-  }
-
-  async function handleInstallUpdate() {
-    try {
-      await window.electronAPI?.installUpdate()
-    } catch (_) {}
-  }
-
   async function loadVersionInfo() {
     try {
       if (window.electronAPI?.getAppVersion) {
@@ -1338,21 +1283,6 @@ function VersionInfoModule() {
 
   return (
     <div className="space-y-6">
-      {message && (
-        <div className={`p-4 rounded-xl text-sm flex items-center gap-3 animate-fade-in
-          ${message.type === 'success'
-            ? 'bg-green-500/10 border border-green-500/30 text-green-400'
-            : 'bg-red-500/10 border border-red-500/30 text-red-400'
-          }`}
-        >
-          {message.type === 'success'
-            ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-            : <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          }
-          {message.text}
-        </div>
-      )}
-
       <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-3">
         <div className="flex items-center gap-3">
           <Info className="w-5 h-5 text-primary-400 flex-shrink-0" />
@@ -1377,83 +1307,33 @@ function VersionInfoModule() {
         </button>
         <div className="border-t border-surface-700" />
         <div className="flex items-center gap-3">
-          <RefreshCw className={`w-5 h-5 flex-shrink-0 ${updateChecking || updateDownloading ? 'text-primary-400 animate-spin' : 'text-primary-400'}`} />
-          <div className="flex-1">
+          <Download className="w-5 h-5 text-amber-400 flex-shrink-0" />
+          <div>
             <p className="text-sm font-medium">软件更新</p>
-            <p className="text-xs text-surface-400 mt-0.5">检查并安装新版本</p>
+            <p className="text-xs text-surface-400 mt-0.5">应用内自动更新功能不稳定，请手动下载安装</p>
           </div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <span className="text-[10px] text-surface-400">自动检查</span>
-            <button onClick={toggleAutoCheck}
-              className={`w-8 h-4 rounded-full transition-colors relative ${autoCheck ? 'bg-primary-500' : 'bg-surface-600'}`}>
-              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${autoCheck ? 'left-4' : 'left-0.5'}`} />
-            </button>
-          </label>
         </div>
-        {updateStatus?.event === 'available' && (
-          <div className="p-3 rounded-lg bg-primary-500/10 border border-primary-500/20 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-primary-300">发现新版本 v{updateStatus.version}</p>
-              <p className="text-[10px] text-surface-400 mt-0.5">可下载并安装更新</p>
-            </div>
-            <button onClick={handleDownloadUpdate} disabled={updateDownloading}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 disabled:opacity-50 transition-colors">
-              {updateDownloading ? '下载中...' : '下载更新'}
+        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <p className="text-xs text-amber-300 mb-3">⚠️ 自动更新功能异常，请从以下链接下载最新版本后手动覆盖安装</p>
+          <div className="flex gap-2">
+            <button onClick={() => window.electronAPI?.openExternal('https://pan.baidu.com/s/14n13-syMOyoLeTJnzYJB7Q?pwd=0721')}
+              className="flex-1 px-3 py-2 rounded-lg text-xs font-medium bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:bg-blue-500/30 transition-colors">
+              百度网盘下载
+            </button>
+            <button onClick={() => window.electronAPI?.openExternal('https://github.com/ParteaDream/SilverMoon-Terminal/releases')}
+              className="flex-1 px-3 py-2 rounded-lg text-xs font-medium bg-surface-700/60 border border-surface-600 text-surface-300 hover:text-white hover:border-surface-500 transition-colors">
+              GitHub Releases
             </button>
           </div>
-        )}
-        {updateStatus?.event === 'progress' && (
-          <div className="p-3 rounded-lg bg-surface-800/60 border border-surface-700">
-            <p className="text-xs text-surface-300 mb-1">下载中 {updateStatus.percent}%</p>
-            <div className="w-full h-1.5 rounded-full bg-surface-700 overflow-hidden">
-              <div className="h-full rounded-full bg-primary-500 transition-all" style={{ width: `${updateStatus.percent}%` }} />
-            </div>
-          </div>
-        )}
-        {updateStatus?.event === 'downloaded' && (
-          <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 flex items-center justify-between">
-            <p className="text-xs font-medium text-green-400">更新已下载，打开文件夹手动替换即可</p>
-            <button onClick={handleInstallUpdate}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors">
-              打开并退出
-            </button>
-          </div>
-        )}
-        {updateStatus?.event === 'not-available' && (
-          <p className="text-xs text-surface-500 px-1">当前已是最新版本</p>
-        )}
-        {updateStatus?.event === 'error' && (
-          <div className="space-y-2">
-            <p className="text-xs text-red-400 px-1">检查失败: {updateStatus.message}</p>
-            <button onClick={async () => {
-              await window.electronAPI?.clearUpdateCache()
-              setUpdateStatus(null)
-              handleCheckUpdate()
-            }}
-              className="px-3 py-1.5 rounded-lg text-xs bg-surface-800/60 border border-surface-700 text-surface-300 hover:text-white transition-colors">
-              清除缓存并重试
-            </button>
-          </div>
-        )}
-        {!updateStatus && !updateChecking && (
-          <button onClick={handleCheckUpdate}
-            className="self-start px-3 py-1.5 rounded-lg text-xs bg-surface-800/60 border border-surface-700 text-surface-300 hover:text-white hover:border-surface-500 transition-colors">
-            检查更新
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer pt-1">
+          <span className="text-[10px] text-surface-400">启动时自动检查新版本提醒</span>
+          <button onClick={toggleAutoCheck}
+            className={`w-8 h-4 rounded-full transition-colors relative ${autoCheck ? 'bg-primary-500' : 'bg-surface-600'}`}>
+            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${autoCheck ? 'left-4' : 'left-0.5'}`} />
           </button>
-        )}
-        {updateChecking && (
-          <p className="text-xs text-surface-400 px-1">正在检查更新...</p>
-        )}
+        </label>
       </div>
-
-      {loading && (
-        <div className="fixed inset-0 bg-surface-950/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="text-center">
-            <div className="w-10 h-10 mx-auto mb-3 rounded-full border-2 border-primary-500 border-t-transparent animate-spin" />
-            <p className="text-sm text-surface-400">处理中...</p>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
