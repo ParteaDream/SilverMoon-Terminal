@@ -950,9 +950,10 @@ function getSeedStats() {
       if (!fs.existsSync(p)) continue;
       try {
         let sql;
-        if (p.includes('.asar')) {
+        const asarMatch = p.match(/\.asar[/\\]/);
+        if (asarMatch) {
           // asar 内路径：直接走原始归档提取
-          sql = extractFromAsar(p);
+          sql = extractFromAsar(p, asarMatch);
           if (!sql) continue;
         } else {
           // 非 asar 路径
@@ -986,11 +987,14 @@ function getSeedStats() {
     }
   }
 
-  // 从 asar 归档中提取文件内容
-  function extractFromAsar(filePath) {
+  // 从 asar 归档中提取文件内容（接受预计算的 asarMatch 避免重复正则）
+  function extractFromAsar(filePath, asarMatch) {
     try {
-      const asarPath = filePath.slice(0, filePath.indexOf('.asar') + 5);
-      const internalPath = filePath.slice(filePath.indexOf('.asar') + 6);
+      if (!asarMatch) asarMatch = filePath.match(/\.asar[/\\]/);
+      if (!asarMatch) return null;
+      const asarEnd = asarMatch.index + 5;
+      const asarPath = filePath.slice(0, asarEnd);
+      const internalPath = filePath.slice(asarEnd + 1);
       if (!fs.existsSync(asarPath)) return null;
       const buf = fs.readFileSync(asarPath);
       const headerSize = buf.readUInt32LE(0);
@@ -1054,11 +1058,14 @@ function seedDatabase() {
     for (const d of searchDirs) {
       const p = path.join(d, filename);
       if (!fs.existsSync(p)) continue;
-      // 如果是 asar 内路径，直接走原始归档提取（避开虚拟文件系统）
-      if (p.includes('.asar')) {
+      // 如果是 asar 内路径（xxx.asar/yyy），直接走原始归档提取
+      // 注意：必须精确匹配 .asar/ 或 .asar\，避免误匹配 app.asar.unpacked 目录
+      const asarMatch = p.match(/\.asar[/\\]/);
+      if (asarMatch) {
         try {
-          const asarPath = p.slice(0, p.indexOf('.asar') + 5);
-          const internalPath = p.slice(p.indexOf('.asar') + 6);
+          const asarEnd = asarMatch.index + 5;
+          const asarPath = p.slice(0, asarEnd);
+          const internalPath = p.slice(asarEnd + 1); // skip the / after .asar
           if (!fs.existsSync(asarPath)) { console.log('[readSqlFile] asar not found:', asarPath); continue; }
           const buf = fs.readFileSync(asarPath);
           const headerSize = buf.readUInt32LE(0);
