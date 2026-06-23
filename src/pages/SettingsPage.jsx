@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useTheme, THEMES } from '../context/ThemeContext'
@@ -468,28 +469,72 @@ function GeneralModule() {
               下载轻量包 (Lite)
             </button>
           </div>
-          {/* 下载进度 */}
+          {/* 下载进度 — 精细粒度 */}
           {dlProgress && (
             <div className="p-3 rounded-lg bg-surface-800/60 border border-surface-700 space-y-2">
+              {/* Top row: mode + overall count */}
               <div className="flex items-center justify-between text-xs">
-                <span className="text-surface-300">
-                  {dlProgress.mode === 'zip' ? (
-                    `下载中 ${formatSize(dlProgress.bytesDownloaded)} / ${formatSize(dlProgress.totalBytes)}`
-                  ) : (
-                    `下载中 ${dlProgress.completedFiles}/${dlProgress.totalFiles} 文件`
-                  )}
-                  {dlProgress.totalBytes > 0 && dlProgress.mode !== 'zip' && ` (${formatSize(dlProgress.bytesDownloaded)} / ${formatSize(dlProgress.totalBytes)})`}
-                  {dlProgress.currentFile && <span className="text-surface-500 ml-1">— {dlProgress.currentFile}</span>}
+                <span className="text-surface-300 font-medium">
+                  {dlProgress.mode === 'archive' ? '📦 归档下载' : '📄 文件下载'}
+                  {' · '}
+                  {dlProgress.completedFiles}/{dlProgress.totalFiles} 文件
+                  {dlProgress.totalBytes > 0 && ` (${formatSize(dlProgress.bytesDownloaded)} / ${formatSize(dlProgress.totalBytes)})`}
                 </span>
-                <span className="text-surface-500">{formatSize(dlProgress.speed)}/s</span>
+                <span className="text-surface-500 flex items-center gap-2">
+                  {dlProgress.speedFormatted || (formatSize(dlProgress.speed || 0) + '/s')}
+                  {dlProgress.eta && dlProgress.eta !== '--:--' && (
+                    <span className="text-surface-600">剩余 {dlProgress.eta}</span>
+                  )}
+                </span>
               </div>
-              <div className="w-full h-1.5 rounded-full bg-surface-700 overflow-hidden">
-                <div className="h-full rounded-full bg-primary-500 transition-all" style={{ width: dlProgress.totalBytes > 0 ? `${Math.min(100, (dlProgress.bytesDownloaded / dlProgress.totalBytes * 100).toFixed(0))}%` : '0%' }} />
+
+              {/* Current file + per-file progress bar */}
+              {dlProgress.currentFile && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-surface-500 truncate max-w-[70%]" title={dlProgress.currentFile}>
+                      {dlProgress.currentFile}
+                    </span>
+                    {dlProgress.currentFileTotal > 0 && (
+                      <span className="text-surface-600 flex-shrink-0">
+                        {formatSize(dlProgress.currentFileBytes)} / {formatSize(dlProgress.currentFileTotal)}
+                      </span>
+                    )}
+                  </div>
+                  {dlProgress.currentFileTotal > 0 && (
+                    <div className="w-full h-1 rounded-full bg-surface-700 overflow-hidden">
+                      <div className="h-full rounded-full bg-amber-500/60 transition-all duration-300"
+                        style={{ width: `${Math.min(100, (dlProgress.currentFileBytes / dlProgress.currentFileTotal * 100).toFixed(0))}%` }} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Overall progress bar */}
+              <div className="w-full h-2 rounded-full bg-surface-700 overflow-hidden">
+                <div className="h-full rounded-full bg-primary-500 transition-all duration-300"
+                  style={{ width: dlProgress.totalBytes > 0
+                    ? `${Math.min(100, (dlProgress.bytesDownloaded / dlProgress.totalBytes * 100).toFixed(1))}%`
+                    : dlProgress.totalFiles > 0
+                      ? `${Math.min(100, (dlProgress.completedFiles / dlProgress.totalFiles * 100).toFixed(0))}%`
+                      : '0%' }} />
               </div>
-              <button onClick={() => cancelDownload(dlProgress.id)}
-                className="text-xs text-red-400 hover:text-red-300 transition-colors flex items-center gap-1">
-                <X className="w-3 h-3" />取消下载
-              </button>
+
+              {/* Bottom row: failures + concurrency + cancel */}
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-surface-600">
+                  {dlProgress.failures > 0 && (
+                    <span className="text-red-400/80 mr-3">失败 {dlProgress.failures}</span>
+                  )}
+                  {dlProgress.concurrency && (
+                    <span className="text-surface-600">并发 {dlProgress.concurrency}</span>
+                  )}
+                </span>
+                <button onClick={() => cancelDownload(dlProgress.id)}
+                  className="text-red-400 hover:text-red-300 transition-colors flex items-center gap-1">
+                  <X className="w-3 h-3" />取消下载
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1345,6 +1390,16 @@ function AdvancedModule() {
   const [loading, setLoading] = useState(false)
   const [seedVersionModal, setSeedVersionModal] = useState(false)
   const [seedVersionInput, setSeedVersionInput] = useState('')
+  const [isComposing, setIsComposing] = useState(false)
+  const seedInputRef = useRef(null)
+
+  // Focus input when modal opens (more reliable than autoFocus on Windows)
+  useEffect(() => {
+    if (seedVersionModal && seedInputRef.current) {
+      const timer = setTimeout(() => seedInputRef.current?.focus(), 50)
+      return () => clearTimeout(timer)
+    }
+  }, [seedVersionModal])
 
   async function handleBackup() {
     setLoading(true)
@@ -1562,15 +1617,32 @@ function AdvancedModule() {
         </div>
       </div>
 
-      {/* 数据版本输入弹窗 */}
-      {seedVersionModal && (
-        <div className="fixed inset-0 bg-surface-950/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setSeedVersionModal(false)}>
-          <div className="bg-surface-900 border border-surface-700 rounded-xl p-6 w-80 shadow-2xl" onClick={e => e.stopPropagation()}>
+      {/* 数据版本输入弹窗 — 通过 Portal 渲染到 body 避免 Windows 下 DOM 层级干扰 */}
+      {seedVersionModal && createPortal(
+        <div className="fixed inset-0 bg-surface-950/60 flex items-center justify-center" style={{ zIndex: 9999 }} onClick={() => setSeedVersionModal(false)}>
+          <div
+            className="bg-surface-900 border border-surface-700 rounded-xl p-6 w-80 shadow-2xl"
+            style={{ WebkitAppRegion: 'no-drag' }}
+            onClick={e => e.stopPropagation()}
+            onMouseDown={e => {
+              // Windows frameless Electron: mousedown may be consumed by drag regions,
+              // explicitly focus the input when clicking anywhere inside the dialog
+              e.stopPropagation()
+              if (seedInputRef.current && document.activeElement !== seedInputRef.current) {
+                e.preventDefault()
+                seedInputRef.current.focus()
+              }
+            }}
+          >
             <p className="text-sm font-medium mb-3">输入新的数据版本号</p>
             <input
-              type="text" value={seedVersionInput} autoFocus
-              onChange={e => setSeedVersionInput(e.target.value)}
+              ref={seedInputRef}
+              type="text" value={seedVersionInput}
+              onChange={e => { if (!isComposing) setSeedVersionInput(e.target.value) }}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={e => { setIsComposing(false); setSeedVersionInput(e.target.value) }}
               onKeyDown={e => { if (e.key === 'Enter') doExportSeed() }}
+              spellCheck={false}
               className="w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-lg text-sm text-surface-200 outline-none focus:border-primary-500 mb-4"
             />
             <div className="flex justify-end gap-2">
@@ -1580,7 +1652,8 @@ function AdvancedModule() {
                 className="px-4 py-1.5 rounded-lg text-xs bg-primary-600 hover:bg-primary-500 text-white transition-colors">确定</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Loading overlay */}

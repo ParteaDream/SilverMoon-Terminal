@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
 const { shell } = require('electron');
-const { getDownloadManager, PACK_DOWNLOAD_URLS, loadState } = require('./download-manager');
+const { getDownloadManager, PACK_DOWNLOAD_URLS, GITHUB_ARCHIVE_URLS, loadState, resolveJsDelivrVersion, generateManifestForDir } = require('./download-manager');
 
 // ── 数据库引擎: sql.js (纯 JS, 无原生模块) ──
 const initSqlJs = require('sql.js');
@@ -67,6 +67,7 @@ function getDbPath(dir) { return path.join(dir, 'silvermoon_terminal.db'); }
 // 类型优先级: Extreme > Medium > Lite
 
 const IMAGE_TYPE_PRIORITY = { 'extreme': 3, 'medium': 2, 'lite': 1 };
+const OFFICIAL_PACK_TYPES = ['extreme', 'medium', 'lite'];
 
 // 图片包大小缓存（避免重复扫描）
 const _packSizeCache = new Map();
@@ -657,26 +658,7 @@ ipcMain.handle('delete-image-pack', (_event, packPath) => {
 });
 
 // ── 生成 manifest ──
-const crypto = require('crypto');
-// ── Manifest 生成工具函数 ──
-function generateManifestForDir(dirPath) {
-  const files = {};
-  function walk(dir, base) {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const e of entries) {
-      if (e.isSymbolicLink()) continue;
-      const fp = path.join(dir, e.name);
-      const rel = base ? base + '/' + e.name : e.name;
-      if (e.isDirectory()) { walk(fp, rel); }
-      else if (e.isFile() && !e.name.endsWith('.json')) {
-        const buf = fs.readFileSync(fp);
-        files[rel] = { hash: crypto.createHash('sha256').update(buf).digest('hex'), size: buf.length };
-      }
-    }
-  }
-  walk(dirPath, '');
-  return { generated: new Date().toISOString(), files };
-}
+// ── Manifest 生成（从 download-manager 导入）──
 
 ipcMain.handle('generate-manifest', (_event, packPath) => {
   try {
@@ -696,9 +678,11 @@ ipcMain.handle('start-pack-download', async (event, packPath, packType, fileList
   try {
     if (!PACK_DOWNLOAD_URLS[packType]) return { success: false, error: '未知的包类型' };
     if (!fs.existsSync(packPath)) fs.mkdirSync(packPath, { recursive: true });
+    const scope = fileList && fileList.length > 0 ? 'update' : 'full';
     const result = await dm.start({
       packPath,
       packType,
+      scope,
       fileList: fileList || undefined,
       webContents: event.sender,
     });
@@ -750,20 +734,24 @@ ipcMain.handle('check-pack-update', async (_event, packPath, packType) => {
     const baseUrl = PACK_DOWNLOAD_URLS[packType];
     if (!baseUrl) return { success: false, error: '未知的包类型' };
     // 先生成本地 manifest
-    const localPath = path.join(packPath, 'manifest.json');
     const localManifest = generateManifestForDir(packPath);
+    const localPath = path.join(packPath, 'manifest.json');
     fs.writeFileSync(localPath, JSON.stringify(localManifest, null, 2));
+    // 通过 jsDelivr API 获取版本 hash，避免重定向
+    const resolved = await resolveJsDelivrVersion(packType);
+    const effectiveBase = resolved || baseUrl;
+    console.log('[check-pack-update] using base:', effectiveBase);
     // 下载远程 manifest
-    const remote = await downloadJsonFile(baseUrl + '/manifest.json');
+    const remote = await downloadJsonFile(effectiveBase + '/manifest.json');
     if (!remote) return { success: false, error: '无法获取远程 manifest，请确认仓库中存在 manifest.json' };
     // 比对差异
     const newFiles = [];
-    for (const [f, info] of Object.entries(remote.files)) {
+    for (const [f, info] of Object.entries(remote.files || {})) {
       if (!localManifest.files[f] || localManifest.files[f].hash !== info.hash) {
-        newFiles.push({ path: f, size: info.size });
+        newFiles.push({ path: f, size: info.size || 0, hash: info.hash });
       }
     }
-    return { success: true, newFiles, totalRemote: Object.keys(remote.files).length };
+    return { success: true, newFiles, totalRemote: Object.keys(remote.files || {}).length };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -816,82 +804,23 @@ async function downloadJsonFile(url) {
   try { return JSON.parse(text); } catch (_) { return null; }
 }
 
-async function downloadBinaryFile(url, destPath) {
-  return new Promise((resolve) => {
-    const proto = url.startsWith('https') ? require('https') : require('http');
-    function fetch(fetchUrl, redirects) {
-      if (redirects > 5) { resolve(null); return; }
-      const options = { headers: { 'User-Agent': 'SilverMoon-Terminal/1.0' } };
-      proto.get(fetchUrl, options, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          fetch(res.headers.location, redirects + 1);
-          return;
-        }
-        if (res.statusCode !== 200) { resolve(null); return; }
-        // 小文件直接缓冲到内存，大文件流式写盘
-        const contentLength = parseInt(res.headers['content-length'] || '0');
-        if (destPath && contentLength > 8192) {
-          const dir = require('path').dirname(destPath);
-          if (!require('fs').existsSync(dir)) require('fs').mkdirSync(dir, { recursive: true });
-          const ws = require('fs').createWriteStream(destPath);
-          res.pipe(ws);
-          ws.on('finish', () => resolve(contentLength));
-          ws.on('error', () => resolve(null));
-        } else {
-          const chunks = [];
-          res.on('data', c => chunks.push(c));
-          res.on('end', () => {
-            const buf = Buffer.concat(chunks);
-            if (destPath) {
-              try {
-                const d = require('path').dirname(destPath);
-                if (!require('fs').existsSync(d)) require('fs').mkdirSync(d, { recursive: true });
-                require('fs').writeFileSync(destPath, buf);
-              } catch (_) {}
-            }
-            resolve(buf.length);
-          });
-        }
-      }).on('error', () => resolve(null)).setTimeout(30000, function() { this.destroy(); resolve(null); });
-    }
-    fetch(url, 0);
-  });
-}
-
-ipcMain.handle('download-full-pack', async (_event, packType) => {
+ipcMain.handle('download-full-pack', async (event, packType) => {
   try {
     if (!dbDir) return { success: false, error: '数据库未初始化' };
-    const baseUrl = PACK_DOWNLOAD_URLS[packType];
-    if (!baseUrl) return { success: false, error: '未知的包类型' };
-    console.log('[download-full-pack] baseUrl:', baseUrl, 'packType:', packType);
+    if (!PACK_DOWNLOAD_URLS[packType]) return { success: false, error: '未知的包类型' };
     const label = packType.charAt(0).toUpperCase() + packType.slice(1);
     const packPath = path.join(dbDir, `images-${label}`);
     if (!fs.existsSync(packPath)) fs.mkdirSync(packPath, { recursive: true });
-    const manifestUrl = baseUrl + '/manifest.json';
-    console.log('[download-full-pack] fetching manifest:', manifestUrl);
-    const remote = await downloadJsonFile(manifestUrl);
-    if (!remote) {
-      console.log('[download-full-pack] manifest fetch FAILED');
-      return { success: false, error: '无法获取远程文件列表，请确认仓库中存在 manifest.json' };
-    }
-    console.log('[download-full-pack] manifest OK, files:', Object.keys(remote.files || {}).length);
-    let downloaded = 0;
-    for (const [f, info] of Object.entries(remote.files)) {
-      try {
-        const destPath = path.join(packPath, f);
-        const destDir = path.dirname(destPath);
-        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-        const data = await downloadBinaryFile(baseUrl + '/' + f.replace(/\//g, '/'))
-        if (data) { fs.writeFileSync(destPath, data); downloaded++; }
-      } catch (_) {}
-    }
-    try {
-      const manifestText = await downloadTextFile(baseUrl + '/manifest.json');
-      if (manifestText) fs.writeFileSync(path.join(packPath, 'manifest.json'), manifestText);
-    } catch (_) {}
-    clearSizeCache();
-    clearImagePathCache();
-    return { success: true, downloaded };
+
+    const dm = getDownloadManager();
+    const result = await dm.start({
+      packPath,
+      packType,
+      scope: 'full',          // tries GitHub archive first, falls back to manifest
+      fileList: undefined,    // full pack — no file list
+      webContents: event.sender,
+    });
+    return { success: true, ...result };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -902,7 +831,9 @@ ipcMain.handle('diff-pack', async (_event, packPath, packType) => {
   try {
     const baseUrl = PACK_DOWNLOAD_URLS[packType];
     if (!baseUrl) return { success: false, error: '未知的包类型' };
-    const remote = await downloadJsonFile(baseUrl + '/manifest.json');
+    const resolved = await resolveJsDelivrVersion(packType);
+    const effectiveBase = resolved || baseUrl;
+    const remote = await downloadJsonFile(effectiveBase + '/manifest.json');
     if (!remote) return { success: false, error: '无法获取远程 manifest，请确认仓库中存在 manifest.json' };
     const localManifestPath = path.join(packPath, 'manifest.json');
     let local = { files: {} };
@@ -931,7 +862,8 @@ ipcMain.handle('export-pack-diff', async (_event, packPath, packType) => {
     const localManifest = generateManifestForDir(packPath);
     fs.writeFileSync(path.join(packPath, 'manifest.json'), JSON.stringify(localManifest, null, 2));
     // 下载远程 manifest
-    const remote = await downloadJsonFile(baseUrl + '/manifest.json');
+    const resolved = await resolveJsDelivrVersion(packType);
+    const remote = await downloadJsonFile((resolved || baseUrl) + '/manifest.json');
     if (!remote) return { success: false, error: '无法获取远程 manifest，请确认仓库中存在 manifest.json' };
     const localOnly = [], remoteOnly = [];
     for (const f of Object.keys(localManifest.files)) { if (!remote.files[f]) localOnly.push(f); }

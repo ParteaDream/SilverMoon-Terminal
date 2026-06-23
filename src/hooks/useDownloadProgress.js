@@ -71,7 +71,10 @@ export function useDownloadProgress() {
           // Never resurrect a terminal download via polling
           if (d.done || d.cancelled || d.error) return;
           setProgress(prev => {
-            if (!prev || prev.id !== d.id || d.currentFile !== prev.currentFile) {
+            if (!prev || prev.id !== d.id ||
+                d.currentFile !== prev.currentFile ||
+                d.completedFiles !== prev.completedFiles ||
+                d.failures !== prev.failures) {
               return d;
             }
             return prev;
@@ -79,7 +82,7 @@ export function useDownloadProgress() {
           progressRef.current = d;
         }
       } catch (_) {}
-    }, 2000);
+    }, 1000); // faster polling for fine-grained updates
 
     return () => {
       if (pollRef.current) {
