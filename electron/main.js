@@ -3555,12 +3555,16 @@ autoUpdater.on('update-downloaded', () => {
   mainWindow?.webContents?.send('update-status', { event: 'downloaded' });
 });
 autoUpdater.on('error', (err) => {
-  // 404 on latest-mac.yml means release hasn't been published with electron-builder --publish
   const msg = err && err.message ? err.message : '';
   if (msg.includes('latest-mac.yml') || msg.includes('404')) {
     mainWindow?.webContents?.send('update-status', {
       event: 'error',
       message: '服务器尚未发布更新元数据（latest-mac.yml），请等待新版本发布',
+    });
+  } else if (msg.includes('Code signature') || msg.includes('SQRLCodeSignatureError')) {
+    mainWindow?.webContents?.send('update-status', {
+      event: 'error',
+      message: '更新安装失败：代码签名验证未通过。请手动下载新版本覆盖安装，或配置 Apple Developer 签名证书后重新发布。',
     });
   } else {
     mainWindow?.webContents?.send('update-status', {
@@ -3568,6 +3572,16 @@ autoUpdater.on('error', (err) => {
       message: `检查更新失败: ${msg || '请确认网络连接'}`,
     });
   }
+});
+
+ipcMain.handle('install-update', () => {
+  // macOS 无 Developer ID 证书时，ShipIt 重启会因签名验证失败而卡住
+  // 打开 ShipIt 缓存目录，用户可手动将新 .app 拖入 /Applications
+  const shipItDir = path.join(app.getPath('caches'), 'com.silvermoon.terminal.ShipIt');
+  try {
+    shell.openPath(shipItDir);
+  } catch (_) {}
+  setImmediate(() => app.quit());
 });
 
 ipcMain.handle('check-for-update', async () => {
@@ -3586,10 +3600,7 @@ ipcMain.handle('download-update', async () => {
     return { success: false, error: e.message };
   }
 });
-ipcMain.handle('install-update', () => {
-  autoUpdater.quitAndInstall();
-  return { success: true };
-});
+
 ipcMain.handle('get-update-auto-check', () => {
   try {
     const config = loadUserConfig();

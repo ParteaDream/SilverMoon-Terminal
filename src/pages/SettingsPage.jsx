@@ -1407,10 +1407,10 @@ function VersionInfoModule() {
         )}
         {updateStatus?.event === 'downloaded' && (
           <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 flex items-center justify-between">
-            <p className="text-xs font-medium text-green-400">更新已下载，重启应用以安装</p>
+            <p className="text-xs font-medium text-green-400">更新已下载，打开文件夹手动替换即可</p>
             <button onClick={handleInstallUpdate}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors">
-              立即重启
+              打开并退出
             </button>
           </div>
         )}
