@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
 const { shell } = require('electron');
+const { getDownloadManager, PACK_DOWNLOAD_URLS, loadState } = require('./download-manager');
 
 // ── 数据库引擎: sql.js (纯 JS, 无原生模块) ──
 const initSqlJs = require('sql.js');
@@ -230,10 +231,8 @@ function getImagesDir(dir) {
     return best.path;
   }
 
-  // 兜底：创建默认 "images" 文件夹
-  const defaultDir = path.join(dir, 'images');
-  if (!fs.existsSync(defaultDir)) fs.mkdirSync(defaultDir, { recursive: true });
-  return defaultDir;
+  // 无可用图包，返回 dbDir 本身
+  return dir;
 }
 
 function getActiveImagePackName(dir) {
@@ -253,7 +252,7 @@ function getActiveImagePackName(dir) {
   }
 
   const best = selectBestImagePack(packs);
-  return best ? best.name : 'images';
+  return best ? best.name : null;
 }
 
 function getUserImagesDir(dir) {
@@ -618,7 +617,7 @@ ipcMain.handle('get-data-version', () => {
 // ── 图片包管理 ──
 ipcMain.handle('list-image-packs', () => {
   try {
-    if (!dbDir) return { success: true, packs: [], active: 'images' };
+    if (!dbDir) return { success: true, packs: [], active: null };
     const packs = findImagePacks(dbDir);
     const active = getActiveImagePackName(dbDir);
     const formatted = packs.map(p => {
@@ -640,7 +639,7 @@ ipcMain.handle('list-image-packs', () => {
     });
     return { success: true, packs: formatted, active };
   } catch (e) {
-    return { success: false, error: e.message, packs: [], active: 'images' };
+    return { success: false, error: e.message, packs: [], active: null };
   }
 });
 
@@ -659,122 +658,108 @@ ipcMain.handle('delete-image-pack', (_event, packPath) => {
 
 // ── 生成 manifest ──
 const crypto = require('crypto');
+// ── Manifest 生成工具函数 ──
+function generateManifestForDir(dirPath) {
+  const files = {};
+  function walk(dir, base) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const e of entries) {
+      if (e.isSymbolicLink()) continue;
+      const fp = path.join(dir, e.name);
+      const rel = base ? base + '/' + e.name : e.name;
+      if (e.isDirectory()) { walk(fp, rel); }
+      else if (e.isFile() && !e.name.endsWith('.json')) {
+        const buf = fs.readFileSync(fp);
+        files[rel] = { hash: crypto.createHash('sha256').update(buf).digest('hex'), size: buf.length };
+      }
+    }
+  }
+  walk(dirPath, '');
+  return { generated: new Date().toISOString(), files };
+}
+
 ipcMain.handle('generate-manifest', (_event, packPath) => {
   try {
     if (!packPath || !fs.existsSync(packPath)) return { success: false, error: '文件夹不存在' };
-    const files = {};
-    function walk(dir, base) {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const e of entries) {
-        if (e.isSymbolicLink()) continue;
-        const fp = path.join(dir, e.name);
-        const rel = base ? base + '/' + e.name : e.name;
-        if (e.isDirectory()) { walk(fp, rel); }
-        else if (e.isFile() && !e.name.endsWith('.json')) {
-          const buf = fs.readFileSync(fp);
-          files[rel] = { hash: crypto.createHash('sha256').update(buf).digest('hex'), size: buf.length };
-        }
-      }
-    }
-    walk(packPath, '');
-    const manifest = { generated: new Date().toISOString(), files };
+    const manifest = generateManifestForDir(packPath);
     fs.writeFileSync(path.join(packPath, 'manifest.json'), JSON.stringify(manifest, null, 2));
-    return { success: true, fileCount: Object.keys(files).length, manifest };
+    return { success: true, fileCount: Object.keys(manifest.files).length, manifest };
   } catch (e) {
     return { success: false, error: e.message };
   }
 });
 
-// ── 下载图包 / 更新 ──
-const PACK_DOWNLOAD_URLS = {
-  lite: 'https://gofile.me/7gOZs/uEqjvLqpk',
-  medium: 'https://gofile.me/7gOZs/1XBiYLXvh',
-};
+// ── 后台下载管理（基于 DownloadManager）──
+const dm = getDownloadManager();
 
-// 从 gofile.me 文件夹 URL 获取 API 参数
-function parseGofileUrl(url) {
-  const m = url.match(/gofile\.me\/([^/]+)\/([^/]+)/);
-  return m ? { accountId: m[1], contentId: m[2] } : null;
-}
-
-// 从 gofile.me 获取文件夹内容（先尝试公开 API，失败则从页面提取）
-async function fetchGofileContents(folderUrl) {
-  const params = parseGofileUrl(folderUrl);
-  if (!params) return null;
-
-  // 方法1: 公开 API（无需 token）
-  let data = await downloadJsonFile(`https://api.gofile.io/contents/${params.contentId}`);
-  if (data?.status === 'ok') return data.data;
-
-  // 方法2: 从 gofile.me 页面中提取 app 状态 JSON
-  const html = await downloadTextFile(folderUrl);
-  if (html) {
-    // 尝试匹配 window.__INITIAL_STATE__ 或类似模式
-    const jsonMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.+?});/s)
-      || html.match(/<script[^>]*>\s*window\.__INITIAL_STATE__\s*=\s*(.+?);\s*<\/script>/s)
-      || html.match(/"children"\s*:\s*\{/);
-    if (jsonMatch) {
-      try {
-        // 尝试从完整页面提取 JSON
-        const bigJson = html.match(/\{[^}]*"children"\s*:\s*\{[^}]*"id"[^}]*\}[^}]*\}/);
-        if (bigJson) {
-          const parsed = JSON.parse(bigJson[0]);
-          if (parsed.children) return { children: parsed.children };
-        }
-      } catch (_) {}
-    }
+ipcMain.handle('start-pack-download', async (event, packPath, packType, fileList) => {
+  try {
+    if (!PACK_DOWNLOAD_URLS[packType]) return { success: false, error: '未知的包类型' };
+    if (!fs.existsSync(packPath)) fs.mkdirSync(packPath, { recursive: true });
+    const result = await dm.start({
+      packPath,
+      packType,
+      fileList: fileList || undefined,
+      webContents: event.sender,
+    });
+    return { success: true, ...result };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
-  return null;
-}
+});
 
-// 从 gofile 文件夹下载指定文件
-async function downloadGofileFile(folderUrl, filename) {
-  const contents = await fetchGofileContents(folderUrl);
-  if (!contents) return null;
-  // 在子文件中查找
-  function findFile(children) {
-    for (const [name, info] of Object.entries(children)) {
-      if (name === filename && info.link) return info.link;
-    }
-    return null;
-  }
-  const link = findFile(contents.children || {});
-  if (!link) return null;
-  return await downloadBinaryFile(link);
-}
+ipcMain.handle('get-download-progress', () => {
+  const downloads = dm.getActiveSummaries();
+  // Clean up old done/cancelled entries (keep for 30s for UI finality)
+  return { success: true, downloads };
+});
 
-// 从 gofile 文件夹下载并解析 JSON 文件
-async function downloadGofileJson(folderUrl, filename) {
-  const contents = await fetchGofileContents(folderUrl);
-  if (!contents) return null;
-  function findFile(children) {
-    for (const [name, info] of Object.entries(children)) {
-      if (name === filename && info.link) return info.link;
-    }
-    return null;
+ipcMain.handle('cancel-download', (_event, downloadId) => {
+  dm.cancel(downloadId);
+  return { success: true };
+});
+
+ipcMain.handle('resume-download', async (event, packPath) => {
+  try {
+    const result = await dm.resume(packPath, event.sender);
+    return { success: true, ...result };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
-  const link = findFile(contents.children || {});
-  if (!link) return null;
-  return await downloadJsonFile(link);
-}
+});
+
+ipcMain.handle('get-persisted-download', (_event, packPath) => {
+  const state = loadState(packPath);
+  return { success: true, download: state || null };
+});
+
+// Listen for download completion to clear caches
+dm.on('progress', (summary) => {
+  if (summary.done || summary.error) {
+    clearSizeCache();
+    clearImagePathCache();
+  }
+});
+
+
+
+
 
 ipcMain.handle('check-pack-update', async (_event, packPath, packType) => {
   try {
     const baseUrl = PACK_DOWNLOAD_URLS[packType];
     if (!baseUrl) return { success: false, error: '未知的包类型' };
-    // 尝试下载远程 manifest
-    const remote = await downloadGofileJson(baseUrl, 'manifest.json');
-    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认 NAS 上已上传 manifest.json' };
-    // 读取本地 manifest
+    // 先生成本地 manifest
     const localPath = path.join(packPath, 'manifest.json');
-    let local = { files: {} };
-    if (fs.existsSync(localPath)) {
-      local = JSON.parse(fs.readFileSync(localPath, 'utf-8'));
-    }
+    const localManifest = generateManifestForDir(packPath);
+    fs.writeFileSync(localPath, JSON.stringify(localManifest, null, 2));
+    // 下载远程 manifest
+    const remote = await downloadJsonFile(baseUrl + '/manifest.json');
+    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认仓库中存在 manifest.json' };
     // 比对差异
     const newFiles = [];
     for (const [f, info] of Object.entries(remote.files)) {
-      if (!local.files[f] || local.files[f].hash !== info.hash) {
+      if (!localManifest.files[f] || localManifest.files[f].hash !== info.hash) {
         newFiles.push({ path: f, size: info.size });
       }
     }
@@ -784,49 +769,44 @@ ipcMain.handle('check-pack-update', async (_event, packPath, packType) => {
   }
 });
 
-ipcMain.handle('download-pack-files', async (_event, packPath, packType, fileList) => {
+// download-pack-files 现在委托给 DownloadManager（向后兼容）
+ipcMain.handle('download-pack-files', async (event, packPath, packType, fileList) => {
   try {
-    const baseUrl = PACK_DOWNLOAD_URLS[packType];
-    if (!baseUrl) return { success: false, error: '未知的包类型' };
-    const contents = await fetchGofileContents(baseUrl);
-    const children = contents?.children || {};
-    let downloaded = 0;
-    for (const f of fileList) {
-      try {
-        const destPath = path.join(packPath, f.path);
-        const destDir = path.dirname(destPath);
-        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-        const fileInfo = children[f.path];
-        const link = fileInfo?.link;
-        const data = link ? await downloadBinaryFile(link) : null;
-        if (data) { fs.writeFileSync(destPath, data); downloaded++; }
-      } catch (_) {}
-    }
-    clearSizeCache();
-    clearImagePathCache();
-    // 下载远程 manifest 作为本地 manifest
-    try {
-      const manifestInfo = children['manifest.json'];
-      if (manifestInfo?.link) {
-        const manifestText = await downloadTextFile(manifestInfo.link);
-        if (manifestText) fs.writeFileSync(path.join(packPath, 'manifest.json'), manifestText);
-      }
-    } catch (_) {}
-    return { success: true, downloaded };
+    if (!PACK_DOWNLOAD_URLS[packType]) return { success: false, error: '未知的包类型' };
+    if (!fs.existsSync(packPath)) fs.mkdirSync(packPath, { recursive: true });
+    const result = await dm.start({
+      packPath,
+      packType,
+      fileList,
+      webContents: event.sender,
+    });
+    return { success: true, ...result };
   } catch (e) {
     return { success: false, error: e.message };
   }
 });
 
 async function downloadTextFile(url) {
+  console.log('[download] GET', url);
   return new Promise((resolve) => {
     const proto = url.startsWith('https') ? require('https') : require('http');
-    proto.get(url, (res) => {
-      if (res.statusCode !== 200) { resolve(null); return; }
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => resolve(data));
-    }).on('error', () => resolve(null)).setTimeout(15000, function() { this.destroy(); resolve(null); });
+    function fetch(fetchUrl, redirects) {
+      if (redirects > 5) { console.log('[download] too many redirects:', url); resolve(null); return; }
+      const options = { headers: { 'User-Agent': 'SilverMoon-Terminal/1.0' } };
+      const req = proto.get(fetchUrl, options, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          fetch(res.headers.location, redirects + 1);
+          return;
+        }
+        if (res.statusCode !== 200) { resolve(null); return; }
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', () => resolve(null));
+      req.setTimeout(15000, function() { this.destroy(); resolve(null); });
+    }
+    fetch(url, 0);
   });
 }
 
@@ -836,15 +816,45 @@ async function downloadJsonFile(url) {
   try { return JSON.parse(text); } catch (_) { return null; }
 }
 
-async function downloadBinaryFile(url) {
+async function downloadBinaryFile(url, destPath) {
   return new Promise((resolve) => {
     const proto = url.startsWith('https') ? require('https') : require('http');
-    proto.get(url, (res) => {
-      if (res.statusCode !== 200) { resolve(null); return; }
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-    }).on('error', () => resolve(null)).setTimeout(30000, function() { this.destroy(); resolve(null); });
+    function fetch(fetchUrl, redirects) {
+      if (redirects > 5) { resolve(null); return; }
+      const options = { headers: { 'User-Agent': 'SilverMoon-Terminal/1.0' } };
+      proto.get(fetchUrl, options, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          fetch(res.headers.location, redirects + 1);
+          return;
+        }
+        if (res.statusCode !== 200) { resolve(null); return; }
+        // 小文件直接缓冲到内存，大文件流式写盘
+        const contentLength = parseInt(res.headers['content-length'] || '0');
+        if (destPath && contentLength > 8192) {
+          const dir = require('path').dirname(destPath);
+          if (!require('fs').existsSync(dir)) require('fs').mkdirSync(dir, { recursive: true });
+          const ws = require('fs').createWriteStream(destPath);
+          res.pipe(ws);
+          ws.on('finish', () => resolve(contentLength));
+          ws.on('error', () => resolve(null));
+        } else {
+          const chunks = [];
+          res.on('data', c => chunks.push(c));
+          res.on('end', () => {
+            const buf = Buffer.concat(chunks);
+            if (destPath) {
+              try {
+                const d = require('path').dirname(destPath);
+                if (!require('fs').existsSync(d)) require('fs').mkdirSync(d, { recursive: true });
+                require('fs').writeFileSync(destPath, buf);
+              } catch (_) {}
+            }
+            resolve(buf.length);
+          });
+        }
+      }).on('error', () => resolve(null)).setTimeout(30000, function() { this.destroy(); resolve(null); });
+    }
+    fetch(url, 0);
   });
 }
 
@@ -853,33 +863,30 @@ ipcMain.handle('download-full-pack', async (_event, packType) => {
     if (!dbDir) return { success: false, error: '数据库未初始化' };
     const baseUrl = PACK_DOWNLOAD_URLS[packType];
     if (!baseUrl) return { success: false, error: '未知的包类型' };
+    console.log('[download-full-pack] baseUrl:', baseUrl, 'packType:', packType);
     const label = packType.charAt(0).toUpperCase() + packType.slice(1);
     const packPath = path.join(dbDir, `images-${label}`);
     if (!fs.existsSync(packPath)) fs.mkdirSync(packPath, { recursive: true });
-    const remote = await downloadGofileJson(baseUrl, 'manifest.json');
-    if (!remote) return { success: false, error: '无法获取远程文件列表，请确认 NAS 上已上传 manifest.json' };
-    // 获取 gofile 内容列表（一次请求，供后续下载用）
-    const contents = await fetchGofileContents(baseUrl);
-    const children = contents?.children || {};
+    const manifestUrl = baseUrl + '/manifest.json';
+    console.log('[download-full-pack] fetching manifest:', manifestUrl);
+    const remote = await downloadJsonFile(manifestUrl);
+    if (!remote) {
+      console.log('[download-full-pack] manifest fetch FAILED');
+      return { success: false, error: '无法获取远程文件列表，请确认仓库中存在 manifest.json' };
+    }
+    console.log('[download-full-pack] manifest OK, files:', Object.keys(remote.files || {}).length);
     let downloaded = 0;
     for (const [f, info] of Object.entries(remote.files)) {
       try {
         const destPath = path.join(packPath, f);
         const destDir = path.dirname(destPath);
         if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-        const fileInfo = children[f];
-        const link = fileInfo?.link;
-        const data = link ? await downloadBinaryFile(link) : null;
+        const data = await downloadBinaryFile(baseUrl + '/' + f.replace(/\//g, '/'))
         if (data) { fs.writeFileSync(destPath, data); downloaded++; }
       } catch (_) {}
     }
-    // 保存 manifest
     try {
-      const manifestText = await (async () => {
-        const cnt = await fetchGofileContents(baseUrl);
-        const manifestInfo = cnt?.children?.['manifest.json'];
-        return manifestInfo?.link ? await downloadTextFile(manifestInfo.link) : null;
-      })();
+      const manifestText = await downloadTextFile(baseUrl + '/manifest.json');
       if (manifestText) fs.writeFileSync(path.join(packPath, 'manifest.json'), manifestText);
     } catch (_) {}
     clearSizeCache();
@@ -895,8 +902,8 @@ ipcMain.handle('diff-pack', async (_event, packPath, packType) => {
   try {
     const baseUrl = PACK_DOWNLOAD_URLS[packType];
     if (!baseUrl) return { success: false, error: '未知的包类型' };
-    const remote = await downloadGofileJson(baseUrl, 'manifest.json');
-    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认 NAS 上已上传 manifest.json' };
+    const remote = await downloadJsonFile(baseUrl + '/manifest.json');
+    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认仓库中存在 manifest.json' };
     const localManifestPath = path.join(packPath, 'manifest.json');
     let local = { files: {} };
     if (fs.existsSync(localManifestPath)) {
@@ -920,16 +927,15 @@ ipcMain.handle('export-pack-diff', async (_event, packPath, packType) => {
   try {
     const baseUrl = PACK_DOWNLOAD_URLS[packType];
     if (!baseUrl) return { success: false, error: '未知的包类型' };
-    const remote = await downloadGofileJson(baseUrl, 'manifest.json');
-    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认 NAS 上已上传 manifest.json' };
-    const localManifestPath = path.join(packPath, 'manifest.json');
-    let local = { files: {} };
-    if (fs.existsSync(localManifestPath)) {
-      local = JSON.parse(fs.readFileSync(localManifestPath, 'utf-8'));
-    }
+    // 先重新生成本地 manifest（确保对比的是最新状态）
+    const localManifest = generateManifestForDir(packPath);
+    fs.writeFileSync(path.join(packPath, 'manifest.json'), JSON.stringify(localManifest, null, 2));
+    // 下载远程 manifest
+    const remote = await downloadJsonFile(baseUrl + '/manifest.json');
+    if (!remote) return { success: false, error: '无法获取远程 manifest，请确认仓库中存在 manifest.json' };
     const localOnly = [], remoteOnly = [];
-    for (const f of Object.keys(local.files)) { if (!remote.files[f]) localOnly.push(f); }
-    for (const f of Object.keys(remote.files)) { if (!local.files[f]) remoteOnly.push(f); }
+    for (const f of Object.keys(localManifest.files)) { if (!remote.files[f]) localOnly.push(f); }
+    for (const f of Object.keys(remote.files)) { if (!localManifest.files[f]) remoteOnly.push(f); }
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择差异导出目录', properties: ['openDirectory', 'createDirectory'],
     });
@@ -3540,8 +3546,20 @@ autoUpdater.on('download-progress', (p) => {
 autoUpdater.on('update-downloaded', () => {
   mainWindow?.webContents?.send('update-status', { event: 'downloaded' });
 });
-autoUpdater.on('error', () => {
-  mainWindow?.webContents?.send('update-status', { event: 'error', message: '检查更新失败，请确认网络连接' });
+autoUpdater.on('error', (err) => {
+  // 404 on latest-mac.yml means release hasn't been published with electron-builder --publish
+  const msg = err && err.message ? err.message : '';
+  if (msg.includes('latest-mac.yml') || msg.includes('404')) {
+    mainWindow?.webContents?.send('update-status', {
+      event: 'error',
+      message: '服务器尚未发布更新元数据（latest-mac.yml），请等待新版本发布',
+    });
+  } else {
+    mainWindow?.webContents?.send('update-status', {
+      event: 'error',
+      message: `检查更新失败: ${msg || '请确认网络连接'}`,
+    });
+  }
 });
 
 ipcMain.handle('check-for-update', async () => {

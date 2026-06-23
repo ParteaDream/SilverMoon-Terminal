@@ -55,6 +55,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   downloadPackFiles: (packPath, packType, fileList) => ipcRenderer.invoke('download-pack-files', packPath, packType, fileList),
   downloadFullPack: (packType) => ipcRenderer.invoke('download-full-pack', packType),
   exportPackDiff: (packPath, packType) => ipcRenderer.invoke('export-pack-diff', packPath, packType),
+  startPackDownload: (packPath, packType, fileList) => ipcRenderer.invoke('start-pack-download', packPath, packType, fileList),
+  getDownloadProgress: () => ipcRenderer.invoke('get-download-progress'),
+  cancelDownload: (downloadId) => ipcRenderer.invoke('cancel-download', downloadId),
+  resumeDownload: (packPath) => ipcRenderer.invoke('resume-download', packPath),
+  getPersistedDownload: (packPath) => ipcRenderer.invoke('get-persisted-download', packPath),
+
+  // Download progress push from main process (survives page navigation)
+  onDownloadProgress: (callback) => {
+    const handler = (_event, progress) => callback(progress);
+    ipcRenderer.on('download-progress', handler);
+    return () => ipcRenderer.removeListener('download-progress', handler);
+  },
 
   // 窗口控制
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),

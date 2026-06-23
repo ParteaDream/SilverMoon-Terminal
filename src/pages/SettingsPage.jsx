@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useTheme, THEMES } from '../context/ThemeContext'
+import { useDownloadProgress } from '../hooks/useDownloadProgress'
 import { savePageStateSync } from '../utils/pageStateStore'
 import {
   FolderOpen, RefreshCw, Database, AlertTriangle, CheckCircle2,
   Palette, Image, Upload, Settings, ChevronRight, Sparkles, Paintbrush,
   Wrench, Download, Upload as UploadIcon, FileCode, ShieldAlert,
-  LayoutList, LayoutGrid, List, Info, Images, HardDrive, Save, Pencil, Trash2, Shirt
+  LayoutList, LayoutGrid, List, Info, Images, HardDrive, Save, Pencil, Trash2, Shirt, X
 } from 'lucide-react'
 import { PRESET_COLORS } from '../utils/colorMarkup'
 
@@ -29,6 +30,14 @@ function formatTotalSize(packs) {
   return total + ' B'
 }
 
+function formatSize(bytes) {
+  if (!bytes || bytes <= 0) return '0 B'
+  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB'
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB'
+  if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB'
+  return bytes + ' B'
+}
+
 function GeneralModule() {
   const { dbPath, selectLocation, getDbPath, updateDatabase, devMode } = useDb()
   const [dbInfo, setDbInfo] = useState({ dbDir: null, isPopulated: false })
@@ -37,9 +46,30 @@ function GeneralModule() {
 
   // Image pack management
   const [packs, setPacks] = useState([])
-  const [activePack, setActivePack] = useState('images')
+  const [activePack, setActivePack] = useState(null)
+  const [checkingPack, setCheckingPack] = useState(null) // pack path being checked for update
+  const [baiduDialog, setBaiduDialog] = useState(null)   // { packType, label } for Baidu Pan dialog
+  const { progress: dlProgress, startDownload, cancelDownload, checkPersisted } = useDownloadProgress()
 
-  useEffect(() => { refreshDbInfo(); loadImagePacks() }, [dbPath])
+  useEffect(() => { refreshDbInfo(); loadImagePacks(); checkStaleDownloads() }, [dbPath])
+
+  // Check for persisted (unfinished) downloads on mount and auto-resume detection
+  async function checkStaleDownloads() {
+    if (!dbInfo.dbDir || !window.electronAPI) return
+    // Check each potential pack path for an incomplete download
+    for (const packType of ['Medium', 'Lite']) {
+      try {
+        const packPath = dbInfo.dbDir + '/images-' + packType
+        const r = await window.electronAPI.getPersistedDownload(packPath)
+        if (r?.success && r.download && !r.download.done && !r.download.cancelled) {
+          // Found an incomplete download — prompt user
+          console.log('[Settings] Found persisted download:', r.download)
+          // The download manager will auto-resume when start is called;
+          // for now, just show the progress via polling (push events will update)
+        }
+      } catch (_) {}
+    }
+  }
 
   async function refreshDbInfo() {
     try {
@@ -96,7 +126,7 @@ function GeneralModule() {
         const r = await window.electronAPI.listImagePacks()
         if (r?.success) {
           setPacks(r.packs || [])
-          setActivePack(r.active || 'images')
+          setActivePack(r.active || null)
         }
       }
     } catch (_) {}
@@ -169,27 +199,35 @@ function GeneralModule() {
       setLoading(false)
     }
   }
+  // Guard against starting a new download while one is active
+  function guardDownload() {
+    if (dlProgress && !dlProgress.done && !dlProgress.cancelled && !dlProgress.error) {
+      alert('已有下载任务正在进行中，请等待完成或取消后再开始新的下载。')
+      return false
+    }
+    return true
+  }
 
   async function handleUpdatePack(packPath, packType, packName) {
-    setLoading(true)
-    setMessage(null)
+    setCheckingPack(packPath)
     try {
+      await window.electronAPI?.generateManifest(packPath)
       const check = await window.electronAPI?.checkPackUpdate(packPath, packType)
       if (!check?.success) { setMessage({ type: 'error', text: check?.error || '检查失败' }); return }
       if (check.newFiles.length === 0) {
         setMessage({ type: 'success', text: `「${packName}」已是最新版本` })
         return
       }
-      if (!confirm(`发现 ${check.newFiles.length} 个新文件（共 ${check.totalRemote} 个远程文件），是否下载更新？`)) return
-      const dl = await window.electronAPI?.downloadPackFiles(packPath, packType, check.newFiles)
-      if (dl?.success) {
-        setMessage({ type: 'success', text: `「${packName}」更新完成，下载了 ${dl.downloaded} 个文件` })
-        await loadImagePacks()
+      if (!confirm(`发现 ${check.newFiles.length} 个新文件（远程共 ${check.totalRemote} 个），是否下载更新？`)) return
+      if (!guardDownload()) return
+      const r = await startDownload(packPath, packType, check.newFiles)
+      if (!r?.success) {
+        setMessage({ type: 'error', text: r?.error || '启动下载失败' })
       }
     } catch (e) {
-      setMessage({ type: 'error', text: e.message })
+      setMessage({ type: 'error', text: e.message || '检查失败' })
     } finally {
-      setLoading(false)
+      setCheckingPack(null)
     }
   }
 
@@ -212,25 +250,54 @@ function GeneralModule() {
   }
 
   async function handleDownloadFullPack(packType) {
+    if (!guardDownload()) return
     const labels = { medium: '标准包 (Medium)', lite: '轻量包 (Lite)' }
     const label = labels[packType] || packType
-    if (!confirm(`将下载完整的 ${label} 图片包到数据库文件夹。\n\n文件夹将命名为 images-${label.split(' ')[0]}，是否继续？`)) return
-    setLoading(true)
-    try {
-      // 通过 IPC 创建并下载
-      const r = await window.electronAPI?.downloadFullPack(packType.toLowerCase())
-      if (r?.success) {
-        setMessage({ type: 'success', text: `${label} 图包下载完成（${r.downloaded} 个文件）` })
-        await loadImagePacks()
-      } else {
-        setMessage({ type: 'error', text: r?.error || '下载失败' })
-      }
-    } catch (e) {
-      setMessage({ type: 'error', text: e.message })
-    } finally {
-      setLoading(false)
-    }
+    // Show Baidu Pan recommendation dialog
+    setBaiduDialog({ packType, label })
   }
+
+  function handleBaiduDialogChoice(choice) {
+    const info = baiduDialog
+    setBaiduDialog(null)
+    if (!info || choice === 'close') return
+
+    if (choice === 'baidu') {
+      window.electronAPI?.openExternal('https://pan.baidu.com/s/1GKzV86djc7iPly2DKvdGwg?pwd=0721')
+      return
+    }
+
+    // choice === 'continue' — start CDN download
+    if (!dbInfo.dbDir) { setMessage({ type: 'error', text: '数据库路径未设置' }); return }
+    const packPath = dbInfo.dbDir + '/images-' + (info.packType === 'medium' ? 'Medium' : 'Lite')
+    startDownload(packPath, info.packType.toLowerCase()).then(r => {
+      if (!r?.success) setMessage({ type: 'error', text: r?.error || '启动下载失败' })
+    }).catch(e => {
+      setMessage({ type: 'error', text: e.message || '下载异常' })
+    })
+  }
+
+  // Watch for download completion to refresh packs and show message
+  const lastDlStatusRef = useRef(null) // { id, type } — prevent duplicate messages
+  useEffect(() => {
+    if (!dlProgress) return
+    const statusKey = `${dlProgress.id}-${dlProgress.done ? 'done' : dlProgress.cancelled ? 'cancelled' : dlProgress.error ? 'error' : ''}`
+    if (!statusKey.endsWith('-')) {
+      if (lastDlStatusRef.current === statusKey) return // already shown
+      lastDlStatusRef.current = statusKey
+    }
+    if (dlProgress.done) {
+      loadImagePacks()
+      setMessage({ type: 'success', text: '图包下载完成' })
+      setTimeout(() => setMessage(null), 3000)
+    } else if (dlProgress.cancelled) {
+      setMessage({ type: 'error', text: '下载已取消' })
+      setTimeout(() => setMessage(null), 3000)
+    } else if (dlProgress.error) {
+      setMessage({ type: 'error', text: `下载失败: ${dlProgress.error}` })
+      setTimeout(() => setMessage(null), 5000)
+    }
+  }, [dlProgress?.done, dlProgress?.cancelled, dlProgress?.error, dlProgress?.id])
 
   return (
     <div className="space-y-6">
@@ -371,9 +438,9 @@ function GeneralModule() {
                     )}
                     {isOfficial && (
                       <button onClick={() => handleUpdatePack(pack.path, pack.officialType, pack.name)}
-                        disabled={loading} title="检查更新"
-                        className="p-1 rounded text-surface-500 hover:text-primary-400 transition-colors">
-                        <RefreshCw className="w-3.5 h-3.5" />
+                        disabled={loading || checkingPack === pack.path} title="检查更新"
+                        className="p-1 rounded text-surface-500 hover:text-primary-400 transition-colors disabled:opacity-50">
+                        <RefreshCw className={`w-3.5 h-3.5 ${checkingPack === pack.path ? 'animate-spin' : ''}`} />
                       </button>
                     )}
                     <button onClick={() => handleDeletePack(pack.path, pack.name)}
@@ -401,8 +468,58 @@ function GeneralModule() {
               下载轻量包 (Lite)
             </button>
           </div>
+          {/* 下载进度 */}
+          {dlProgress && (
+            <div className="p-3 rounded-lg bg-surface-800/60 border border-surface-700 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-surface-300">
+                  {dlProgress.mode === 'zip' ? (
+                    `下载中 ${formatSize(dlProgress.bytesDownloaded)} / ${formatSize(dlProgress.totalBytes)}`
+                  ) : (
+                    `下载中 ${dlProgress.completedFiles}/${dlProgress.totalFiles} 文件`
+                  )}
+                  {dlProgress.totalBytes > 0 && dlProgress.mode !== 'zip' && ` (${formatSize(dlProgress.bytesDownloaded)} / ${formatSize(dlProgress.totalBytes)})`}
+                  {dlProgress.currentFile && <span className="text-surface-500 ml-1">— {dlProgress.currentFile}</span>}
+                </span>
+                <span className="text-surface-500">{formatSize(dlProgress.speed)}/s</span>
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-surface-700 overflow-hidden">
+                <div className="h-full rounded-full bg-primary-500 transition-all" style={{ width: dlProgress.totalBytes > 0 ? `${Math.min(100, (dlProgress.bytesDownloaded / dlProgress.totalBytes * 100).toFixed(0))}%` : '0%' }} />
+              </div>
+              <button onClick={() => cancelDownload(dlProgress.id)}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors flex items-center gap-1">
+                <X className="w-3 h-3" />取消下载
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Baidu Pan recommendation dialog */}
+      {baiduDialog && (
+        <div className="fixed inset-0 bg-surface-950/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => handleBaiduDialogChoice('close')}>
+          <div className="bg-surface-800 border border-surface-600 rounded-xl p-6 max-w-sm mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-white mb-3">下载 {baiduDialog.label}</h3>
+            <p className="text-xs text-surface-400 mb-4 leading-relaxed">
+              推荐直接从网盘下载完整压缩包，速度更快且支持断点续传。
+            </p>
+            <div className="flex flex-col gap-2">
+              <button onClick={() => handleBaiduDialogChoice('baidu')}
+                className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-500 text-white transition-colors">
+                好的，打开网盘链接
+              </button>
+              <button onClick={() => handleBaiduDialogChoice('continue')}
+                className="w-full px-4 py-2 rounded-lg text-xs font-medium bg-surface-700/60 border border-surface-600 text-surface-300 hover:text-white hover:border-surface-500 transition-colors">
+                继续使用 CDN 下载
+              </button>
+              <button onClick={() => handleBaiduDialogChoice('close')}
+                className="w-full px-4 py-2 rounded-lg text-xs text-surface-500 hover:text-surface-400 transition-colors">
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Loading overlay */}
       {loading && (
