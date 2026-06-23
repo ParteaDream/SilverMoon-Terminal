@@ -3589,10 +3589,23 @@ ipcMain.handle('install-update', () => {
     // 打开 ShipIt 缓存目录，用户可手动将新 .app 拖入 /Applications
     const cachesDir = path.dirname(app.getPath('cache'));
     const shipItDir = path.join(cachesDir, 'com.silvermoon.terminal.ShipIt');
+    console.log('[update] shipIt dir:', shipItDir, 'exists:', fs.existsSync(shipItDir));
+    // Try to open the ShipIt root, or the latest update subfolder
+    let targetDir = shipItDir;
     if (fs.existsSync(shipItDir)) {
-      try { shell.openPath(shipItDir); } catch (_) {}
+      // Find the latest update.* subfolder
+      try {
+        const entries = fs.readdirSync(shipItDir).filter(e => e.startsWith('update.'));
+        if (entries.length > 0) {
+          entries.sort();
+          targetDir = path.join(shipItDir, entries[entries.length - 1]);
+          console.log('[update] found update subfolder:', targetDir);
+        }
+      } catch (_) {}
+      try { shell.openPath(targetDir); } catch (_) {}
     }
-    setImmediate(() => app.quit());
+    // Delay quit to let Finder open
+    setTimeout(() => app.quit(), 500);
   } else {
     // Windows: NSIS 安装器原生支持更新，直接调用 quitAndInstall
     autoUpdater.quitAndInstall();
