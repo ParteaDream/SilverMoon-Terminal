@@ -1477,6 +1477,7 @@ function VersionInfoModule() {
   const [appVersion, setAppVersion] = useState('1.0')
   const [dataVersion, setDataVersion] = useState('6.7.0')
   const [autoCheck, setAutoCheck] = useState(false)
+  const [checkResult, setCheckResult] = useState('')
 
   useEffect(() => {
     loadVersionInfo()
@@ -1557,6 +1558,31 @@ function VersionInfoModule() {
               GitHub Releases
             </button>
           </div>
+        </div>
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            onClick={async () => {
+              try {
+                setCheckResult('检查中...')
+                const r = await window.electronAPI?.checkForUpdate()
+                if (r?.success && r.version) {
+                  setCheckResult(`发现新版本 v${r.version}，请前往上方链接下载`)
+                } else if (r?.success) {
+                  setCheckResult('当前已是最新版本')
+                } else {
+                  setCheckResult(r?.error || '检查失败')
+                }
+              } catch (e) {
+                setCheckResult('检查失败: ' + e.message)
+              }
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs bg-surface-700 hover:bg-surface-600 text-surface-300 transition-colors"
+          >
+            检查更新
+          </button>
+          {checkResult && (
+            <span className="text-[10px] text-surface-400">{checkResult}</span>
+          )}
         </div>
         <label className="flex items-center gap-2 cursor-pointer pt-1">
           <span className="text-[10px] text-surface-400">启动时自动检查新版本提醒</span>

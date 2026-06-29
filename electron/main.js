@@ -896,9 +896,6 @@ app.whenReady().then(async () => {
 
   createWindow();
 
-  // 启动时自动检查更新（如果用户开启）
-  setTimeout(() => checkUpdateOnStartup(), 3000);
-
   // macOS 保留标准菜单，Windows 移除菜单栏
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -4533,12 +4530,15 @@ function clearCachedData() {
 
 function checkUpdateOnStartup() {
   const config = loadUserConfig();
-  // 默认开启：仅当用户明确关闭时才跳过
   if (config.autoCheckUpdate !== false) {
-    autoUpdater.checkForUpdates().catch(() => {
-      // 启动检查失败（网络问题/GitHub API限流），静默忽略
-      // 用户可在设置页手动重试
+    console.log('[startup] checking for updates...');
+    autoUpdater.checkForUpdates().then(info => {
+      console.log('[startup] check result:', info?.updateInfo?.version || 'no update');
+    }).catch(err => {
+      console.warn('[startup] update check failed (silent):', err?.message || 'unknown');
     });
+  } else {
+    console.log('[startup] auto-update check disabled by user');
   }
 }
 
