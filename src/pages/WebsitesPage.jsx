@@ -52,7 +52,8 @@ export default function WebsitesPage() {
 
   function openAdd() {
     setEditing(null)
-    setForm({ title_zh: '', url: '', description_zh: '', icon: null, image: null, sort_order: 0 })
+    const maxOrder = websites.reduce((max, w) => Math.max(max, w.sort_order || 0), 0)
+    setForm({ title_zh: '', url: '', description_zh: '', icon: null, image: null, sort_order: maxOrder + 1 })
     setModalOpen(true)
   }
 
@@ -143,6 +144,24 @@ export default function WebsitesPage() {
     loadData()
   }
 
+  async function handleReorder(fromId, toId, dataList) {
+    const list = dataList || websites
+    const fromIdx = list.findIndex(w => w.id === fromId)
+    const toIdx = list.findIndex(w => w.id === toId)
+    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return
+    const reordered = [...list]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    try {
+      for (let i = 0; i < reordered.length; i++) {
+        await query('UPDATE websites SET sort_order = ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?', [i, reordered[i].id])
+      }
+      loadData()
+    } catch (e) {
+      console.error('Failed to reorder:', e)
+    }
+  }
+
   const filtered = websites.filter(w => {
     if (!search) return true
     const s = search.toLowerCase()
@@ -229,6 +248,7 @@ export default function WebsitesPage() {
           onDelete={handleDelete}
           onAdd={openAdd}
           onRowClick={handleRowClick}
+          onRowReorder={handleReorder}
           selectable={multiSelect}
           selectedIds={selected}
           onToggleSelect={toggleSelect}
@@ -276,8 +296,13 @@ export default function WebsitesPage() {
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-fade-in">
-            {filtered.map(w => (
-              <GalleryCard key={w.id} website={w} />
+            {filtered.map((w, i) => (
+              <div key={w.id}
+                draggable
+                onDragStart={e => { e.dataTransfer.setData('text/plain', String(w.id)); e.dataTransfer.effectAllowed = 'move'; }}
+                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                onDrop={e => { e.preventDefault(); const fromId = parseInt(e.dataTransfer.getData('text/plain'), 10); handleReorder(fromId, w.id, filtered); }}
+              ><GalleryCard website={w} /></div>
             ))}
             {filtered.length === 0 && (
               <div className="col-span-full py-16 text-center text-surface-500 text-sm">暂无网站数据</div>
@@ -338,7 +363,6 @@ export default function WebsitesPage() {
         <ImagePicker label="图标" currentImage={form.icon} onSelect={v => setForm({ ...form, icon: v })} onRemove={() => setForm({ ...form, icon: null })} />
         <ImagePicker label="网站图片" currentImage={form.image} onSelect={v => setForm({ ...form, image: v })} onRemove={() => setForm({ ...form, image: null })} />
         <FormInput label="描述" value={form.description_zh || ''} onChange={v => setForm({ ...form, description_zh: v })} multiline />
-        <FormInput label="排序" value={form.sort_order ?? 0} onChange={v => setForm({ ...form, sort_order: Number(v) })} type="number" />
       </EditModal>
     </div>
   )

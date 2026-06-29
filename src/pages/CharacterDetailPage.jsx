@@ -594,10 +594,10 @@ function CharacterDetailContent() {
         style={character.namecard_art ? {} : { background: elemColor.bg === 'bg-surface-800' ? undefined : undefined }}
       >
         {character.namecard_art && <BannerBg filename={character.namecard_art} />}
-        <div className={`absolute inset-0 ${character.namecard_art ? 'bg-surface-950/60 backdrop-blur-[2px]' : elemColor.bg}`} />
+        <div className={`absolute inset-0 ${character.namecard_art ? 'bg-transparent' : elemColor.bg}`} />
         <button
           onClick={() => backToList('/characters')}
-          className="relative z-10 inline-flex items-center gap-1.5 text-xs text-surface-400 hover:text-white transition-colors mb-6"
+          className="relative z-10 self-start inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-[rgb(var(--color-1))] text-[rgb(var(--btn-text-1)_/_0.8)] hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:scale-105 transition-all mb-6"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           返回角色列表
@@ -623,7 +623,7 @@ function CharacterDetailContent() {
                 <span className={`text-5xl font-bold ${elemColor.text}`}>{character.name_zh[0]}</span>
               )}
             </div>
-            <div>
+            <div className="bg-surface-900/70 backdrop-blur-md rounded-xl p-4 border border-[rgb(var(--border-accent)_/_0.35)]">
               <div className="flex items-center gap-3 mb-1">
                 <h1 className="text-2xl font-bold tracking-tight">{character.name_zh}</h1>
                 <span className="text-accent-gold text-sm">{character.rarity === 5 ? '★★★★★' : '★★★★'}</span>
@@ -642,7 +642,7 @@ function CharacterDetailContent() {
           </div>
           <button
             onClick={() => setEditCharacter(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-white/80 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-[rgb(var(--color-1))] text-[rgb(var(--btn-text-1)_/_0.8)] hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:scale-105 transition-all"
           >
             <Edit3 className="w-3.5 h-3.5" />
             编辑资料
@@ -1817,7 +1817,7 @@ function BannerBg({ filename }) {
     return () => { cancelled = true }
   }, [filename, readImage])
   if (!src) return null
-  return <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" draggable onDragStart={handleDrag} />
+  return <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover" draggable onDragStart={handleDrag} />
 }
 
 function SplashImage({ filename, className = '' }) {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useDb } from './context/DbContext'
 import { useNav } from './context/NavContext'
 import { ChevronLeft, ChevronRight, ArrowUp, Minus, Square, X } from 'lucide-react'
@@ -27,6 +27,7 @@ const TITLEBAR_HEIGHT = 38
 export default function App() {
   const { dbReady, needsSetup, devMode } = useDb()
   const { canGoBack, canGoForward, goBack, goForward } = useNav()
+  const location = useLocation()
   const [showBackToTop, setShowBackToTop] = useState(false)
 
   // 禁用浏览器默认的滚动恢复，使用自定义恢复逻辑
@@ -63,6 +64,7 @@ export default function App() {
     <div className="h-full flex overflow-hidden">
       <Sidebar />
       <main className={`flex-1 overflow-y-auto overflow-x-hidden relative ${devMode ? 'pb-10' : ''}`} onScroll={handleScroll}>
+        <div key={location.key} className="animate-slide-up">
         <Routes>
           <Route path="/" element={<Navigate to="/characters" replace />} />
           <Route path="/characters" element={<CharactersPage />} />
@@ -79,6 +81,7 @@ export default function App() {
           <Route path="/websites" element={<WebsitesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
+        </div>
 
         {/* 返回顶部浮动按钮 */}
         {showBackToTop && (

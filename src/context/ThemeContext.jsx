@@ -5,25 +5,25 @@ export const THEMES = {
   slate: {
     id: 'slate',
     label: '原初色彩',
-    desc: '暖灰基调 + 靛蓝点缀',
+    desc: '鸽子衔枝之年……',
     colors: ['#EDEBE9', '#D8D1C9', '#3A529D', '#49474A', '#34353F'],
   },
   trailblaze: {
     id: 'trailblaze',
     label: '开拓金',
-    desc: '沉稳黑金 · 星穹铁道开拓者',
+    desc: '稳重黑金，深沉格调',
     colors: ['#E4CBB0', '#B6AEB1', '#B0965C', '#2C2B34', '#80CBB5'],
   },
   lidu: {
     id: 'lidu',
     label: '丽都橙',
-    desc: '硬核嘻哈 · 绝区零风格',
+    desc: '嗯呐嗯呐，嗯呐哒！',
     colors: ['#E28234', '#242424', '#2E2F31', '#E9E34C', '#1C1C1C'],
   },
   raiden: {
     id: 'raiden',
     label: '奥赫马风尚',
-    desc: '雷电将军 · 紫金配色',
+    desc: '爱！上！雷！神！',
     colors: ['#C1C4DE', '#7690AD', '#6D349E', '#D1B347', '#1a1428'],
   },
   classic: {
@@ -54,7 +54,7 @@ export const THEMES = {
     id: 'custom',
     label: '自定义',
     desc: '自由搭配专属配色',
-    colors: ['#6366f1', '#1e293b', '#0f172a', '#64748b'],
+    colors: ['#6366f1', '#e4e0db', '#49474a', '#c4bab0', '#23242c'],
   },
 }
 
@@ -62,38 +62,42 @@ const DEFAULT_THEME = 'slate'
 const THEME_STORAGE_KEY = 'theme'
 const CUSTOM_COLORS_KEY = 'custom_theme_colors'
 
-// Default custom colors (fallback)
+// Default custom colors (fallback) — 5 general colors + icon
 const DEFAULT_CUSTOM_COLORS = {
-  surface950: '35 36 44',
-  surface800: '73 71 74',
-  surface700: '90 85 80',
-  surface500: '162 155 147',
-  surface400: '195 188 181',
-  primary500: '72 100 175',
+  c1: '72 100 175',   // 主色 (primary accent)
+  c2: '232 228 223',  // 浅色表面 (light surface)
+  c3: '73 71 74',     // 卡片底色 (card / input bg)
+  c4: '195 188 181',  // 正文色 (body text)
+  c5: '35 36 44',     // 最深底色 (deepest bg)
   iconFrom: '72 100 175',
   iconTo: '140 160 228',
 }
 
-// Interpolate full palette from key colors
+// Build full palette from custom 5-color scheme
 function buildCustomPalette(c) {
+  const c1 = c.c1 || '99 102 241'    // primary accent
+  const c2 = c.c2 || c.surface200 || '232 228 223'  // light surface
+  const c3 = c.c3 || c.surface800 || '73 71 74'     // card bg
+  const c4 = c.c4 || c.surface400 || '195 188 181'  // text
+  const c5 = c.c5 || c.surface950 || '35 36 44'      // deep bg
   return {
-    '--surface-950': c.surface950,
-    '--surface-900': c.surface900 || c.surface950,
-    '--surface-850': c.surface850 || c.surface950,
-    '--surface-800': c.surface800,
-    '--surface-700': c.surface700,
-    '--surface-600': c.surface600 || c.surface700,
-    '--surface-500': c.surface500,
-    '--surface-400': c.surface400,
-    '--surface-300': c.surface300 || c.surface400,
-    '--surface-200': c.surface200 || c.surface400,
-    '--surface-100': c.surface100 || c.surface400,
-    '--surface-50': c.surface50 || c.surface400,
-    '--primary-500': c.primary500,
-    '--primary-400': c.primary400 || c.primary500,
-    '--primary-600': c.primary600 || c.primary500,
-    '--primary-300': c.primary300 || c.primary500,
-    '--primary-700': c.primary700 || c.primary500,
+    '--surface-950': c5,
+    '--surface-900': c5,
+    '--surface-850': c5,
+    '--surface-800': c3,
+    '--surface-700': c3,
+    '--surface-600': c3,
+    '--surface-500': c4,
+    '--surface-400': c4,
+    '--surface-300': c2,
+    '--surface-200': c2,
+    '--surface-100': c2,
+    '--surface-50': c2,
+    '--primary-500': c1,
+    '--primary-400': c1,
+    '--primary-600': c1,
+    '--primary-300': c1,
+    '--primary-700': c1,
   }
 }
 
@@ -126,7 +130,7 @@ export function ThemeProvider({ children }) {
   useEffect(() => {
     const root = document.documentElement
     if (theme === 'custom') {
-      root.style.setProperty('--app-icon-from', customColors.iconFrom || customColors.primary500 || '99 102 241')
+      root.style.setProperty('--app-icon-from', customColors.iconFrom || customColors.c1 || customColors.primary500 || '99 102 241')
       root.style.setProperty('--app-icon-to', customColors.iconTo || customColors.primary300 || '165 180 252')
     } else {
       // Preset themes: CSS [data-theme] blocks define these, clear inline
@@ -144,7 +148,7 @@ export function ThemeProvider({ children }) {
         '--surface-950','--surface-900','--surface-850','--surface-800','--surface-700','--surface-600',
         '--surface-500','--surface-400','--surface-300','--surface-200','--surface-100','--surface-50',
         '--primary-500','--primary-400','--primary-600','--primary-300','--primary-700',
-        '--app-icon-from','--app-icon-to',
+        '--app-icon-from','--app-icon-to','--scrollbar-thumb','--devtool-bg','--border-accent','--btn-text','--btn-text-4th','--color-1','--btn-text-1',
       ]
       for (const key of keys) root.style.removeProperty(key)
       return

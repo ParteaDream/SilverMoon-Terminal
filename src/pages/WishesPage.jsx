@@ -340,7 +340,7 @@ export default function WishesPage() {
             <button
               onClick={() => setShowImages(true)}
               className={`px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1
-                ${showImages ? 'bg-surface-700 text-white shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
+                ${showImages ? '!bg-[rgb(var(--color-1))] !text-[rgb(var(--btn-text-1))] shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
               title="显示卡池图"
             >
               <Image className="w-3.5 h-3.5" />卡池图
@@ -348,7 +348,7 @@ export default function WishesPage() {
             <button
               onClick={() => setShowImages(false)}
               className={`px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1
-                ${!showImages ? 'bg-surface-700 text-white shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
+                ${!showImages ? '!bg-[rgb(var(--color-1))] !text-[rgb(var(--btn-text-1))] shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
               title="显示角色/武器详情"
             >
               <List className="w-3.5 h-3.5" />详情
@@ -359,7 +359,7 @@ export default function WishesPage() {
             <button
               onClick={() => setCompactMode(false)}
               className={`px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1
-                ${!compactMode ? 'bg-surface-700 text-white shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
+                ${!compactMode ? '!bg-[rgb(var(--color-1))] !text-[rgb(var(--btn-text-1))] shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
               title="默认排列"
             >
               <List className="w-3.5 h-3.5" />默认
@@ -367,7 +367,7 @@ export default function WishesPage() {
             <button
               onClick={() => setCompactMode(true)}
               className={`px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1
-                ${compactMode ? 'bg-surface-700 text-white shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
+                ${compactMode ? '!bg-[rgb(var(--color-1))] !text-[rgb(var(--btn-text-1))] shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
               title="紧凑排列"
             >
               <Columns className="w-3.5 h-3.5" />紧凑
@@ -407,7 +407,7 @@ export default function WishesPage() {
             key={key}
             onClick={() => setBannerType(key)}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors
-              ${bannerType === key ? 'bg-surface-700 text-white shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
+              ${bannerType === key ? '!bg-[rgb(var(--color-1))] !text-[rgb(var(--btn-text-1))] shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
           >
             {label}
           </button>
@@ -415,7 +415,7 @@ export default function WishesPage() {
       </div>
 
       {/* Gallery */}
-      <div className={compactMode ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3' : 'space-y-4'}>
+      <div key={bannerType} className={compactMode ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 animate-fade-in' : 'space-y-4 animate-fade-in'}>
         {filtered.map(wish => {
           const wishBanners = getBannersForWish(wish.id)
           const today = new Date().toISOString().slice(0, 10)
@@ -924,7 +924,7 @@ function ItemThumb({ item, charMap, weaponMap, small, compact }) {
           </div>
         )}
       </div>
-      <span className={`${textSize} text-center truncate group-hover:text-white transition-colors ${item.rarity === 5 ? 'text-accent-gold' : 'text-purple-400'}`}>
+      <span className={`${textSize} text-center truncate group-hover:text-[rgb(var(--btn-text-4th))] transition-colors ${item.rarity === 5 ? 'text-accent-gold' : 'text-purple-400'}`}>
         {entity?.name_zh || `ID:${item.item_id}`}
       </span>
     </button>

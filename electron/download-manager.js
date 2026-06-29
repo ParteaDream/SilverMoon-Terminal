@@ -415,6 +415,7 @@ function generateManifestForDir(dirPath) {
     for (const e of entries) {
       if (e.isSymbolicLink()) continue;
       if (e.name.startsWith('.')) continue;
+      if (e.name.toLowerCase() === 'thumbs.db' || e.name.toLowerCase() === 'desktop.ini') continue;
       const fp = path.join(dir, e.name);
       const rel = base ? base + '/' + e.name : e.name;
       if (e.isDirectory()) { walk(fp, rel); }

@@ -121,6 +121,7 @@ function buildImagePathCache(imagesDir) {
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isSymbolicLink()) continue;
+        if (entry.name.toLowerCase() === 'thumbs.db' || entry.name.toLowerCase() === 'desktop.ini') continue;
         if (entry.isDirectory()) {
           walk(fullPath);
         } else if (entry.isFile()) {

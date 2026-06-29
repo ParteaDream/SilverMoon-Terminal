@@ -985,12 +985,11 @@ function AppearanceModule() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { key: 'primary500', label: '主色调', desc: '按钮、链接等' },
-              { key: 'surface950', label: '页面背景', desc: '最深底色' },
-              { key: 'surface800', label: '卡片/输入框', desc: '内容容器背景' },
-              { key: 'surface700', label: '激活态', desc: '选中按钮/切换' },
-              { key: 'surface500', label: '占位文字', desc: '提示/禁用文字' },
-              { key: 'surface400', label: '正文', desc: '默认文字颜色' },
+              { key: 'c1', label: '主色', desc: '按钮、链接等强调色' },
+              { key: 'c2', label: '浅色表面', desc: '浅色元素背景' },
+              { key: 'c3', label: '卡片底色', desc: '内容容器背景' },
+              { key: 'c4', label: '正文色', desc: '默认文字颜色' },
+              { key: 'c5', label: '最深底色', desc: '页面最深背景' },
               { key: 'iconFrom', label: '图标起始色', desc: 'App 图标渐变起始' },
               { key: 'iconTo', label: '图标结束色', desc: 'App 图标渐变结束' },
             ].map(field => {
@@ -1378,6 +1377,11 @@ function VersionInfoModule() {
             <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${autoCheck ? 'left-4' : 'left-0.5'}`} />
           </button>
         </label>
+        <div className="mt-4 p-3 rounded-lg bg-primary-500/10 border border-primary-500/20">
+          <p className="text-xs text-primary-300">
+            💡 更新软件版本后，建议在高级设置中重新初始化数据库并检查图包更新，与最新数据保持同步
+          </p>
+        </div>
       </div>
     </div>
   )

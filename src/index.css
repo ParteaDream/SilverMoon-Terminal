@@ -64,6 +64,13 @@
   --primary-800: 55 48 163;    --primary-900: 49 46 129;
   --primary-950: 30 27 75;
   --app-icon-from: 99 102 241;   --app-icon-to: 165 180 252;
+  --devtool-bg: 2 6 23;
+  --scrollbar-thumb: 15 23 42;
+  --border-accent: 30 41 59;
+  --btn-text: 255 255 255;
+  --btn-text-4th: 255 255 255;
+  --color-1: 99 102 241;
+  --btn-text-1: 255 255 255;
 }
 /* App icon 背景渐变（使用主题 CSS 变量，支持定制） */
 .app-icon-bg {
@@ -84,6 +91,13 @@
   --primary-800: 34 48 100;    --primary-900: 24 32 70;
   --primary-950: 14 18 45;
   --app-icon-from: 216 209 201;   --app-icon-to: 58 82 157;
+  --devtool-bg: 52 53 63;
+  --scrollbar-thumb: 73 71 74;
+  --border-accent: 58 82 157;
+  --btn-text: 255 255 255;
+  --btn-text-4th: 255 255 255;
+  --color-1: 237 233 233;
+  --btn-text-1: 0 0 0;
 }
 /* ── 开拓金 ── 沉稳黑金主题 */
 [data-theme="trailblaze"] {
@@ -100,6 +114,13 @@
   --primary-800: 82 68 42;     --primary-900: 58 48 32;
   --primary-950: 38 32 24;
   --app-icon-from: 228 203 176;   --app-icon-to: 44 43 52;
+  --devtool-bg: 128 203 181;
+  --scrollbar-thumb: 44 43 52;
+  --border-accent: 176 150 92;
+  --btn-text: 0 0 0;
+  --btn-text-4th: 255 255 255;
+  --color-1: 228 203 176;
+  --btn-text-1: 0 0 0;
 }
 /* ── 丽都橙 ── 硬核嘻哈风格 橙#E28234 黑#242424 边框#2E2F31 黄#E9E34C ── */
 [data-theme="lidu"] {
@@ -116,6 +137,13 @@
   --primary-800: 90 48 22;     --primary-900: 65 32 14;
   --primary-950: 45 20 8;
   --app-icon-from: 226 130 52;   --app-icon-to: 28 28 28;
+  --devtool-bg: 28 28 28;
+  --scrollbar-thumb: 233 227 76;
+  --border-accent: 46 47 49;
+  --btn-text: 255 255 255;
+  --btn-text-4th: 0 0 0;
+  --color-1: 226 130 52;
+  --btn-text-1: 0 0 0;
 }
 /* ── 奥赫马风尚 ── 紫金配色 紫#6D349E 金#D1B347 灰白#C1C4DE 淡蓝#7690AD ── */
 [data-theme="raiden"] {
@@ -132,6 +160,13 @@
   --primary-800: 95 78 32;     --primary-900: 65 55 22;
   --primary-950: 40 35 14;
   --app-icon-from: 209 179 71;   --app-icon-to: 109 52 158;
+  --devtool-bg: 26 20 40;
+  --scrollbar-thumb: 209 179 71;
+  --border-accent: 109 52 158;
+  --btn-text: 255 255 255;
+  --btn-text-4th: 0 0 0;
+  --color-1: 193 196 222;
+  --btn-text-1: 0 0 0;
 }
 /* ── 原初暗色 ── 靛蓝石板暗色主题 ── */
 [data-theme="classic"] {
@@ -148,6 +183,13 @@
   --primary-800: 55 48 163;    --primary-900: 49 46 129;
   --primary-950: 30 27 75;
   --app-icon-from: 99 102 241;   --app-icon-to: 2 6 23;
+  --devtool-bg: 2 6 23;
+  --scrollbar-thumb: 15 23 42;
+  --border-accent: 30 41 59;
+  --btn-text: 255 255 255;
+  --btn-text-4th: 255 255 255;
+  --color-1: 99 102 241;
+  --btn-text-1: 255 255 255;
 }
 /* ── 翡翠绿 ── 中性灰表面 + 绿点缀 ── */
 [data-theme="emerald"] {
@@ -164,6 +206,13 @@
   --primary-800: 14 78 38;     --primary-900: 10 52 25;
   --primary-950: 5 28 12;
   --app-icon-from: 38 165 85;   --app-icon-to: 12 20 12;
+  --devtool-bg: 12 20 12;
+  --scrollbar-thumb: 20 30 20;
+  --border-accent: 26 38 24;
+  --btn-text: 255 255 255;
+  --btn-text-4th: 255 255 255;
+  --color-1: 38 165 90;
+  --btn-text-1: 255 255 255;
 }
 /* ── 日落暖橙 ── 中性灰表面 + 暖橙点缀 ── */
 [data-theme="sunset"] {
@@ -180,6 +229,13 @@
   --primary-800: 102 42 15;    --primary-900: 70 28 10;
   --primary-950: 40 15 5;
   --app-icon-from: 210 104 40;   --app-icon-to: 15 11 9;
+  --devtool-bg: 15 11 9;
+  --scrollbar-thumb: 24 18 14;
+  --border-accent: 31 24 18;
+  --btn-text: 255 255 255;
+  --btn-text-4th: 255 255 255;
+  --color-1: 210 104 40;
+  --btn-text-1: 0 0 0;
 }
 /* ── 紫晶 ── 中性灰表面 + 紫点缀 ── */
 [data-theme="amethyst"] {
@@ -196,6 +252,13 @@
   --primary-800: 66 18 102;    --primary-900: 44 10 72;
   --primary-950: 24 5 42;
   --app-icon-from: 145 64 208;   --app-icon-to: 13 9 17;
+  --devtool-bg: 13 9 17;
+  --scrollbar-thumb: 21 14 28;
+  --border-accent: 28 20 38;
+  --btn-text: 255 255 255;
+  --btn-text-4th: 255 255 255;
+  --color-1: 145 64 208;
+  --btn-text-1: 255 255 255;
 }
 /* ── 自定义 ── 变量由 JS 动态写入 */
 [data-theme="custom"] { /* see ThemeContext */ }
@@ -230,7 +293,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-surface-light);
+  background: rgb(var(--scrollbar-thumb));
   border-radius: 3px;
 }
 
@@ -243,6 +306,26 @@ body {
   background: rgba(99, 102, 241, 0.3);
   color: #fff;
 }
+
+/* 交互组件文字不可选中，内容文字仍可选 */
+button, a, [role="button"], [role="tab"], select, option,
+input[type="checkbox"], input[type="radio"], input[type="submit"], input[type="button"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 按钮悬停高亮 — 使用主题第四色 (低透明度，不覆盖已有 hover 样式) */
+button:hover:not(:disabled) {
+  background-color: rgb(var(--scrollbar-thumb));
+  color: rgb(var(--btn-text-4th));
+  border-radius: 6px;
+}
+
+/* 游戏数据分类 tag 主题色（使用 data-category 属性匹配） */
+.category-tag { background: rgb(var(--surface-700)); color: rgb(var(--surface-300)); }
+.category-tag[data-category="damage_formula"] { background: rgb(var(--color-1)) !important; color: rgb(var(--btn-text-1)) !important; }
+.category-tag[data-category="reaction"]       { background: rgb(var(--scrollbar-thumb)) !important; color: rgb(var(--btn-text-4th)) !important; }
+.category-tag[data-category="stat"]           { background: rgb(var(--border-accent)) !important; color: rgb(var(--btn-text)) !important; }
 
 /* Focus styles */
 *:focus-visible {
@@ -284,6 +367,11 @@ body {
 .animate-slide-up { animation: slideUp 0.3s ease-out; }
 .animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
 .animate-scale-in { animation: scaleIn 0.2s ease-out; }
+
+/* 图片淡入：针对通过 readImage 动态加载的 base64 图片 */
+img[src^="data:image/"] {
+  animation: fadeIn 0.3s ease-out;
+}
 
 @keyframes rainbowBorder {
   0%   { border-color: #ef4444; }

@@ -236,7 +236,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
   filterableCols: extFilterableCols, filterOptions: extFilterOptions,
   processed: extProcessed, activeFilterCount: extActiveFilterCount,
   selectable, selectedIds, onToggleSelect, onToggleSelectAll, onBulkDelete,
-  onRowClick,
+  onRowClick, onRowReorder,
 }) {
   // Use external state if provided (for sync with gallery view), else internal
   const internal = useSortFilter(data, columns)
@@ -359,8 +359,12 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
             <tbody>
               {processed.map((row, i) => (
                 <tr key={row.id || i}
-                  className={`border-b border-surface-800/50 last:border-b-0 hover:bg-surface-800/30 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+                  className={`border-b border-surface-800/50 last:border-b-0 hover:bg-surface-800/30 transition-colors ${onRowClick ? 'cursor-pointer' : ''} ${onRowReorder ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  draggable={!!onRowReorder}
+                  onDragStart={onRowReorder ? (e) => { e.dataTransfer.setData('text/plain', String(row.id)); e.dataTransfer.effectAllowed = 'move'; } : undefined}
+                  onDragOver={onRowReorder ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
+                  onDrop={onRowReorder ? (e) => { e.preventDefault(); const fromId = parseInt(e.dataTransfer.getData('text/plain'), 10); if (fromId !== row.id) onRowReorder(fromId, row.id); } : undefined}
                 >
                   {selectable && (
                     <td className="text-center px-3 py-3 w-10" onClick={e => e.stopPropagation()}>

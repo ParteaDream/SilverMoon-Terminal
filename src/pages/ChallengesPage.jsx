@@ -146,16 +146,22 @@ export default function ChallengesPage() {
     } catch (_) {}
     setElemMap(em)
 
-    // Load element icon image data
+    // Load element icon image data (parallel)
     const icons = {}
+    const iconNames = new Set()
     for (const e of Object.values(em)) {
-      if (e.icon && !icons[e.icon]) icons[e.icon] = null
+      if (e.icon) iconNames.add(e.icon)
     }
-    for (const iconName of Object.keys(icons)) {
-      try {
-        const res = await readImage(iconName)
-        if (res) icons[iconName] = res
-      } catch (_) {}
+    const iconResults = await Promise.all(
+      [...iconNames].map(async (iconName) => {
+        try {
+          const res = await readImage(iconName)
+          return { iconName, data: res || null }
+        } catch (_) { return { iconName, data: null } }
+      })
+    )
+    for (const { iconName, data } of iconResults) {
+      icons[iconName] = data
     }
     setElemIcons(icons)
   }
@@ -530,7 +536,7 @@ export default function ChallengesPage() {
             key={key}
             onClick={() => { setActiveType(key); setSelectMode(false); setSelected(new Set()) }}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors
-              ${activeType === key ? 'bg-surface-700 text-white shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
+              ${activeType === key ? '!bg-[rgb(var(--color-1))] !text-[rgb(var(--btn-text-1))] shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}
           >
             {label}
           </button>
@@ -538,7 +544,7 @@ export default function ChallengesPage() {
       </div>
 
       {/* 卡片列表 */}
-      <div className="space-y-4">
+      <div key={activeType} className="space-y-4 animate-fade-in">
         {filtered.map(challenge => {
           const today = new Date().toISOString().slice(0, 10)
           const started = !challenge.start_date || challenge.start_date <= today
@@ -806,7 +812,7 @@ function PerilousTrailContent({ childData, elemMap, elemIcons, readImage, onLigh
             {isCollapsed ? (
               <button
                 onClick={() => toggle(diff)}
-                className="flex items-center gap-2 text-xs font-medium text-surface-300 hover:text-white transition-colors w-full text-left group"
+                className="flex items-center gap-2 text-xs font-medium text-surface-300 hover:text-white transition-colors w-full text-left group py-2.5"
               >
                 <span className="transition-transform">▶</span>
                 <span className="flex-shrink-0">{DIFFICULTY_LABELS[diff]}</span>
@@ -885,7 +891,7 @@ function PerilousBossCard({ boss, elemMap, elemIcons, readImage, onLightbox, exp
           onClick={() => onLightbox?.({ filename: boss.boss_image, label: boss.boss_name })}
           className={`${imgClass} bg-[#030616] hover:ring-1 ring-primary-500/50 block`}
         >
-          <img src={imgSrc} alt="" className={`w-full h-full ${expanded ? 'object-cover' : 'object-contain'}`} />
+          <img src={imgSrc} alt="" className={`w-full h-full ${expanded ? 'object-cover' : 'object-contain'} hover:scale-110 transition-transform`} />
         </button>
       ) : (
         <div className={`${imgClass} bg-[#030616] flex items-center justify-center text-surface-500 text-xs`}>暂无图片</div>
@@ -992,7 +998,7 @@ function CharThumb({ char, readImage, size = 'xs' }) {
       <div className={`${sizeClass} rounded overflow-hidden bg-surface-700 flex-shrink-0 border border-surface-600 group-hover:border-primary-500/50 transition-colors`}>
         {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Search className="w-3 h-3 text-surface-500" /></div>}
       </div>
-      <span className="text-[10px] text-surface-300 group-hover:text-white transition-colors text-center max-w-[60px] truncate">{char.name_zh}</span>
+      <span className="text-[10px] text-surface-300 group-hover:text-[rgb(var(--btn-text-4th))] transition-colors text-center max-w-[60px] truncate">{char.name_zh}</span>
     </button>
   )
 }

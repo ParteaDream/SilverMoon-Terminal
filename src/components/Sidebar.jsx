@@ -117,6 +117,8 @@ export default function Sidebar() {
             key={item.to}
             to={item.to}
             title={collapsed ? item.label : undefined}
+            draggable={false}
+            onDragStart={e => e.preventDefault()}
             className={({ isActive }) =>
               `flex items-center rounded-lg text-sm font-medium
                transition-all duration-200 no-drag
@@ -125,8 +127,8 @@ export default function Sidebar() {
                  : 'gap-3 px-3 py-2.5'
                }
                ${isActive
-                 ? 'bg-primary-500/10 text-primary-400 shadow-sm'
-                 : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
+                 ? 'bg-primary-500/10 text-primary-400 shadow-sm hover:bg-primary-500/10 hover:text-primary-400'
+                 : 'text-surface-400 hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:ring-2 hover:ring-[rgb(var(--color-1))] hover:shadow-lg'
                }`
             }
           >
