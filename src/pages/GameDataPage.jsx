@@ -9,6 +9,7 @@ import TableEditor from '../components/TableEditor'
 import ColoredText from '../components/ColoredText'
 import { X, ImagePlus } from 'lucide-react'
 import { stripFormatting } from '../utils/colorMarkup'
+import { useTypeColor } from '../hooks/useTypeColor'
 
 const CATEGORIES = {
   damage_formula: '计算公式',
@@ -16,11 +17,14 @@ const CATEGORIES = {
   stat: '游戏机制',
 }
 
-// 分类标签主题色彩
-const CATEGORY_STYLES = {
-  damage_formula: { bg: '--color-1', text: '--btn-text-1' },
-  reaction:       { bg: '--scrollbar-thumb', text: '--btn-text-4th' },
-  stat:           { bg: '--border-accent', text: '--btn-text' },
+// ── 分类标签组件（自动根据名称从主题色派生颜色）──
+function CategoryTag({ category }) {
+  const { bg, text } = useTypeColor(category || '')
+  return (
+    <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: `rgb(${bg})`, color: `rgb(${text})` }}>
+      {CATEGORIES[category] || category}
+    </span>
+  )
 }
 
 // ── 多图选择器 ──
@@ -374,11 +378,7 @@ export default function GameDataPage() {
           columns={[
             {
               key: 'category', label: '分类', width: '110px',
-              render: row => (
-                <span className="text-xs px-2 py-0.5 rounded-full category-tag" data-category={row.category || ''}>
-                  {CATEGORIES[row.category] || row.category}
-                </span>
-              ),
+              render: row => <CategoryTag category={row.category} />,
             },
             {
               key: 'title_zh', label: '标题',
@@ -434,9 +434,7 @@ export default function GameDataPage() {
           {/* 关闭按钮 */}
           <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 bg-surface-900/95 backdrop-blur-sm border-b border-surface-700 rounded-t-xl">
             <div className="flex items-center gap-2">
-              <span className="text-xs px-2 py-0.5 rounded-full category-tag" data-category={activeDetail.category || ''}>
-                {CATEGORIES[activeDetail.category] || activeDetail.category}
-              </span>
+              <CategoryTag category={activeDetail.category} />
               <h3 className="text-base font-semibold text-white">{activeDetail.title_zh}</h3>
             </div>
             <div className="flex items-center gap-2">

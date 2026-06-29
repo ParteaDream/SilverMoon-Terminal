@@ -42,6 +42,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   repairWebsites: () => ipcRenderer.invoke('db-repair-websites'),
   getUserConfig: () => ipcRenderer.invoke('get-user-config'),
   setUserConfig: (key, value) => ipcRenderer.invoke('set-user-config', key, value),
+  setDevMode: (enabled) => ipcRenderer.invoke('set-dev-mode', enabled),
+  getDevMode: () => ipcRenderer.invoke('get-dev-mode'),
+  setDualDbMode: (enabled) => ipcRenderer.invoke('set-dual-db-mode', enabled),
+  getDualDbMode: () => ipcRenderer.invoke('get-dual-db-mode'),
   loadPageStates: () => ipcRenderer.invoke('load-page-states'),
   savePageStates: (states) => ipcRenderer.invoke('save-page-states', states),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
@@ -60,6 +64,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelDownload: (downloadId) => ipcRenderer.invoke('cancel-download', downloadId),
   resumeDownload: (packPath) => ipcRenderer.invoke('resume-download', packPath),
   getPersistedDownload: (packPath) => ipcRenderer.invoke('get-persisted-download', packPath),
+  deleteExtraFiles: (packPath, filePaths) => ipcRenderer.invoke('delete-extra-files', packPath, filePaths),
 
   // Download progress push from main process (survives page navigation)
   onDownloadProgress: (callback) => {
@@ -87,6 +92,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setUpdateAutoCheck: (enabled) => ipcRenderer.invoke('set-update-auto-check', enabled),
   clearUpdateCache: () => ipcRenderer.invoke('clear-update-cache'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  setAppIcon: (filename, pngData) => ipcRenderer.invoke('set-app-icon', { filename, pngData }),
+  undoAppIcon: () => ipcRenderer.invoke('undo-app-icon'),
+  clearAppCache: () => ipcRenderer.invoke('clear-app-cache'),
+  getCacheSize: () => ipcRenderer.invoke('get-cache-size'),
   onUpdateStatus: (callback) => {
     ipcRenderer.on('update-status', (_e, status) => callback(status));
     return () => ipcRenderer.removeAllListeners('update-status');

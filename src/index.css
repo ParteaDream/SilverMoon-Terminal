@@ -321,11 +321,8 @@ button:hover:not(:disabled) {
   border-radius: 6px;
 }
 
-/* 游戏数据分类 tag 主题色（使用 data-category 属性匹配） */
+/* 游戏数据分类 tag — 已弃用(data-category)，改用 useTypeColor hook 内联样式 */
 .category-tag { background: rgb(var(--surface-700)); color: rgb(var(--surface-300)); }
-.category-tag[data-category="damage_formula"] { background: rgb(var(--color-1)) !important; color: rgb(var(--btn-text-1)) !important; }
-.category-tag[data-category="reaction"]       { background: rgb(var(--scrollbar-thumb)) !important; color: rgb(var(--btn-text-4th)) !important; }
-.category-tag[data-category="stat"]           { background: rgb(var(--border-accent)) !important; color: rgb(var(--btn-text)) !important; }
 
 /* Focus styles */
 *:focus-visible {

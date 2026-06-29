@@ -14,7 +14,7 @@ const navItems = [
   { to: '/wishes', icon: Gift, label: '祈愿' },
   { to: '/challenges', icon: SwordsIcon, label: '挑战' },
   { to: '/data', icon: Database, label: '数据' },
-  { to: '/websites', icon: Globe, label: '网站' },
+  { to: '/websites', icon: Globe, label: '站点' },
   { to: '/settings', icon: Settings, label: '设置' },
 ]
 

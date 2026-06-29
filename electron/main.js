@@ -18,6 +18,9 @@ async function ensureSql() {
 
 let mainWindow;
 let db = null;
+let userDb = null;          // 用户数据库（非开发者模式下的修改保存于此）
+let devMode = false;        // 开发者模式状态（后端同步）
+let dualDbMode = true;      // 双数据库模式（默认开启，关闭后只读/写基准库）
 let dbDir = null;
 
 const isDev = !app.isPackaged;
@@ -61,7 +64,6 @@ function readSeedVersion() {
 
 // ── 路径工具 ──
 function getDbPath(dir) { return path.join(dir, 'silvermoon_terminal.db'); }
-
 // ── 图片包识别 ──
 // 优先级: "images-版本号-类型" > "images" > 最大文件夹
 // 类型优先级: Extreme > Medium > Lite
@@ -76,7 +78,12 @@ function findImagePacks(dir) {
   if (!fs.existsSync(dir)) return [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   return entries
-    .filter(e => e.isDirectory() && e.name.toLowerCase().includes('images'))
+    .filter(e => {
+      if (!e.isDirectory()) return false;
+      const name = e.name.toLowerCase();
+      if (name === 'user_images' || name === '.thumb') return false;
+      return name.includes('images');
+    })
     .map(e => ({
       name: e.name,
       path: path.join(dir, e.name),
@@ -314,6 +321,8 @@ function openDb(dir) {
   }
   db.exec('PRAGMA foreign_keys = OFF');
   migrateSchema();  // 增量迁移：为已有数据库补全新列
+  // 尝试打开 user.db（可能不存在）
+  openUserDb(dir);
   return dbPath;
 }
 
@@ -325,11 +334,388 @@ function closeDatabase() {
   }
   db.close();
   db = null;
+  // 同时关闭 user.db
+  closeUserDb();
 }
 
 function dbSave() {
   if (db && dbDir) {
     fs.writeFileSync(getDbPath(dbDir), Buffer.from(db.export()));
+  }
+}
+
+// ── User DB (非开发者模式下数据修改保存于此) ──
+function getUserDbPath(dir) { return path.join(dir, 'user.db'); }
+
+function openUserDb(dir) {
+  const dbPath = getUserDbPath(dir);
+  if (fs.existsSync(dbPath)) {
+    const buf = fs.readFileSync(dbPath);
+    userDb = new SQL.Database(buf);
+    console.log('[main] opened existing user.db, size:', buf.length, 'bytes');
+    // 确保 schema 完整（如果之前创建时出错，重新应用）
+    ensureUserDbSchema();
+  } else {
+    // 不存在时先不创建——仅在非开发者模式下首次保存数据时创建
+    console.log('[main] user.db not found, will create on first non-dev write');
+    userDb = null;
+  }
+  return userDb;
+}
+
+function ensureUserDb() {
+  if (userDb) return userDb;
+  if (!dbDir) return null;
+  const dbPath = getUserDbPath(dbDir);
+  userDb = new SQL.Database();
+  console.log('[main] created new user.db');
+  userDb.exec('PRAGMA foreign_keys = OFF');
+  // 应用相同的表结构（直接执行 schema.sql，外键约束不会被强制）
+  ensureUserDbSchema();
+  // 将自增 ID 起始值设为一个较大值，避免与基准库冲突
+  try {
+    userDb.exec("INSERT OR REPLACE INTO sqlite_sequence (name, seq) SELECT name, 1000000 FROM sqlite_master WHERE type='table'");
+  } catch (_) {}
+  userDbSave();
+  return userDb;
+}
+
+function closeUserDb() {
+  if (!userDb) return;
+  userDbSave();
+  userDb.close();
+  userDb = null;
+}
+
+function userDbSave() {
+  if (userDb && dbDir) {
+    const data = userDb.export();
+    fs.writeFileSync(getUserDbPath(dbDir), Buffer.from(data));
+  }
+}
+
+function ensureUserDbSchema() {
+  if (!userDb) return;
+  try {
+    // 使用 _user_delta 增量表替代完整表结构
+    // 只存储被修改的字段 (table_name, row_id, column_name, new_value)
+    userDb.exec(`CREATE TABLE IF NOT EXISTS _user_delta (
+      table_name TEXT NOT NULL,
+      row_id INTEGER NOT NULL,
+      column_name TEXT NOT NULL,
+      new_value TEXT,
+      op_type TEXT DEFAULT 'update',
+      updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+      PRIMARY KEY (table_name, row_id, column_name)
+    )`);
+    console.log('[ensureUserDbSchema] _user_delta table ready');
+    // 尝试迁移旧的 user.db 数据（如果有完整表结构的数据）
+    try { migrateOldUserDb(); } catch (_) {}
+  } catch (e) {
+    console.error('[ensureUserDbSchema] error:', e.message);
+  }
+}
+
+// 从旧版完整表结构的 user.db 迁移数据到 _user_delta（一次性操作）
+function migrateOldUserDb() {
+  if (!userDb) return;
+  const tables = userDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_%' AND name != 'sqlite_sequence'");
+  if (!tables.length || !tables[0].values) return;
+  for (const row of tables[0].values) {
+    const tableName = row[0];
+    try {
+      const data = userDb.exec(`SELECT * FROM "${tableName}"`);
+      if (data.length && data[0].values) {
+        const cols = data[0].columns;
+        for (const valRow of data[0].values) {
+          const rowId = valRow[cols.indexOf('id')];
+          if (rowId == null) continue;
+          for (let i = 0; i < cols.length; i++) {
+            if (cols[i] === 'id') continue;
+            const val = valRow[i];
+            if (val != null) {
+              try {
+                const safe = String(val).replace(/'/g, "''");
+                userDb.exec(`INSERT OR REPLACE INTO _user_delta (table_name, row_id, column_name, new_value, op_type) VALUES ('${tableName}', ${Number(rowId)}, '${cols[i]}', '${safe}', 'update')`);
+              } catch (_) {}
+            }
+          }
+        }
+      }
+      userDb.exec(`DROP TABLE IF EXISTS "${tableName}"`);
+      console.log('[migrateOldUserDb] migrated table:', tableName);
+    } catch (_) {}
+  }
+  console.log('[migrateOldUserDb] migration complete');
+}
+
+// 从 SQL 中提取主表名（简单解析，仅支持 SELECT FROM table 模式）
+function _extractTableName(sql) {
+  const trimmed = sql.trim();
+  // 匹配 SELECT ... FROM tableName
+  const selectMatch = trimmed.match(/^\s*SELECT\s+.+\s+FROM\s+(?:IF NOT EXISTS\s+)?['"`]?(\w+)['"`]?(?:\s|$)/i);
+  if (selectMatch) return selectMatch[1];
+  // 匹配 INSERT INTO tableName
+  const insertMatch = trimmed.match(/^\s*INSERT\s+(?:OR\s+\w+\s+)?INTO\s+['"`]?(\w+)['"`]?\s/i);
+  if (insertMatch) return insertMatch[1];
+  // 匹配 UPDATE tableName
+  const updateMatch = trimmed.match(/^\s*UPDATE\s+(?:OR\s+\w+\s+)?['"`]?(\w+)['"`]?\s/i);
+  if (updateMatch) return updateMatch[1];
+  // 匹配 DELETE FROM tableName
+  const deleteMatch = trimmed.match(/^\s*DELETE\s+FROM\s+['"`]?(\w+)['"`]?\s/i);
+  if (deleteMatch) return deleteMatch[1];
+  return null;
+}
+
+// 从 SQL 中提取所有表名（包括 JOIN 的表）
+function _extractAllTableNames(sql) {
+  const tables = [];
+  const trimmed = sql.trim();
+  // 匹配 SELECT ... FROM tableName [alias]
+  // alias 是可选的，使用前瞻避免匹配到后续关键词
+  const fromRegex = /FROM\s+(?:IF NOT EXISTS\s+)?['"`]?(\w+)['"`]?(?:\s+(?:AS\s+)?['"`]?(\w+)['"`]?)?(?:\s|$)/i;
+  const fromMatch = trimmed.match(fromRegex);
+  if (fromMatch) {
+    tables.push({ name: fromMatch[1], alias: fromMatch[2] || null });
+  }
+  // 匹配 JOIN tableName [alias]
+  const joinRegex = /JOIN\s+(?:IF NOT EXISTS\s+)?['"`]?(\w+)['"`]?\s+(?:(?:AS\s+)?['"`]?(\w+)['"`]?\s+)?/gi;
+  let joinMatch;
+  while ((joinMatch = joinRegex.exec(trimmed)) !== null) {
+    tables.push({ name: joinMatch[1], alias: joinMatch[2] || null });
+  }
+  return tables;
+}
+
+// 解析 SELECT 列中的别名映射
+function _extractSelectAliases(sql) {
+  // 匹配 SELECT ... FROM 之间的列定义
+  const selectEnd = sql.toUpperCase().indexOf('FROM');
+  if (selectEnd < 0) return {};
+  const selectClause = sql.substring(7, selectEnd).trim(); // 去掉 SELECT
+  
+  const aliases = {}; // alias_name -> { table_alias, column }
+  // 匹配 pattern: alias.column AS alias_name 或 alias.column alias_name
+  const colRegex = /['"`]?(\w+)['"`]?\s*\.\s*['"`]?(\w+)['"`]?\s+(?:AS\s+)?['"`]?(\w+)['"`]?/gi;
+  let m;
+  while ((m = colRegex.exec(selectClause)) !== null) {
+    aliases[m[3].toLowerCase()] = { tableAlias: m[1], column: m[2] };
+  }
+  return aliases;
+}
+
+// 从 _user_delta 读取某张表的所有增量修改
+function getUserDeltas(tableName) {
+  if (!userDb) return [];
+  try {
+    const result = userDb.exec(`SELECT * FROM _user_delta WHERE table_name = '${tableName.replace(/'/g, "''")}'`);
+    if (!result.length || !result[0].values) return [];
+    const cols = result[0].columns;
+    return result[0].values.map(row => {
+      const obj = {};
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
+      return obj;
+    });
+  } catch (_) { return []; }
+}
+
+// 对 SELECT 结果进行 user.db 增量合并（按字段覆盖，非整行替换）
+// 支持处理 JOIN 查询：为所有引用的表应用 delta
+function mergeWithUserDbDelta(tableName, baseRows, sql) {
+  // 1. 合并主表
+  const deltas = getUserDeltas(tableName);
+  let merged = applyTableDeltas(baseRows, deltas);
+
+  // 2. 如果有 JOIN，合并关联表
+  if (sql) {
+    const allTables = _extractAllTableNames(sql);
+    const selectAliases = _extractSelectAliases(sql);
+
+    // 建立 alias → tableName 映射
+    const aliasToTable = {};
+    for (const t of allTables) {
+      aliasToTable[t.alias || t.name] = t.name;
+    }
+
+    for (const t of allTables) {
+      if (t.name === tableName) continue; // 主表已处理
+      const joinDeltas = getUserDeltas(t.name);
+      if (!joinDeltas.length) continue;
+
+      // 按 row_id 分组
+      const joinDeltaMap = new Map();
+      for (const d of joinDeltas) {
+        if (d.op_type !== 'update') continue;
+        const rid = Number(d.row_id);
+        if (!joinDeltaMap.has(rid)) joinDeltaMap.set(rid, {});
+        joinDeltaMap.get(rid)[d.column_name] = d.new_value;
+      }
+      if (!joinDeltaMap.size) continue;
+
+      // 查找 FK 列：{table}_id（去掉末尾的 s）
+      const tableBase = t.name.replace(/s$/, '');
+      const fkCol = `${tableBase}_id`;
+
+      // 为 SELECT 中的列别名建立映射：alias.column → resultColumn
+      // 例如 m.name_zh AS material_name → 如果 result 有 material_name 列，则映射
+      const aliasColumnMap = {}; // table_alias.column -> result_column
+      for (const [aliasName, info] of Object.entries(selectAliases)) {
+        if (info.tableAlias === (t.alias || t.name)) {
+          aliasColumnMap[info.column] = aliasName;
+        }
+      }
+
+      // 对每条结果，检查是否需要应用关联表的 delta
+      merged = merged.map(row => {
+        const fkValue = row[fkCol];
+        if (fkValue == null) return row;
+        const joinOverrides = joinDeltaMap.get(Number(fkValue));
+        if (!joinOverrides) return row;
+        // 应用 delta：将关联表列名映射到结果列名
+        const rowOverrides = {};
+        for (const [col, val] of Object.entries(joinOverrides)) {
+          // 如果有别名映射，使用别名；否则直接用列名
+          const resultCol = aliasColumnMap[col] || col;
+          rowOverrides[resultCol] = val;
+        }
+        return { ...row, ...rowOverrides };
+      });
+    }
+  }
+
+  return merged;
+}
+
+// 对一组基本行应用某张表的 delta（内部工具）
+function applyTableDeltas(baseRows, deltas) {
+  if (!deltas || !deltas.length) return baseRows || [];
+
+  const deltaMap = new Map();
+  const deletedIds = new Set();
+  const insertedRows = new Map();
+
+  for (const d of deltas) {
+    const rid = Number(d.row_id);
+    if (d.op_type === 'delete') { deletedIds.add(rid); continue; }
+    if (d.op_type === 'insert') {
+      if (!insertedRows.has(rid)) insertedRows.set(rid, {});
+      insertedRows.get(rid)[d.column_name] = d.new_value;
+      continue;
+    }
+    if (!deltaMap.has(rid)) deltaMap.set(rid, {});
+    deltaMap.get(rid)[d.column_name] = d.new_value;
+  }
+
+  const result = [];
+  for (const row of (baseRows || [])) {
+    const id = Number(row.id);
+    if (deletedIds.has(id)) continue;
+    const overrides = deltaMap.get(id);
+    result.push(overrides ? { ...row, ...overrides } : row);
+    deltaMap.delete(id);
+  }
+
+  for (const [rid, fields] of insertedRows) {
+    result.push({ id: rid, ...fields });
+  }
+  return result;
+}
+
+// 将 UPDATE 语句转换为 _user_delta 增量存储
+function storeUpdateAsDelta(targetDb, sql, params = []) {
+  const tableMatch = sql.match(/^\s*UPDATE\s+(?:OR\s+\w+\s+)?['"`]?(\w+)['"`]?\s+SET\s+/i);
+  if (!tableMatch) return { changes: 0, lastId: null };
+  const table = tableMatch[1];
+
+  const setClauseMatch = sql.match(/SET\s+(.+?)\s+WHERE\s+/i);
+  if (!setClauseMatch) return { changes: 0, lastId: null };
+
+  const setColumns = [];
+  const colRegex = /['"`]?(\w+)['"`]?\s*=\s*\?/g;
+  let colMatch;
+  while ((colMatch = colRegex.exec(setClauseMatch[1])) !== null) {
+    setColumns.push(colMatch[1]);
+  }
+
+  if (setColumns.length === 0 || setColumns.length > params.length) return { changes: 0, lastId: null };
+
+  const setId = params[params.length - 1];
+  const setValues = params.slice(0, setColumns.length);
+  if (setId == null) return { changes: 0, lastId: null };
+
+  let savedCount = 0;
+  for (let i = 0; i < setColumns.length; i++) {
+    const col = setColumns[i];
+    const val = setValues[i];
+    try {
+      const safeTable = table.replace(/'/g, "''");
+      const safeCol = col.replace(/'/g, "''");
+      const safeVal = val != null ? String(val).replace(/'/g, "''") : null;
+      if (safeVal != null) {
+        targetDb.exec(`INSERT OR REPLACE INTO _user_delta (table_name, row_id, column_name, new_value, op_type, updated_at) VALUES ('${safeTable}', ${Number(setId)}, '${safeCol}', '${safeVal}', 'update', datetime('now','localtime'))`);
+      }
+      savedCount++;
+    } catch (e) {
+      console.error('[storeUpdateAsDelta] error:', e.message, 'col:', col);
+    }
+  }
+
+  return { changes: savedCount, lastId: setId };
+}
+
+// 清理 user.db 中与基准库一致的多余数据
+function optimizeUserDb() {
+  if (!userDb || !db) return;
+  try {
+    const deltas = userDb.exec('SELECT * FROM _user_delta WHERE op_type = \'update\'');
+    if (!deltas.length || !deltas[0].values) return;
+    const cols = deltas[0].columns;
+    const toDelete = []; // { table_name, row_id, column_name }
+    const rowsToCheck = {}; // table -> Set of row_ids
+
+    for (const row of deltas[0].values) {
+      const rowObj = {};
+      for (let i = 0; i < cols.length; i++) rowObj[cols[i]] = row[i];
+      const tableName = rowObj.table_name;
+      const rowId = Number(rowObj.row_id);
+      const colName = rowObj.column_name;
+      if (!rowsToCheck[tableName]) rowsToCheck[tableName] = new Set();
+      rowsToCheck[tableName].add(rowId);
+      toDelete.push({ tableName, rowId, colName, newValue: rowObj.new_value });
+    }
+
+    const actuallyDeleted = [];
+    for (const item of toDelete) {
+      try {
+        const baseRows = dbAll(`SELECT "${item.colName}" FROM "${item.tableName.replace(/'/g, "''")}" WHERE id = ?`, [item.rowId]);
+        if (baseRows.length > 0) {
+          const baseVal = String(baseRows[0][item.colName]);
+          if (baseVal === item.newValue) {
+            // 与基准库一致 → 删除该 delta
+            userDb.exec(`DELETE FROM _user_delta WHERE table_name = '${item.tableName.replace(/'/g, "''")}' AND row_id = ${item.rowId} AND column_name = '${item.colName.replace(/'/g, "''")}'`);
+            actuallyDeleted.push(item);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 删除完全为空的整行（没有剩余 delta 的行）
+    for (const [tableName, ids] of Object.entries(rowsToCheck)) {
+      for (const rowId of ids) {
+        try {
+          const remaining = userDb.exec(`SELECT COUNT(*) as c FROM _user_delta WHERE table_name = '${tableName.replace(/'/g, "''")}' AND row_id = ${rowId}`);
+          if (remaining.length && remaining[0].values && remaining[0].values[0][0] === 0) {
+            // 已无任何 delta，该行已自然删除
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (actuallyDeleted.length > 0) {
+      console.log('[optimizeUserDb] cleaned', actuallyDeleted.length, 'redundant deltas');
+    }
+  } catch (e) {
+    console.error('[optimizeUserDb] error:', e.message);
   }
 }
 
@@ -896,6 +1282,31 @@ ipcMain.handle('export-pack-diff', async (_event, packPath, packType) => {
   }
 });
 
+// ── 删除图包中的多余文件（用户确认后）──
+ipcMain.handle('delete-extra-files', (_event, packPath, filePaths) => {
+  try {
+    if (!packPath || !fs.existsSync(packPath)) return { success: false, error: '文件夹不存在' };
+    let deleted = 0;
+    for (const fp of (filePaths || [])) {
+      const fullPath = path.join(packPath, fp);
+      // 安全检查：确保文件在 packPath 内
+      const relative = path.relative(packPath, fullPath);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+      try {
+        if (fs.existsSync(fullPath)) {
+          fs.unlinkSync(fullPath);
+          deleted++;
+        }
+      } catch (_) {}
+    }
+    clearSizeCache();
+    clearImagePathCache();
+    return { success: true, deleted };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('set-active-image-pack', (_event, packName) => {
   try {
     if (!dbDir) return { success: false, error: '数据库未初始化' };
@@ -1161,8 +1572,24 @@ function seedDatabase() {
 
 ipcMain.handle('init-database', () => {
   try {
+    if (!dbDir) throw new Error('数据库路径未设置');
+    // 1. 关闭两个数据库
+    closeDatabase(); // 这会同时关闭 user.db
+    // 2. 删除两个 db 文件
+    const basePath = getDbPath(dbDir);
+    const userPath = getUserDbPath(dbDir);
+    try { if (fs.existsSync(basePath)) fs.unlinkSync(basePath); } catch (_) {}
+    try { if (fs.existsSync(userPath)) fs.unlinkSync(userPath); } catch (_) {}
+    console.log('[init-database] deleted db files, re-creating from seed');
+    // 3. 重新打开基准库（新建空库）并播种
+    openDb(dbDir); // 不传入 userDb，后面会通过 openUserDb 打开（即使不存在）
     const result = seedDatabase();
     dbSave();
+    // 确保 user.db 没有被错误创建（只在首次非开发者写入时创建）
+    if (userDb) {
+      closeUserDb();
+      try { if (fs.existsSync(userPath)) fs.unlinkSync(userPath); } catch (_) {}
+    }
     return result;
   } catch (error) {
     console.error('[init-database] error:', error.message);
@@ -1171,8 +1598,17 @@ ipcMain.handle('init-database', () => {
 });
 
 // ── 更新种子数据（设置页，补充缺失条目）──
+// 仅删除并重新初始化 silvermoon_terminal.db，保留 user.db
 ipcMain.handle('update-database', () => {
   try {
+    if (!dbDir) throw new Error('数据库路径未设置');
+    // 关闭并删除基准库，保留 user.db
+    const basePath = getDbPath(dbDir);
+    closeDatabase(); // 关闭两个库
+    try { if (fs.existsSync(basePath)) fs.unlinkSync(basePath); } catch (_) {}
+    console.log('[update-database] deleted base db, re-seeding');
+    // 重新打开基准库（不关闭 user.db — closeDatabase 已关闭它，重新打开）
+    openDb(dbDir); // openUserDb 会重新打开已存在的 user.db
     const result = seedDatabase();
     dbSave();
     return result;
@@ -1271,21 +1707,148 @@ ipcMain.handle('db-query', (_event, sql, params = []) => {
   try {
     if (!db) throw new Error('数据库未初始化');
     const trimmed = sql.trim().toUpperCase();
+
+    // ── 双数据库模式关闭：所有操作直接走基准库 ──
+    if (!dualDbMode) {
+      if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA')) {
+        return { data: dbAll(sql, params) };
+      }
+      const result = dbRun(sql, params);
+      try { dbSave(); } catch (saveErr) {
+        return { changes: result.changes, lastId: result.lastId, saveError: saveErr.message };
+      }
+      return { changes: result.changes, lastId: result.lastId };
+    }
+
+    // ── SELECT / PRAGMA：查询基准库，合并 _user_delta（字段级覆盖）──
     if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA')) {
-      return { data: dbAll(sql, params) };
+      const baseResult = dbAll(sql, params);
+      if (userDb && trimmed.startsWith('SELECT')) {
+        try {
+          const tableName = _extractTableName(sql);
+          if (tableName) {
+            // 调试：检查 characters 表是否有 delta
+            if (tableName === 'characters' && userDb) {
+              const count = userDb.exec("SELECT COUNT(*) as c FROM _user_delta WHERE table_name = 'characters'");
+              const deltaCount = count?.[0]?.values?.[0]?.[0] || 0;
+              if (deltaCount > 0) {
+                console.log('[db-query] characters has', deltaCount, 'deltas, running merge');
+              }
+            }
+            const merged = mergeWithUserDbDelta(tableName, baseResult, sql);
+            if (merged !== baseResult) {
+              console.log('[db-query] merged', tableName, 'rows:', baseResult.length, '→', merged.length);
+            }
+            return { data: merged };
+          }
+        } catch (e) {
+          console.error('[db-query] merge error:', e.message);
+        }
+      }
+      return { data: baseResult };
     }
-    const result = dbRun(sql, params);
-    // Persist to disk — isolate save errors so they don't mask a successful query
-    try {
-      dbSave();
-    } catch (saveErr) {
-      console.error('[db-query] dbSave failed:', saveErr.message);
-      return { changes: result.changes, lastId: result.lastId, saveError: saveErr.message };
+
+    // ── 写操作：根据 devMode 路由 ──
+    if (devMode) {
+      const result = dbRun(sql, params);
+      try { dbSave(); } catch (saveErr) {
+        return { changes: result.changes, lastId: result.lastId, saveError: saveErr.message };
+      }
+      return { changes: result.changes, lastId: result.lastId };
+    } else {
+      // 非开发者模式 → 写入 user.db（_user_delta 增量表）
+      const udb = ensureUserDb();
+      if (!udb) throw new Error('无法创建用户数据库');
+
+      let result;
+      if (trimmed.startsWith('UPDATE')) {
+        result = storeUpdateAsDelta(udb, sql, params);
+      } else if (trimmed.startsWith('INSERT')) {
+        result = dbRunOnDb(udb, sql, params);
+      } else if (trimmed.startsWith('DELETE')) {
+        const tableName = _extractTableName(sql);
+        const idMatch = sql.match(/WHERE\s+id\s*=\s*\?/i);
+        if (tableName && idMatch && params.length > 0) {
+          const delId = params[params.length - 1];
+          try {
+            const safeTable = tableName.replace(/'/g, "''");
+            udb.exec(`INSERT OR REPLACE INTO _user_delta (table_name, row_id, column_name, new_value, op_type, updated_at) VALUES ('${safeTable}', ${Number(delId)}, '_deleted', '1', 'delete', datetime('now','localtime'))`);
+            result = { changes: 1, lastId: null };
+          } catch (e) {
+            result = { changes: 0, lastId: null, error: e.message };
+          }
+        } else {
+          result = dbRunOnDb(udb, sql, params);
+        }
+      } else {
+        result = dbRunOnDb(udb, sql, params);
+      }
+
+      try { userDbSave(); } catch (saveErr) {
+        return { changes: result.changes, lastId: result.lastId, saveError: saveErr.message };
+      }
+      // 清理与基准库一致的冗余 delta
+      try { optimizeUserDb(); userDbSave(); } catch (_) {}
+      return { changes: result.changes, lastId: result.lastId };
     }
-    return { changes: result.changes, lastId: result.lastId };
   } catch (error) {
     return { error: error.message };
   }
+});
+
+// 在指定数据库上执行 dbAll
+function dbAllOnDb(targetDb, sql, params = []) {
+  const replaced = _replaceParams(sql, params);
+  const results = [];
+  try {
+    const stmt = targetDb.prepare(replaced);
+    while (stmt.step()) results.push(stmt.getAsObject());
+    stmt.free();
+  } catch (e) {
+    throw new Error(`sql.js query: ${e.message}\nSQL: ${replaced}`);
+  }
+  return results;
+}
+
+// 在指定数据库上执行 dbRun
+function dbRunOnDb(targetDb, sql, params = []) {
+  const replaced = _replaceParams(sql, params);
+  let stmt;
+  try {
+    stmt = targetDb.prepare(replaced);
+    stmt.step();
+  } finally {
+    if (stmt) stmt.free();
+  }
+  const changes = targetDb.getRowsModified();
+  let lastId = null;
+  try {
+    const results = targetDb.exec('SELECT last_insert_rowid() as id');
+    if (results.length > 0 && results[0].values.length > 0) {
+      lastId = results[0].values[0][0];
+    }
+  } catch (_) {}
+  return { changes, lastId };
+}
+
+// ── 设置开发者模式（后端同步）──
+ipcMain.handle('set-dev-mode', (_event, enabled) => {
+  devMode = !!enabled;
+  return { success: true };
+});
+
+ipcMain.handle('get-dev-mode', () => {
+  return { devMode };
+});
+
+// ── 双数据库模式开关 ──
+ipcMain.handle('set-dual-db-mode', (_event, enabled) => {
+  dualDbMode = !!enabled;
+  return { success: true };
+});
+
+ipcMain.handle('get-dual-db-mode', () => {
+  return { dualDbMode };
 });
 
 ipcMain.handle('save-image', (_event, { filename, buffer }) => {
@@ -1496,7 +2059,10 @@ ipcMain.handle('delete-user-image', (_event, filename) => {
 // ── 备份数据库：将 db 文件复制到用户选择的文件夹 ──
 ipcMain.handle('backup-database', async () => {
   try {
-    if (!dbDir || !db) throw new Error('数据库未初始化');
+    if (!dbDir) throw new Error('数据库路径未设置');
+    // 确保数据已写入磁盘
+    if (db) dbSave();
+    if (userDb) userDbSave();
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择备份目标文件夹',
       message: '数据库文件将复制到此文件夹',
@@ -1506,22 +2072,50 @@ ipcMain.handle('backup-database', async () => {
       return { success: false, message: '已取消' };
     }
     const destDir = result.filePaths[0];
-    const srcPath = getDbPath(dbDir);
     const timestamp = beijingISO();
-    const destPath = path.join(destDir, `silvermoon_terminal_backup_${timestamp}.db`);
-    fs.copyFileSync(srcPath, destPath);
-    return { success: true, destPath };
+    const saved = [];
+
+    // 备份基准库
+    const baseSrc = getDbPath(dbDir);
+    if (fs.existsSync(baseSrc)) {
+      const baseDest = path.join(destDir, `silvermoon_terminal_backup_${timestamp}_base.db`);
+      fs.copyFileSync(baseSrc, baseDest);
+      saved.push(baseDest);
+    }
+
+    // 备份用户库（如果存在）
+    const userSrc = getUserDbPath(dbDir);
+    if (fs.existsSync(userSrc)) {
+      const userDest = path.join(destDir, `silvermoon_terminal_backup_${timestamp}_user.db`);
+      fs.copyFileSync(userSrc, userDest);
+      saved.push(userDest);
+    }
+
+    return { success: true, files: saved };
   } catch (e) {
     return { success: false, error: e.message };
   }
 });
 
-// ── 导入数据库：选择 .db 文件替换当前数据库 ──
+// ── 导入数据库：用户选择导入基准库还是用户库 ──
 ipcMain.handle('import-database', async () => {
   try {
+    // 先询问导入类型
+    const { response: dbType } = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: '导入数据库',
+      message: '请选择要导入的数据库类型',
+      detail: '基准数据库（silvermoon_terminal.db）包含初始数据；\n用户数据库（user.db）包含用户修改的数据。',
+      buttons: ['基准数据库 (base)', '用户数据库 (user)', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+    });
+    if (dbType === 2) return { success: false, message: '已取消' };
+    const isBase = dbType === 0;
+
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: '选择数据库文件',
-      message: '选择要导入的 .db 文件（将替换当前数据库）',
+      title: `选择要导入的${isBase ? '基准' : '用户'}数据库文件`,
+      message: '选择要导入的 .db 文件（将替换当前对应数据库）',
       filters: [{ name: '数据库文件', extensions: ['db'] }],
       properties: ['openFile'],
     });
@@ -1540,12 +2134,24 @@ ipcMain.handle('import-database', async () => {
     } catch (_) {
       return { success: false, error: '所选文件不是有效的 SQLite 数据库' };
     }
-    // 关闭当前数据库，替换文件，重新打开
-    closeDatabase();
-    const destPath = getDbPath(dbDir);
-    fs.copyFileSync(srcPath, destPath);
-    openDb(dbDir);
-    return { success: true };
+
+    if (isBase) {
+      // 导入基准库
+      closeDatabase();
+      const destPath = getDbPath(dbDir);
+      fs.copyFileSync(srcPath, destPath);
+      openDb(dbDir);
+    } else {
+      // 导入用户库
+      if (userDb) {
+        closeUserDb();
+      }
+      const destPath = getUserDbPath(dbDir);
+      fs.copyFileSync(srcPath, destPath);
+      // 重新打开 user.db
+      openUserDb(dbDir);
+    }
+    return { success: true, dbType: isBase ? 'base' : 'user' };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -1571,23 +2177,26 @@ ipcMain.handle('list-backups', () => {
         const stat = fs.statSync(fullPath);
         const bjTime = new Date(stat.mtime.getTime() + 8 * 60 * 60 * 1000);
         const mtimeStr = bjTime.toISOString().replace('T', ' ').slice(0, 19);
-        // 从文件名解析备注和时间戳: {note}_{timestamp}.db 或 silvermoon_terminal_backup_{timestamp}.db
+        // 从文件名解析: {note}_{timestamp}_{type}.db  (type = base | user)
         let note = f;
-        const matchNew = f.match(/^(.+)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})\.db$/);
+        let dbType = 'base';
+        const matchNew = f.match(/^(.+)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})_(base|user)\.db$/);
         const matchOld = f.match(/^silvermoon_terminal_backup_(.+)\.db$/);
         if (matchNew) {
           note = matchNew[1];
+          dbType = matchNew[3];
         } else if (matchOld) {
           note = matchOld[1];
         }
         return {
           filename: f,
           note: note,
+          dbType,
           size: stat.size,
           mtime: mtimeStr,
         };
       })
-      .sort((a, b) => b.mtime.localeCompare(a.mtime)); // 按修改时间降序
+      .sort((a, b) => b.mtime.localeCompare(a.mtime));
     return { success: true, backups: files };
   } catch (e) {
     return { success: false, error: e.message };
@@ -1599,13 +2208,29 @@ ipcMain.handle('create-backup', (_event, note) => {
   try {
     if (!dbDir || !db) throw new Error('数据库未初始化');
     dbSave(); // 确保最新数据写入磁盘
+    if (userDb) userDbSave();
     const backupsDir = getBackupsDir();
     const safeNote = (note || 'backup').replace(/[/\\:*?"<>|]/g, '_');
     const timestamp = beijingISO();
-    const destPath = path.join(backupsDir, `${safeNote}_${timestamp}.db`);
-    const srcPath = getDbPath(dbDir);
-    fs.copyFileSync(srcPath, destPath);
-    return { success: true, filename: path.basename(destPath), destPath };
+    const saved = [];
+
+    // 备份基准库
+    const baseSrc = getDbPath(dbDir);
+    if (fs.existsSync(baseSrc)) {
+      const baseDest = path.join(backupsDir, `${safeNote}_${timestamp}_base.db`);
+      fs.copyFileSync(baseSrc, baseDest);
+      saved.push(path.basename(baseDest));
+    }
+
+    // 备份用户库（如果存在）
+    const userSrc = getUserDbPath(dbDir);
+    if (fs.existsSync(userSrc)) {
+      const userDest = path.join(backupsDir, `${safeNote}_${timestamp}_user.db`);
+      fs.copyFileSync(userSrc, userDest);
+      saved.push(path.basename(userDest));
+    }
+
+    return { success: true, files: saved };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -1620,7 +2245,8 @@ ipcMain.handle('restore-backup', (_event, filename) => {
     if (!fs.existsSync(srcPath)) {
       return { success: false, error: '备份文件不存在' };
     }
-    // 验证是有效的 SQLite 文件
+    // 从文件名推断数据库类型（_base.db / _user.db）
+    const isUserDb = filename.endsWith('_user.db');
     const buf = fs.readFileSync(srcPath);
     try {
       const testDb = new SQL.Database(buf);
@@ -1628,12 +2254,21 @@ ipcMain.handle('restore-backup', (_event, filename) => {
     } catch (_) {
       return { success: false, error: '备份文件不是有效的 SQLite 数据库' };
     }
-    // 关闭当前数据库，替换文件，重新打开
-    closeDatabase();
-    const destPath = getDbPath(dbDir);
-    fs.copyFileSync(srcPath, destPath);
-    openDb(dbDir);
-    return { success: true };
+
+    if (isUserDb) {
+      // 恢复用户库
+      if (userDb) closeUserDb();
+      const destPath = getUserDbPath(dbDir);
+      fs.copyFileSync(srcPath, destPath);
+      openUserDb(dbDir);
+    } else {
+      // 恢复基准库
+      closeDatabase(); // 同时关闭 user.db
+      const destPath = getDbPath(dbDir);
+      fs.copyFileSync(srcPath, destPath);
+      openDb(dbDir); // 重新打开两个库
+    }
+    return { success: true, dbType: isUserDb ? 'user' : 'base' };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -3614,6 +4249,287 @@ ipcMain.handle('set-update-auto-check', (_event, enabled) => {
 ipcMain.handle('open-external', (_event, url) => {
   shell.openExternal(url);
 });
+
+// ── 应用图标替换 ──
+const ICON_BACKUP_DIR = 'icon-backups';
+
+function getAppIconPaths() {
+  const paths = { iconPath: null, appBundlePath: null, exePath: null };
+  try {
+    if (process.platform === 'darwin') {
+      // macOS: icon.icns inside .app bundle
+      const resourcesPath = process.resourcesPath;
+      if (resourcesPath) {
+        paths.iconPath = path.join(resourcesPath, 'icon.icns');
+        paths.appBundlePath = path.resolve(resourcesPath, '..', '..');
+      }
+    } else if (process.platform === 'win32') {
+      paths.exePath = app.getPath('exe');
+    }
+  } catch (_) {}
+  return paths;
+}
+
+ipcMain.handle('set-app-icon', async (_event, { filename, pngData }) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+
+    // 解析源图标路径：优先使用 pngData（base64 编码的合成图标），其次使用 filename
+    let srcPath = null;
+    if (pngData) {
+      // 将 base64 PNG 写入临时文件
+      const backupDir = path.join(app.getPath('userData'), ICON_BACKUP_DIR);
+      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+      srcPath = path.join(backupDir, 'app_icon_composited.png');
+      const matches = pngData.match(/^data:image\/png;base64,(.+)$/);
+      if (!matches) throw new Error('无效的图片数据');
+      fs.writeFileSync(srcPath, Buffer.from(matches[1], 'base64'));
+    } else if (filename) {
+      const userImagesDir = getUserImagesDir(dbDir);
+      srcPath = path.join(userImagesDir, filename);
+      if (!fs.existsSync(srcPath)) srcPath = null;
+    }
+    // 没有自定义图标时，使用默认图标（public/ 目录下的默认图片）
+    if (!srcPath) {
+      const defaultDirs = [
+        path.join(__dirname, '..', 'public'),
+        path.join(__dirname, '..', 'dist'),
+        path.join(process.resourcesPath || '', 'dist'),
+      ];
+      for (const d of defaultDirs) {
+        const candidate = path.join(d, 'UI_Talent_U_Columbina_02.webp');
+        if (fs.existsSync(candidate)) { srcPath = candidate; break; }
+      }
+    }
+    if (!srcPath) throw new Error('未找到可用的图标源文件');
+
+    // 备份当前图标
+    const backupDir = path.join(app.getPath('userData'), ICON_BACKUP_DIR);
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+
+    let result;
+    if (process.platform === 'darwin') {
+      const { iconPath, appBundlePath } = getAppIconPaths();
+
+      // 检查是否在打包模式下运行（开发模式下无 .app bundle）
+      if (!iconPath || !fs.existsSync(path.dirname(iconPath))) {
+        throw new Error('应用图标替换仅在打包后（生产模式）可用。开发模式下无法替换 .app 图标。');
+      }
+
+      // 备份原图标
+      if (fs.existsSync(iconPath)) {
+        fs.copyFileSync(iconPath, path.join(backupDir, 'icon.icns.backup'));
+      }
+
+      // 将 PNG 转换为 ICNS
+      const tmpIcns = path.join(backupDir, 'icon_converted.icns');
+      const { execSync } = require('child_process');
+      execSync(`sips -s format icns "${srcPath}" --out "${tmpIcns}"`, { stdio: 'pipe', timeout: 30000 });
+
+      // 替换 icon.icns
+      if (fs.existsSync(tmpIcns)) {
+        fs.copyFileSync(tmpIcns, iconPath);
+        try { fs.unlinkSync(tmpIcns); } catch (_) {}
+      } else {
+        throw new Error('ICNS 转换失败');
+      }
+
+      // 刷新图标缓存
+      if (appBundlePath && fs.existsSync(appBundlePath)) {
+        try { execSync(`touch "${appBundlePath}"`, { stdio: 'pipe', timeout: 5000 }); } catch (_) {}
+      }
+      // 尝试用 Electron API 立即更新 Dock 图标
+      try {
+        const img = nativeImage.createFromPath(srcPath);
+        if (app.dock) app.dock.setIcon(img);
+      } catch (_) {}
+
+      result = { success: true, platform: 'darwin' };
+    } else if (process.platform === 'win32') {
+      const { exePath } = getAppIconPaths();
+      if (!exePath) throw new Error('无法定位可执行文件路径');
+
+      // 备份原图标（保存 exe 备份，只备份一次）
+      const backupExe = path.join(backupDir, 'app.exe.backup');
+      if (!fs.existsSync(backupExe)) {
+        try { fs.copyFileSync(exePath, backupExe); } catch (_) {}
+      }
+
+      // 下载 rcedit
+      const rceditPath = path.join(backupDir, 'rcedit.exe');
+      if (!fs.existsSync(rceditPath)) {
+        const https = require('https');
+        const rceditUrl = 'https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe';
+        await new Promise((resolve, reject) => {
+          const file = fs.createWriteStream(rceditPath);
+          https.get(rceditUrl, (res) => {
+            if (res.statusCode === 302 || res.statusCode === 301) {
+              https.get(res.headers.location, (r) => r.pipe(file));
+            } else {
+              res.pipe(file);
+            }
+            file.on('finish', () => { file.close(); resolve(); });
+          }).on('error', (e) => { try { fs.unlinkSync(rceditPath); } catch (_) {} reject(e); });
+        });
+      }
+
+      if (!fs.existsSync(rceditPath)) {
+        result = { success: false, error: '无法下载 rcedit，请检查网络连接' };
+      } else {
+        // Windows 上正在运行的 exe 无法直接修改，采用延迟批处理方案
+        // 创建 bat 脚本：等待应用退出 → 替换图标 → 重启
+        const batPath = path.join(backupDir, 'apply_icon.bat');
+        const appFolder = path.dirname(exePath);
+        const appName = path.basename(exePath);
+
+        // 安全转义路径中的反斜杠（bat 中需要双反斜杠或引号保护）
+        const safeExe = exePath;
+        const safeRcedit = rceditPath;
+        const safeIcon = srcPath;
+
+        const batContent = `@echo off
+chcp 65001 >nul
+echo 正在为 SilverMoon-Terminal 更换图标...
+echo 应用将在完成后自动重启。
+:wait
+tasklist /fi "IMAGENAME eq ${appName}" 2>nul | find /i "${appName}" >nul
+if not errorlevel 1 (
+  timeout /t 2 /nobreak >nul
+  goto wait
+)
+"${safeRcedit}" "${safeExe}" --set-icon "${safeIcon}"
+if errorlevel 1 (
+  echo 图标替换失败，请尝试以管理员身份运行此脚本。
+  pause
+  exit /b 1
+)
+echo 图标替换成功！
+start "" "${safeExe}"
+exit /b 0
+`;
+        fs.writeFileSync(batPath, batContent, 'utf-8');
+
+        // 以分离进程方式启动批处理（不阻塞当前应用）
+        const { spawn } = require('child_process');
+        spawn('cmd.exe', ['/c', 'start', '', '/min', batPath], {
+          detached: true,
+          stdio: 'ignore',
+        }).unref();
+
+        result = { success: true, platform: 'win32', deferred: true };
+      }
+    } else {
+      result = { success: false, error: '当前平台不支持图标替换' };
+    }
+
+    return result || { success: false, error: '未知错误' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('undo-app-icon', async () => {
+  try {
+    const backupDir = path.join(app.getPath('userData'), ICON_BACKUP_DIR);
+    if (!fs.existsSync(backupDir)) throw new Error('没有可撤回的备份');
+
+    if (process.platform === 'darwin') {
+      const { iconPath } = getAppIconPaths();
+      const backupIcns = path.join(backupDir, 'icon.icns.backup');
+      if (!fs.existsSync(backupIcns)) throw new Error('备份文件不存在');
+
+      fs.copyFileSync(backupIcns, iconPath);
+      try { fs.unlinkSync(backupIcns); } catch (_) {}
+
+      // 刷新图标
+      try {
+        const { execSync } = require('child_process');
+        const { appBundlePath } = getAppIconPaths();
+        if (appBundlePath) execSync(`touch "${appBundlePath}"`, { stdio: 'pipe', timeout: 5000 });
+      } catch (_) {}
+      // 重置 Dock 图标
+      try { if (app.dock) app.dock.setIcon(null); } catch (_) {}
+
+      return { success: true, platform: 'darwin' };
+    } else if (process.platform === 'win32') {
+      const backupExe = path.join(backupDir, 'app.exe.backup');
+      if (!fs.existsSync(backupExe)) throw new Error('备份文件不存在');
+
+      const { exePath } = getAppIconPaths();
+      // Windows 上无法覆盖正在运行的可执行文件，给出提示
+      return { success: false, error: 'Windows 上请在关闭应用后手动替换:\n源: ' + backupExe + '\n目标: ' + exePath };
+    }
+
+    return { success: false, error: '当前平台不支持' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 清理缓存 ──
+ipcMain.handle('clear-app-cache', async () => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const cacheDir = path.join(userDataPath, 'Cache');
+    let deletedSize = 0;
+
+    if (fs.existsSync(cacheDir)) {
+      deletedSize = getDirSize(cacheDir);
+      fs.rmSync(cacheDir, { recursive: true, force: true });
+      console.log('[clear-app-cache] deleted Cache dir, size:', deletedSize);
+    }
+
+    return {
+      success: true,
+      deletedSize,
+      deletedSizeFormatted: formatBytes(deletedSize),
+      targets: ['Cache'],
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 查询缓存大小 ──
+ipcMain.handle('get-cache-size', () => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const cacheDir = path.join(userDataPath, 'Cache');
+    const total = fs.existsSync(cacheDir) ? getDirSize(cacheDir) : 0;
+    return { success: true, sizes: { Cache: total }, total, totalFormatted: formatBytes(total) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+function getDirSize(dirPath) {
+  try {
+    let total = 0;
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const e of entries) {
+      const fp = path.join(dirPath, e.name);
+      try {
+        if (e.isFile()) total += fs.statSync(fp).size;
+        else if (e.isDirectory()) total += getDirSize(fp);
+      } catch (_) {}
+    }
+    return total;
+  } catch (_) { return 0; }
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+  if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return bytes + ' B';
+}
+
+function clearCachedData() {
+  _cachedCharacterList = null;
+  _cachedItemAll = null;
+  _cachedItemAllEn = null;
+  _cachedAppVersion = null;
+}
 
 function checkUpdateOnStartup() {
   const config = loadUserConfig();

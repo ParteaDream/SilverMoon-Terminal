@@ -14,6 +14,7 @@ export function DbProvider({ children }) {
   const [imagesDir, setImagesDir] = useState(null)
   const [needsSetup, setNeedsSetup] = useState(false)
   const [devMode, setDevMode] = useState(false)
+  const [dualDbMode, setDualDbMode] = useState(true)
   const [defaultViewMode, setDefaultViewMode] = useState(null) // 全局默认视图模式
 
   const query = useCallback(async (sql, params = []) => {
@@ -197,9 +198,21 @@ export function DbProvider({ children }) {
     try {
       if (window.electronAPI) {
         await window.electronAPI.setUserConfig('devMode', newVal)
+        await window.electronAPI.setDevMode(newVal) // 同步到后端
       }
     } catch (_) { /* non-fatal */ }
   }, [devMode])
+
+  const toggleDualDbMode = useCallback(async () => {
+    const newVal = !dualDbMode
+    setDualDbMode(newVal)
+    try {
+      if (window.electronAPI) {
+        await window.electronAPI.setUserConfig('dualDbMode', newVal)
+        await window.electronAPI.setDualDbMode(newVal)
+      }
+    } catch (_) { /* non-fatal */ }
+  }, [dualDbMode])
 
   useEffect(() => {
     async function init() {
@@ -252,6 +265,15 @@ export function DbProvider({ children }) {
           const res = await window.electronAPI.getUserConfig()
           if (res?.success && res.config) {
             setDevMode(!!res.config.devMode)
+            if (window.electronAPI.setDevMode) {
+              await window.electronAPI.setDevMode(!!res.config.devMode)
+            }
+            // 同步双数据库模式
+            const ddMode = res.config.dualDbMode !== false // 默认 true
+            setDualDbMode(ddMode)
+            if (window.electronAPI.setDualDbMode) {
+              await window.electronAPI.setDualDbMode(ddMode)
+            }
             const DEFAULT_VIEWS = { characters: 'gallery', weapons: 'gallery', artifacts: 'gallery', materials: 'gallery', wishes: 'images' }
             if (res.config.defaultViewMode) {
               const merged = { ...DEFAULT_VIEWS, ...res.config.defaultViewMode }
@@ -272,14 +294,14 @@ export function DbProvider({ children }) {
 
   return (
     <DbContext.Provider value={{
-      dbReady, dbPath, imagesDir, needsSetup, devMode, defaultViewMode,
+      dbReady, dbPath, imagesDir, needsSetup, devMode, dualDbMode, defaultViewMode,
       query, selectLocation, initSchema,
       readImage, importImage, deleteImage,
       getDbPath, updateDatabase, backupDatabase, importDatabase, exportSeed,
       listBackups, createBackup, restoreBackup, deleteBackup,
       crawlCharacter, crawlWeapon, checkMissingWeapons, crawlArtifact, checkMissingArtifacts, crawlWishes, crawlWishImages, downloadBannerImage, cleanupScrapeWindow, downloadMaterialImage, cleanUnusedImages,
       checkDbIntegrity, repairWebsites,
-      toggleDevMode,
+      toggleDevMode, toggleDualDbMode,
     }}>
       {children}
     </DbContext.Provider>

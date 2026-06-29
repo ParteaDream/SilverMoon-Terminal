@@ -86,7 +86,7 @@ export default function WebsitesPage() {
     } catch (e) {
       const msg = e.message || ''
       if (msg.includes('memory access out of bounds') || msg.includes('out of bounds')) {
-        if (confirm('网站数据表可能已损坏，是否尝试自动修复？\n（修复将重建 websites 表，如无法读取旧数据则可能丢失）')) {
+        if (confirm('站点数据表可能已损坏，是否尝试自动修复？\n（修复将重建 websites 表，如无法读取旧数据则可能丢失）')) {
           try {
             const res = await window.electronAPI?.repairWebsites()
             if (res?.success) {
@@ -114,7 +114,7 @@ export default function WebsitesPage() {
   }
 
   async function handleDelete(row) {
-    if (!confirm(`确定删除网站「${row.title_zh}」？`)) return
+    if (!confirm(`确定删除站点「${row.title_zh}」？`)) return
     await query('DELETE FROM websites WHERE id = ?', [row.id])
     if (activeDetailId === row.id) setActiveDetailId(null)
     loadData()
@@ -136,7 +136,7 @@ export default function WebsitesPage() {
 
   async function handleBulkDelete() {
     if (selected.size === 0) return
-    if (!confirm(`确定删除选中的 ${selected.size} 个网站？`)) return
+    if (!confirm(`确定删除选中的 ${selected.size} 个站点？`)) return
     const ids = [...selected]
     await query(`DELETE FROM websites WHERE id IN (${ids.map(() => '?').join(',')})`, ids)
     setSelected(new Set())
@@ -215,34 +215,34 @@ export default function WebsitesPage() {
       {/* Left: list / gallery */}
       <div className={`${activeDetail ? 'flex-1 min-w-[340px]' : 'flex-1'} overflow-auto`}>
       {/* List view */}
-      {viewMode === 'table' && (
+      {viewMode === 'table' && (() => {
+        // 右侧详情栏打开时隐藏地址列
+        const tableColumns = activeDetailId
+          ? [
+              { key: 'icon', label: '图标', width: '56px', render: row => <IconCell filename={row.icon} /> },
+              { key: 'title_zh', label: '标题', render: row => <span className="font-medium text-white text-sm">{row.title_zh}</span> },
+              { key: 'description_zh', label: '描述', render: row => <span className="text-xs text-surface-400 line-clamp-2 max-w-xl">{row.description_zh || '-'}</span> },
+            ]
+          : [
+              { key: 'icon', label: '图标', width: '56px', render: row => <IconCell filename={row.icon} /> },
+              { key: 'title_zh', label: '标题', render: row => <span className="font-medium text-white text-sm">{row.title_zh}</span> },
+              {
+                key: 'url', label: '地址',
+                render: row => row.url ? (
+                  <a href="#"
+                    className="text-xs text-primary-400 hover:text-primary-300 hover:underline flex items-center gap-1"
+                    onClick={e => { e.stopPropagation(); window.electronAPI?.openExternal(row.url); }}
+                  >
+                    {row.url} <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : <span className="text-xs text-surface-500">-</span>,
+              },
+              { key: 'description_zh', label: '描述', render: row => <span className="text-xs text-surface-400 line-clamp-2 max-w-xl">{row.description_zh || '-'}</span> },
+            ]
+        return (
         <DataTable
-          title="网站"
-          columns={[
-            {
-              key: 'icon', label: '图标', width: '56px',
-              render: row => <IconCell filename={row.icon} />,
-            },
-            {
-              key: 'title_zh', label: '标题',
-              render: row => <span className="font-medium text-white text-sm">{row.title_zh}</span>,
-            },
-            {
-              key: 'url', label: '地址',
-              render: row => row.url ? (
-                <a href={row.url} target="_blank" rel="noopener noreferrer"
-                  className="text-xs text-primary-400 hover:text-primary-300 hover:underline flex items-center gap-1"
-                  onClick={e => e.stopPropagation()}
-                >
-                  {row.url} <ExternalLink className="w-3 h-3" />
-                </a>
-              ) : <span className="text-xs text-surface-500">-</span>,
-            },
-            {
-              key: 'description_zh', label: '描述',
-              render: row => <span className="text-xs text-surface-400 line-clamp-2 max-w-xl">{row.description_zh || '-'}</span>,
-            },
-          ]}
+          title="站点"
+          columns={tableColumns}
           data={filtered}
           onEdit={openEdit}
           onDelete={handleDelete}
@@ -274,14 +274,14 @@ export default function WebsitesPage() {
             </div>
           }
         />
-      )}
+      )})()}
 
       {/* Gallery view */}
       {viewMode === 'gallery' && (
         <>
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h1 className="text-lg font-semibold tracking-tight">网站</h1>
+              <h1 className="text-lg font-semibold tracking-tight">站点</h1>
               <p className="text-xs text-surface-500 mt-0.5">{filtered.length} 条记录</p>
             </div>
             <div className="flex items-center gap-2">
@@ -305,7 +305,7 @@ export default function WebsitesPage() {
               ><GalleryCard website={w} /></div>
             ))}
             {filtered.length === 0 && (
-              <div className="col-span-full py-16 text-center text-surface-500 text-sm">暂无网站数据</div>
+              <div className="col-span-full py-16 text-center text-surface-500 text-sm">暂无站点数据</div>
             )}
           </div>
         </>
@@ -319,8 +319,9 @@ export default function WebsitesPage() {
             <div className="flex items-center gap-2 min-w-0">
               <h3 className="text-base font-semibold text-white truncate">{activeDetail.title_zh}</h3>
               {activeDetail.url && (
-                <a href={activeDetail.url} target="_blank" rel="noopener noreferrer"
+                <a href="#"
                   className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1 flex-shrink-0"
+                  onClick={e => { e.preventDefault(); window.electronAPI?.openExternal(activeDetail.url); }}
                 >
                   <ExternalLink className="w-3 h-3" />打开
                 </a>
@@ -356,12 +357,12 @@ export default function WebsitesPage() {
         onClose={() => setModalOpen(false)}
         onSave={handleSave}
         saving={saving}
-        title={editing ? `编辑网站 - ${editing.title_zh}` : '添加网站'}
+        title={editing ? `编辑站点 - ${editing.title_zh}` : '添加站点'}
       >
         <FormInput label="标题" value={form.title_zh || ''} onChange={v => setForm({ ...form, title_zh: v })} />
         <FormInput label="地址 (URL)" value={form.url || ''} onChange={v => setForm({ ...form, url: v })} placeholder="https://..." />
         <ImagePicker label="图标" currentImage={form.icon} onSelect={v => setForm({ ...form, icon: v })} onRemove={() => setForm({ ...form, icon: null })} />
-        <ImagePicker label="网站图片" currentImage={form.image} onSelect={v => setForm({ ...form, image: v })} onRemove={() => setForm({ ...form, image: null })} />
+        <ImagePicker label="站点图片" currentImage={form.image} onSelect={v => setForm({ ...form, image: v })} onRemove={() => setForm({ ...form, image: null })} />
         <FormInput label="描述" value={form.description_zh || ''} onChange={v => setForm({ ...form, description_zh: v })} multiline />
       </EditModal>
     </div>

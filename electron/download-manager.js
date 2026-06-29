@@ -502,6 +502,7 @@ class DownloadManager extends EventEmitter {
       // manifest-mode fields
       remainingFiles: [],
       completedFileSet: new Set(),  // Set of completed file paths
+      extraFiles: [],               // Files in pack dir not in manifest (detected after download)
       // adaptive concurrency
       concurrency: CONCURRENCY_INITIAL,
       recentFailures: 0,
@@ -693,6 +694,7 @@ class DownloadManager extends EventEmitter {
       speedFormatted: formatBytes(speed) + '/s',
       eta: formatDuration(eta),
       elapsed: formatDuration(dl.speedTracker.elapsedMs / 1000),
+      extraFiles: dl.extraFiles || [],
     };
   }
 
@@ -949,6 +951,9 @@ class DownloadManager extends EventEmitter {
     dl.completedFiles = dl.totalFiles;
     dl.bytesDownloaded = dl.totalBytes;
 
+    // Detect extra files
+    dl.extraFiles = this._findExtraFiles(dl);
+
     dl.done = true;
     this._push(dl);
   }
@@ -1012,7 +1017,7 @@ class DownloadManager extends EventEmitter {
     // Sort by size ascending — small files first for quick wins
     dl.remainingFiles.sort((a, b) => (a.size || 0) - (b.size || 0));
 
-    // Filter out already-existing files (size match)
+    // Step 1: Filter out already-existing files (exact path + size match)
     dl.remainingFiles = dl.remainingFiles.filter(f => {
       const destPath = path.join(dl.packPath, f.path);
       if (!fs.existsSync(destPath)) return true;
@@ -1028,9 +1033,19 @@ class DownloadManager extends EventEmitter {
       return true;
     });
 
+    // Step 2: Try to relocate existing files by basename (ignoring extension)
+    if (dl.remainingFiles.length > 0) {
+      const moved = this._relocateExistingFiles(dl);
+      if (moved > 0) {
+        console.log(`[dm] Relocated ${moved} existing files by name match`);
+      }
+    }
+
     if (dl.remainingFiles.length === 0) {
       dl.done = true;
       await this._saveRemoteManifest(dl);
+      // After saving manifest, detect extra files
+      dl.extraFiles = this._findExtraFiles(dl);
       this._push(dl);
       return;
     }
@@ -1161,6 +1176,8 @@ class DownloadManager extends EventEmitter {
 
     if (!dl.cancelled) {
       await this._saveRemoteManifest(dl);
+      // Detect extra files
+      dl.extraFiles = this._findExtraFiles(dl);
       dl.done = true;
       this._push(dl);
     }
@@ -1256,6 +1273,127 @@ class DownloadManager extends EventEmitter {
         req.on('close', () => dl._activeRequests && dl._activeRequests.delete(req));
       }
     });
+  }
+
+  // ── Relocate existing files by name match ────────────────────────────────
+  /**
+   * For files that still need downloading, search the entire pack directory
+   * for files with the same basename (ignoring extension). If found, move
+   * them to the correct manifest path instead of re-downloading.
+   * Returns the number of files relocated.
+   */
+  _relocateExistingFiles(dl) {
+    // Build a name → current path map of all files in the pack directory
+    const nameMap = new Map(); // basename_lower → [{fullPath, size}]
+    this._walkDir(dl.packPath, (filePath) => {
+      const base = path.basename(filePath);
+      const key = base.toLowerCase();
+      if (!nameMap.has(key)) nameMap.set(key, []);
+      nameMap.get(key).push({ fullPath: filePath, size: fs.statSync(filePath).size });
+    });
+
+    let movedCount = 0;
+    const stillNeeded = [];
+
+    for (const f of dl.remainingFiles) {
+      const destPath = path.join(dl.packPath, f.path);
+      // If dest already exists (e.g. after a prior partial move), skip
+      if (fs.existsSync(destPath)) {
+        try {
+          const stat = fs.statSync(destPath);
+          if (f.size && stat.size === f.size) {
+            dl.completedFiles++;
+            dl.bytesDownloaded += stat.size;
+            dl.completedFileSet.add(f.path);
+            continue;
+          }
+        } catch (_) {}
+      }
+
+      const destName = path.basename(f.path).toLowerCase();
+      const candidates = nameMap.get(destName);
+      if (!candidates || candidates.length === 0) {
+        stillNeeded.push(f);
+        continue;
+      }
+
+      // Find the best candidate: prefer size match, else take the first
+      let best = null;
+      for (const c of candidates) {
+        // Don't move if already at destination
+        if (c.fullPath === destPath) { best = null; break; }
+        if (f.size && c.size === f.size) { best = c; break; }
+        if (!best) best = c;
+      }
+      if (!best) { stillNeeded.push(f); continue; }
+
+      // Move the file
+      try {
+        ensureDir(path.dirname(destPath));
+        fs.renameSync(best.fullPath, destPath);
+        dl.completedFiles++;
+        dl.bytesDownloaded += (f.size || best.size);
+        dl.completedFileSet.add(f.path);
+        movedCount++;
+        console.log(`[dm] Relocated: ${best.fullPath} → ${destPath}`);
+      } catch (_) {
+        // Move failed, fall through to download
+        stillNeeded.push(f);
+      }
+    }
+
+    dl.remainingFiles = stillNeeded;
+    return movedCount;
+  }
+
+  /** Walk a directory tree (non-recursive helper). */
+  _walkDir(dir, fn) {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isSymbolicLink()) continue;
+        if (e.name.startsWith('.')) continue;
+        if (e.name === 'manifest.json') continue;
+        const lower = e.name.toLowerCase();
+        if (lower === 'thumbs.db' || lower === 'desktop.ini') continue;
+        const fp = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          this._walkDir(fp, fn);
+        } else if (e.isFile()) {
+          fn(fp);
+        }
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * After download completes, find files in the pack directory that
+   * are NOT in the manifest. Returns an array of relative paths.
+   */
+  _findExtraFiles(dl) {
+    // Read the manifest (saved locally)
+    const manifestPath = path.join(dl.packPath, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) return [];
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    } catch (_) { return []; }
+    const manifestFiles = new Set(Object.keys(manifest.files || {}));
+
+    const extraFiles = [];
+    this._walkDir(dl.packPath, (fp) => {
+      const rel = path.relative(dl.packPath, fp);
+      if (rel.startsWith('.')) return;
+      if (rel === 'manifest.json') return;
+      // 忽略系统文件
+      const base = path.basename(fp).toLowerCase();
+      if (base === 'thumbs.db' || base === '.ds_store' || base === 'desktop.ini') return;
+      const normalized = rel.split(path.sep).join('/');
+      if (!manifestFiles.has(normalized)) {
+        extraFiles.push(normalized);
+      }
+    });
+    return extraFiles;
   }
 
   // ── Manifest helpers ─────────────────────────────────────────────────────

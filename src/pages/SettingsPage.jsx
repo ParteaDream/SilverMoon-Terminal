@@ -44,6 +44,8 @@ function GeneralModule() {
   const [dbInfo, setDbInfo] = useState({ dbDir: null, isPopulated: false })
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState(null)
+  const [cacheSize, setCacheSize] = useState(null)
+  const [cacheSizeStr, setCacheSizeStr] = useState('计算中...')
 
   // Image pack management
   const [packs, setPacks] = useState([])
@@ -289,8 +291,29 @@ function GeneralModule() {
     }
     if (dlProgress.done) {
       loadImagePacks()
-      setMessage({ type: 'success', text: '图包下载完成' })
-      setTimeout(() => setMessage(null), 3000)
+      // Check for extra files that are not in the manifest
+      const extras = dlProgress.extraFiles
+      if (extras && extras.length > 0) {
+        (async () => {
+          const msg = `图包下载完成。\n\n发现 ${extras.length} 个不在 manifest 中的多余文件，是否删除？\n\n${extras.slice(0, 20).join('\n')}${extras.length > 20 ? `\n...及其他 ${extras.length - 20} 个文件` : ''}`
+          if (confirm(msg)) {
+            const packPath = dlProgress.packPath
+            if (packPath && window.electronAPI?.deleteExtraFiles) {
+              const r = await window.electronAPI.deleteExtraFiles(packPath, extras)
+              if (r?.success) {
+                setMessage({ type: 'success', text: `图包下载完成，已删除 ${r.deleted} 个多余文件` })
+              } else {
+                setMessage({ type: 'error', text: `删除多余文件失败: ${r?.error || ''}` })
+              }
+            }
+          } else {
+            setMessage({ type: 'success', text: '图包下载完成（多余文件已保留）' })
+          }
+        })()
+      } else {
+        setMessage({ type: 'success', text: '图包下载完成' })
+      }
+      setTimeout(() => setMessage(null), 5000)
     } else if (dlProgress.cancelled) {
       setMessage({ type: 'error', text: '下载已取消' })
       setTimeout(() => setMessage(null), 3000)
@@ -298,7 +321,22 @@ function GeneralModule() {
       setMessage({ type: 'error', text: `下载失败: ${dlProgress.error}` })
       setTimeout(() => setMessage(null), 5000)
     }
-  }, [dlProgress?.done, dlProgress?.cancelled, dlProgress?.error, dlProgress?.id])
+  }, [dlProgress?.done, dlProgress?.cancelled, dlProgress?.error, dlProgress?.id, dlProgress?.extraFiles])
+
+  // 获取缓存大小
+  useEffect(() => {
+    let cancelled = false
+    window.electronAPI?.getCacheSize().then(r => {
+      if (cancelled) return
+      if (r?.success) {
+        setCacheSize(r.total)
+        setCacheSizeStr(r.totalFormatted || '0 B')
+      } else {
+        setCacheSizeStr('未知')
+      }
+    })
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -575,6 +613,41 @@ function GeneralModule() {
           </div>
         </div>
       )}
+
+      {/* ── 清理缓存 ── */}
+      <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-3">
+        <div className="flex items-center gap-3">
+          <Trash2 className="w-5 h-5 text-surface-400 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">清理缓存</p>
+            <p className="text-xs text-surface-400 mt-0.5">当前缓存：{cacheSizeStr}</p>
+          </div>
+        </div>
+        <button
+          onClick={async () => {
+            if (!confirm(`确定要清理所有缓存数据吗？\n\n当前缓存大小：${cacheSizeStr}\n\n这将清除系统缓存、临时图标备份等非核心数据。`)) return
+            try {
+              const result = await window.electronAPI?.clearAppCache()
+              if (result?.success) {
+                setCacheSize(0)
+                setCacheSizeStr('0 B')
+                const msg = result.targets?.length
+                  ? `清理完成，共释放 ${result.deletedSizeFormatted || '0 B'}（${result.targets.join('、')}）`
+                  : '暂无需要清理的缓存'
+                setMessage({ type: 'success', text: msg })
+              } else {
+                setMessage({ type: 'error', text: result?.error || '清理失败' })
+              }
+            } catch (e) {
+              setMessage({ type: 'error', text: e.message })
+            }
+          }}
+          className="px-3 py-1.5 rounded-lg text-xs bg-surface-700 hover:bg-surface-600 text-surface-300 transition-colors"
+        >
+          立即清理
+        </button>
+      </div>
+
     </div>
   )
 }
@@ -597,6 +670,8 @@ function AppIconSection() {
   const [iconFile, setIconFile] = useState(() => {
     return localStorage.getItem('app_icon') || null
   })
+  const [canUndo, setCanUndo] = useState(false)
+  const [iconBusy, setIconBusy] = useState(false)
 
   async function handleExport() {
     const src = iconSrc || './UI_Talent_U_Columbina_02.webp'
@@ -646,7 +721,7 @@ function AppIconSection() {
     ctx.fillRect(0, 0, size, size)
 
     // Icon image
-    const pad = size * 0.15
+    const pad = size * 0.08
     ctx.drawImage(img, pad, pad, size - pad * 2, size - pad * 2)
 
     // Export
@@ -702,6 +777,98 @@ function AppIconSection() {
     window.dispatchEvent(new CustomEvent('app-icon-changed'))
   }
 
+  async function handleSetAppIcon() {
+    if (iconBusy) return
+    setIconBusy(true)
+    try {
+      // 1. 合成图标：渐变背景 + 图标叠加
+      const src = iconSrc || './UI_Talent_U_Columbina_02.webp'
+      const style = getComputedStyle(document.documentElement)
+      const fromColor = style.getPropertyValue('--app-icon-from').trim() || '99 102 241'
+      const toColor = style.getPropertyValue('--app-icon-to').trim() || '165 180 252'
+      const [fr, fg, fb] = fromColor.split(' ').map(Number)
+      const [tr, tg, tb] = toColor.split(' ').map(Number)
+
+      const img = new window.Image()
+      img.crossOrigin = 'anonymous'
+      await new Promise((resolve, reject) => {
+        img.onload = resolve
+        img.onerror = reject
+        img.src = src
+      })
+
+      const size = 256
+      const canvas = document.createElement('canvas')
+      canvas.width = size
+      canvas.height = size
+      const ctx = canvas.getContext('2d')
+
+      // Rounded rect clip
+      const r = size * 0.2
+      ctx.beginPath()
+      ctx.moveTo(r, 0)
+      ctx.lineTo(size - r, 0)
+      ctx.quadraticCurveTo(size, 0, size, r)
+      ctx.lineTo(size, size - r)
+      ctx.quadraticCurveTo(size, size, size - r, size)
+      ctx.lineTo(r, size)
+      ctx.quadraticCurveTo(0, size, 0, size - r)
+      ctx.lineTo(0, r)
+      ctx.quadraticCurveTo(0, 0, r, 0)
+      ctx.closePath()
+      ctx.clip()
+
+      // Gradient background
+      const grad = ctx.createLinearGradient(0, 0, size, size)
+      grad.addColorStop(0, `rgb(${fr},${fg},${fb})`)
+      grad.addColorStop(1, `rgb(${tr},${tg},${tb})`)
+      ctx.fillStyle = grad
+      ctx.fillRect(0, 0, size, size)
+
+      // Icon image
+      const pad = size * 0.08
+      ctx.drawImage(img, pad, pad, size - pad * 2, size - pad * 2)
+
+      // 2. 导出为 PNG data URL
+      const pngData = canvas.toDataURL('image/png')
+
+      // 3. 发送到后端
+      const result = await window.electronAPI?.setAppIcon(iconFile || null, pngData)
+      if (result?.success) {
+        setCanUndo(true)
+        if (result.deferred) {
+          alert('关闭应用后将自动完成图标替换并重启。')
+        } else {
+          alert('应用图标已更新，部分系统可能需要重启应用才能看到变化。')
+        }
+      } else {
+        alert('设置失败: ' + (result?.error || '未知错误'))
+      }
+    } catch (e) {
+      alert('设置失败: ' + e.message)
+    } finally {
+      setIconBusy(false)
+    }
+  }
+
+  async function handleUndoAppIcon() {
+    if (!canUndo || iconBusy) return
+    setIconBusy(true)
+    try {
+      const result = await window.electronAPI?.undoAppIcon()
+      if (result?.success) {
+        setCanUndo(false)
+        alert('已撤回图标更改，部分系统可能需要重启应用才能看到变化。')
+      } else {
+        alert('撤回失败: ' + (result?.error || '未知错误'))
+      }
+    } catch (e) {
+      alert('撤回失败: ' + e.message)
+    } finally {
+      setIconBusy(false)
+    }
+  }
+
   return (
     <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-4">
       <div className="flex items-center gap-3">
@@ -739,6 +906,27 @@ function AppIconSection() {
             </button>
           )}
         </div>
+      </div>
+      {/* 应用/撤回 图标替换按钮 */}
+      <div className="flex items-center gap-2 pt-2 border-t border-surface-700">
+        <button
+          onClick={handleSetAppIcon}
+          disabled={iconBusy}
+          className="px-3 py-1.5 rounded-lg text-xs bg-primary-600 hover:bg-primary-500 disabled:bg-surface-700 disabled:text-surface-500 text-white transition-colors flex items-center gap-1.5"
+        >
+          <Upload className="w-3.5 h-3.5" />设置
+        </button>
+        <button
+          onClick={handleUndoAppIcon}
+          disabled={!canUndo || iconBusy}
+          className="px-3 py-1.5 rounded-lg text-xs bg-surface-700 disabled:text-surface-500 text-surface-300 hover:bg-surface-600 transition-colors disabled:cursor-not-allowed flex items-center gap-1.5"
+        >
+          <Upload className="w-3.5 h-3.5" />撤回
+        </button>
+        <span className="text-[10px] text-surface-500">将当前图标设为应用图标（替换 .exe / .app）</span>
+        {navigator.platform?.includes('Win') && (
+          <span className="text-[10px] text-amber-400 ml-2">Windows 版暂存问题，暂时不可以更换图标，但可以导出喵</span>
+        )}
       </div>
     </div>
   )
@@ -1389,7 +1577,7 @@ function VersionInfoModule() {
 
 // ── Advanced Module ─────────────────────────────────────────────────
 function AdvancedModule() {
-  const { devMode, toggleDevMode, backupDatabase, importDatabase, exportSeed, updateDatabase, initSchema } = useDb()
+  const { devMode, toggleDevMode, dualDbMode, toggleDualDbMode, backupDatabase, importDatabase, exportSeed, updateDatabase, initSchema } = useDb()
   const [message, setMessage] = useState(null)
   const [loading, setLoading] = useState(false)
   const [seedVersionModal, setSeedVersionModal] = useState(false)
@@ -1411,7 +1599,8 @@ function AdvancedModule() {
     try {
       const result = await backupDatabase()
       if (result.success) {
-        setMessage({ type: 'success', text: `备份完成: ${result.destPath}` })
+        const count = result.files?.length || 0
+        setMessage({ type: 'success', text: `备份完成，共 ${count} 个文件` })
       } else if (result.message === '已取消') {
         // 用户取消，不提示
       } else {
@@ -1425,14 +1614,15 @@ function AdvancedModule() {
   }
 
   async function handleImport() {
-    if (!confirm('导入数据库将替换当前所有数据，确定要继续吗？')) return
+    if (!confirm('导入数据库将替换当前数据，确定要继续吗？')) return
     if (!confirm('再次确认：此操作不可逆，当前数据库将被替换为导入的文件。确定继续？')) return
     setLoading(true)
     setMessage(null)
     try {
       const result = await importDatabase()
       if (result.success) {
-        setMessage({ type: 'success', text: '数据库已导入，即将刷新...' })
+        const typeLabel = result.dbType === 'user' ? '用户数据库(user.db)' : '基准数据库(silvermoon_terminal.db)'
+        setMessage({ type: 'success', text: `${typeLabel}已导入，即将刷新...` })
         setTimeout(() => window.location.reload(), 800)
       } else if (result.message === '已取消') {
         // 用户取消
@@ -1472,7 +1662,7 @@ function AdvancedModule() {
   }
 
   async function handleReinit() {
-    if (!confirm('确定要重新初始化数据库吗？\n\n此操作将删除所有现有数据（包括你添加的数据），重新创建数据库。')) return
+    if (!confirm('确定要重新初始化数据库吗？\n\n此操作将删除 silvermoon_terminal.db 和 user.db 两个数据库文件，然后重新创建基准数据库。所有用户修改的数据将丢失！')) return
     setLoading(true)
     setMessage(null)
     try {
@@ -1534,6 +1724,32 @@ function AdvancedModule() {
         </div>
       </div>
 
+      {/* Dual DB Mode Toggle */}
+      <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Database className="w-5 h-5 text-primary-400 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium">双数据库模式</p>
+              <p className="text-xs text-surface-400 mt-0.5">开启后非开发者模式的修改保存到 user.db 并合并读取；关闭后只读写基准库</p>
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+            <input
+              type="checkbox"
+              checked={dualDbMode}
+              onChange={toggleDualDbMode}
+              className="sr-only peer"
+            />
+            <div className="w-10 h-5 bg-surface-600 peer-checked:bg-primary-500 rounded-full transition-colors
+              after:content-[''] after:absolute after:top-0.5 after:left-0.5
+              after:bg-white after:rounded-full after:h-4 after:w-4
+              after:transition-transform peer-checked:after:translate-x-[18px]"
+            />
+          </label>
+        </div>
+      </div>
+
       {/* Database Operations */}
       <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-3">
         <div className="flex items-center gap-3 mb-2">
@@ -1559,7 +1775,7 @@ function AdvancedModule() {
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium">备份数据库</p>
-              <p className="text-xs text-surface-400 mt-0.5">将数据库文件复制到指定文件夹</p>
+              <p className="text-xs text-surface-400 mt-0.5">同时备份基准数据库(silvermoon_terminal.db)和用户数据库(user.db)</p>
             </div>
           </button>
 
@@ -1577,7 +1793,7 @@ function AdvancedModule() {
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium">导入数据库</p>
-              <p className="text-xs text-surface-400 mt-0.5">选择 .db 文件替换当前数据库（需要二次确认）</p>
+              <p className="text-xs text-surface-400 mt-0.5">选择基准库或用户库 .db 文件导入（需要二次确认）</p>
             </div>
           </button>
 
