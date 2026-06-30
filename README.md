@@ -16,7 +16,7 @@
 
 SilverMoon Terminal（银月终端）是一款基于 Electron 的原神桌面端数据库应用，提供本地化的数据查询、编辑与管理功能。数据存储于本地 SQLite 数据库，无需网络即可离线使用。
 
-![SilverMoon_Terminal_Win](public/SilverMoon_Terminal_Win.png)
+![SilverMoon_Terminal_Win](public/SilverMoon_Terminal_Win.jpeg)
 
 ### 主要功能
 - 📊 **数据浏览与编辑** — 角色、武器、圣遗物、材料、祈愿、挑战等数据的表格/详情双视图
