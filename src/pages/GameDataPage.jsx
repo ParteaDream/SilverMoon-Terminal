@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useDb } from '../context/DbContext'
+import { useNav } from '../context/NavContext'
 import DataTable from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput } from '../components/EditModal'
@@ -196,6 +197,8 @@ function CategoryInput({ label, value, onChange, existingCategories }) {
 
 export default function GameDataPage() {
   const { query, devMode } = useDb()
+  const { restorePage, savePage, consumeBackToList } = useNav()
+  const restoringScroll = useRef(false)
   const [data, setData] = useState([])
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -207,7 +210,6 @@ export default function GameDataPage() {
   const [multiSelect, setMultiSelect] = useState(false)      // 多选模式开关
   const [activeDetailId, setActiveDetailId] = useState(null)  // 右侧详情面板当前条目 ID
 
-  useEffect(() => { loadData() }, [])
 
   async function loadData() {
     const result = await query('SELECT * FROM game_data ORDER BY category DESC, title_zh DESC')
@@ -341,8 +343,56 @@ export default function GameDataPage() {
     _preview: stripFormatting((item.content || '').slice(0, 200)),
   }))
 
+  // ── 状态持久化（参考武器板块）──
+  useEffect(() => {
+    const isBack = consumeBackToList()
+    if (isBack) {
+      loadData()
+      restoringScroll.current = true
+      restorePage('gamedata').then(saved => {
+        if (saved?.scrollY != null && saved.scrollY > 0) {
+          const targetY = Number(saved.scrollY)
+          const tryScroll = (attempt) => {
+            const main = document.querySelector('main')
+            if (!main) return
+            if (main.scrollHeight > targetY) {
+              main.scrollTo(0, targetY)
+              setTimeout(() => { restoringScroll.current = false }, 300)
+              setTimeout(() => {
+                if (main) main.dispatchEvent(new Event('scroll', { bubbles: true }))
+              }, 150)
+            } else if (attempt > 0) {
+              setTimeout(() => tryScroll(attempt - 1), 200)
+            }
+          }
+          setTimeout(() => tryScroll(10), 100)
+        }
+      })
+    } else {
+      const main = document.querySelector('main')
+      if (main) main.scrollTo(0, 0)
+      loadData()
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const main = document.querySelector('main')
+    if (!main) return
+    let timer = null
+    const onScroll = () => {
+      clearTimeout(timer)
+      if (restoringScroll.current) return
+      timer = setTimeout(() => savePage('gamedata'), 200)
+    }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      main.removeEventListener('scroll', onScroll)
+      clearTimeout(timer)
+    }
+  }, [savePage])
+
   return (
-    <div className="p-6 flex gap-4 h-[calc(100vh-60px)]">
+    <div className="p-6 flex gap-4 h-full">
       {/* ═══ 左侧：表格区 ═══ */}
       <div className={`${activeDetailId ? 'flex-1 min-w-[340px]' : 'flex-1'} overflow-auto`}>
         {/* 多选开关 */}

@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
+import { useLazyImage } from '../hooks/useLazyImage'
 import DataTable from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
@@ -21,30 +22,102 @@ export default function MaterialsPage() {
   const { query } = useDb()
   const { restorePage, savePage, push, consumeBackToList } = useNav()
   const [materials, setMaterials] = useState([])
+
+  // ── 同步初始化：仅 viewMode 从缓存恢复 ──
+  const initViewMode = loadPageStateSync('materials')?.state?.viewMode
   const [search, setSearch] = useState('')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({})
   const [viewMode, setViewMode] = useState(() => {
-    const saved = loadPageStateSync('materials')
-    if (saved?.state?.viewMode) return saved.state.viewMode
+    if (initViewMode) return initViewMode
     try {
       const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
       if (defs.materials) return defs.materials
     } catch (_) {}
     return 'gallery'
   })
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState({})
   const [selected, setSelected] = useState(new Set())
   const restoringScroll = useRef(false)
+  // 用 ref 保持最新状态
+  const stateRef = useRef({ viewMode, search })
+  stateRef.current = { viewMode, search }
 
   // 挂载时加载数据，恢复视图模式
   useEffect(() => {
     const isBack = consumeBackToList()
     if (isBack) {
-      sessionStorage.setItem('_nav_backToList', '1')
+      // 同步预设 scrollY 消除置顶闪烁
+      const cached = loadPageStateSync('materials')
+      if (cached?.scrollY > 0) {
+        const m = document.querySelector('main')
+        if (m) m.scrollTop = cached.scrollY
+      }
       loadData()
+      restoringScroll.current = true
       restorePage('materials').then(saved => {
-        if (saved?.viewMode) setViewMode(saved.viewMode)
+        if (saved) {
+          if (saved.viewMode) setViewMode(saved.viewMode)
+          if (saved.search) setSearch(saved.search)
+          // 等待 React 处理搜索后再恢复滚动位置
+          requestAnimationFrame(() => {
+          const main = document.querySelector('main')
+          // 先尝试 scrollToItem（精确计算 scrollY）
+          const scrollToId = sessionStorage.getItem('_nav_scroll_to_id')
+          if (scrollToId) {
+            sessionStorage.removeItem('_nav_scroll_to_id')
+            const el = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
+            const m = document.querySelector('main')
+            if (el && m) {
+              const elRect = el.getBoundingClientRect()
+              const mRect = m.getBoundingClientRect()
+              const elTopInMain = elRect.top - mRect.top + m.scrollTop
+              const targetY = elTopInMain - (m.clientHeight / 2) + (elRect.height / 2)
+              m.scrollTo(0, Math.max(0, Math.round(targetY)))
+              setTimeout(() => { restoringScroll.current = false }, 300)
+              setTimeout(() => m.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              return
+            }
+            // 元素不在 DOM（可能被筛选隐藏）：后台重试，同时走 scrollY 回退
+            const retryScrollToItem = (n) => {
+              const el2 = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
+              const m2 = document.querySelector('main')
+              if (el2 && m2) {
+                const er = el2.getBoundingClientRect()
+                const mr = m2.getBoundingClientRect()
+                const et = er.top - mr.top + m2.scrollTop
+                const ty = et - (m2.clientHeight / 2) + (er.height / 2)
+                m2.scrollTo(0, Math.max(0, Math.round(ty)))
+                setTimeout(() => { restoringScroll.current = false }, 300)
+                setTimeout(() => m2.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              } else if (n > 0) {
+                setTimeout(() => retryScrollToItem(n - 1), 200)
+              }
+            }
+            setTimeout(() => retryScrollToItem(15), 200)
+            // 不 return — 走下方 scrollY 回退作为近似定位
+          }
+          // 否则恢复保存的 scrollY
+          if (saved.scrollY != null && saved.scrollY > 0) {
+            restoringScroll.current = true
+            const targetY = Number(saved.scrollY)
+            const tryScroll = (attempt) => {
+              const main = document.querySelector('main')
+              if (!main) return
+              if (main.scrollHeight > targetY) {
+                main.scrollTo(0, targetY)
+                setTimeout(() => { restoringScroll.current = false }, 300)
+                setTimeout(() => {
+                  if (main) main.dispatchEvent(new Event('scroll', { bubbles: true }))
+                }, 150)
+              } else if (attempt > 0) {
+                setTimeout(() => tryScroll(attempt - 1), 200)
+              }
+            }
+            setTimeout(() => tryScroll(10), 100)
+          }
+          }) // end requestAnimationFrame
+        }
       })
     } else {
       // 从侧边栏进入：使用全局默认视图模式，重置滚动位置
@@ -58,56 +131,22 @@ export default function MaterialsPage() {
     }
   }, [])
 
-  // 数据加载完成后恢复滚动位置（仅返回导航时）
-  useEffect(() => {
-    if (materials.length === 0) return
-    const isBack = sessionStorage.getItem('_nav_backToList') === '1'
-    if (!isBack) return
-    sessionStorage.removeItem('_nav_backToList')
-    restorePage('materials').then(saved => {
-      const main = document.querySelector('main')
-      if (saved?.scrollY != null && saved.scrollY > 0) {
-        restoringScroll.current = true
-        const targetY = Number(saved.scrollY)
-        const tryScroll = (n) => {
-          if (main && main.scrollHeight > targetY) {
-            main.scrollTo(0, targetY)
-            setTimeout(() => { restoringScroll.current = false }, 300)
-            setTimeout(() => {
-              if (main) main.dispatchEvent(new Event('scroll', { bubbles: true }))
-            }, 150)
-          } else if (n > 0) {
-            setTimeout(() => tryScroll(n - 1), 200)
-          }
-        }
-        tryScroll(10)
-      }
-    })
-  }, [materials])
-
-  // 滚动时保存（使用 useLayoutEffect：cleanup 在 DOM 替换前执行）
+  // 滚动时保存
   useLayoutEffect(() => {
     const main = document.querySelector('main')
     if (!main) return
     let timer = null
-    const save = () => {
-      if (restoringScroll.current) return
-      savePage('materials', { viewMode: viewModeRef.current })
-    }
     const onScroll = () => {
       clearTimeout(timer)
       if (restoringScroll.current) return
-      timer = setTimeout(save, 150)
+      timer = setTimeout(() => savePage('materials', stateRef.current), 200)
     }
     main.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       main.removeEventListener('scroll', onScroll)
       clearTimeout(timer)
-      save()
     }
-  }, [viewMode, savePage])
-  const viewModeRef = useRef(viewMode)
-  viewModeRef.current = viewMode
+  }, [savePage])
 
   async function loadData() {
     const result = await query('SELECT * FROM materials ORDER BY id')
@@ -115,7 +154,7 @@ export default function MaterialsPage() {
   }
 
   function navigateToDetail(id) {
-    savePage('materials', { viewMode })
+    savePage('materials', stateRef.current)
     push(`/materials/${id}`)
   }
 
@@ -236,11 +275,12 @@ export default function MaterialsPage() {
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
           onBulkDelete={handleBulkDelete}
+          onRowClick={row => navigateToDetail(row.id)} itemIdKey="id"
         />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3">
           {filtered.map(m => (
-            <div key={m.id} onClick={() => navigateToDetail(m.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
+            <div key={m.id} data-item-id={m.id} onClick={() => navigateToDetail(m.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
               <div className="aspect-[3/4] bg-surface-700 flex items-center justify-center">
                 {m.image ? <MatThumb filename={m.image} large /> : <Package className="w-10 h-10 text-surface-500" />}
               </div>
@@ -273,15 +313,17 @@ export default function MaterialsPage() {
 }
 
 function MatThumb({ filename, large }) {
-  const [src, setSrc] = useState(null)
-  const { readImage } = useDb()
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      if (filename) { const data = await readImage(filename); if (!cancelled && data) setSrc(data) }
-    }
-    load(); return () => { cancelled = true }
-  }, [filename, readImage])
-  if (!src) return large ? <Package className="w-10 h-10 text-surface-500" /> : <div className="w-8 h-8 rounded bg-surface-700 flex items-center justify-center shrink-0"><Package className="w-4 h-4 text-surface-500" /></div>
-  return <img src={src} alt="" className={large ? 'w-full h-full object-contain' : 'w-8 h-8 rounded object-cover shrink-0'} />
+  const { ref, src } = useLazyImage(filename)
+  if (large) {
+    return (
+      <div ref={ref} className="w-full h-full flex items-center justify-center overflow-hidden">
+        {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <Package className="w-10 h-10 text-surface-500" />}
+      </div>
+    )
+  }
+  return (
+    <div ref={ref} className="w-8 h-8 rounded overflow-hidden shrink-0 bg-surface-700 flex items-center justify-center">
+      {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <Package className="w-4 h-4 text-surface-500" />}
+    </div>
+  )
 }

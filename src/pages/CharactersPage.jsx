@@ -36,21 +36,22 @@ export default function CharactersPage() {
   const [elements, setElements] = useState([])
   const [weaponTypes, setWeaponTypes] = useState([])
   const [regions, setRegions] = useState([])
+
+  // ── 同步初始化：仅 viewMode 从缓存恢复 ──
+  const initViewMode = loadPageStateSync('characters')?.state?.viewMode
   const [search, setSearch] = useState('')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({})
-  const [saving, setSaving] = useState(false)
   const [viewMode, setViewMode] = useState(() => {
-    const saved = loadPageStateSync('characters')
-    if (saved?.state?.viewMode) return saved.state.viewMode
-    // Fall back to global default
+    if (initViewMode) return initViewMode
     try {
       const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
       if (defs.characters) return defs.characters
     } catch (_) {}
     return 'gallery'
   })
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState({})
+  const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState(new Set())
   const restoringScroll = useRef(false)
 
@@ -58,12 +59,75 @@ export default function CharactersPage() {
   useEffect(() => {
     const isBack = consumeBackToList()
     if (isBack) {
-      // 从详情页返回：恢复视图模式和滚动位置
-      // Re-set the flag for the data-load effect to read
-      sessionStorage.setItem('_nav_backToList', '1')
+      // 同步预设 scrollY 消除置顶闪烁
+      const cached = loadPageStateSync('characters')
+      if (cached?.scrollY > 0) {
+        const m = document.querySelector('main')
+        if (m) m.scrollTop = cached.scrollY
+      }
       loadData()
+      restoringScroll.current = true
       restorePage('characters').then(saved => {
-        if (saved?.viewMode) setViewMode(saved.viewMode)
+        if (saved) {
+          if (saved.viewMode) setViewMode(saved.viewMode)
+          if (saved.search) setSearch(saved.search)
+          if (saved.sortKeys?.length) setSortKeys(saved.sortKeys)
+          if (saved.filters) {
+            Object.entries(saved.filters).forEach(([k, v]) => setFilter(k, v))
+          }
+          // 等待 React 处理筛选/排序状态后再恢复滚动位置
+          requestAnimationFrame(() => {
+          const main = document.querySelector('main')
+          // 先尝试 scrollToItem（精确计算 scrollY）
+          const scrollToId = sessionStorage.getItem('_nav_scroll_to_id')
+          if (scrollToId) {
+            sessionStorage.removeItem('_nav_scroll_to_id')
+            const el = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
+            const m = document.querySelector('main')
+            if (el && m) {
+              const elRect = el.getBoundingClientRect()
+              const mRect = m.getBoundingClientRect()
+              const elTopInMain = elRect.top - mRect.top + m.scrollTop
+              const targetY = elTopInMain - (m.clientHeight / 2) + (elRect.height / 2)
+              m.scrollTo(0, Math.max(0, Math.round(targetY)))
+              setTimeout(() => { restoringScroll.current = false }, 300)
+              setTimeout(() => m.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              return
+            }
+            // 元素不在 DOM（可能被筛选隐藏）：后台重试，同时走 scrollY 回退
+            const retryScrollToItem = (n) => {
+              const el2 = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
+              const m2 = document.querySelector('main')
+              if (el2 && m2) {
+                const er = el2.getBoundingClientRect()
+                const mr = m2.getBoundingClientRect()
+                const et = er.top - mr.top + m2.scrollTop
+                const ty = et - (m2.clientHeight / 2) + (er.height / 2)
+                m2.scrollTo(0, Math.max(0, Math.round(ty)))
+                setTimeout(() => { restoringScroll.current = false }, 300)
+                setTimeout(() => m2.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              } else if (n > 0) {
+                setTimeout(() => retryScrollToItem(n - 1), 200)
+              }
+            }
+            setTimeout(() => retryScrollToItem(15), 200)
+            // 不 return — 走下方 scrollY 回退作为近似定位
+          }
+          // 否则恢复保存的 scrollY
+          if (saved.scrollY != null && saved.scrollY > 0 && main) {
+            const targetY = Number(saved.scrollY)
+            const tryScroll = (n) => {
+              if (main.scrollHeight > targetY) {
+                main.scrollTo(0, targetY)
+                setTimeout(() => { restoringScroll.current = false }, 300)
+                setTimeout(() => main.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              } else if (n > 0) { setTimeout(() => tryScroll(n - 1), 200) }
+              else { restoringScroll.current = false }
+            }
+            tryScroll(10)
+          }
+          }) // end requestAnimationFrame
+        }
       })
     } else {
       // 从侧边栏进入：使用全局默认视图模式，重置滚动位置
@@ -77,35 +141,6 @@ export default function CharactersPage() {
     }
   }, [])
 
-  // 数据加载完成后恢复滚动位置（仅返回导航时）
-  useEffect(() => {
-    if (characters.length === 0) return
-    const isBack = sessionStorage.getItem('_nav_backToList') === '1'
-    if (!isBack) return
-    // Consume after restoring
-    sessionStorage.removeItem('_nav_backToList')
-    restorePage('characters').then(saved => {
-      if (saved?.scrollY != null && saved.scrollY > 0) {
-        restoringScroll.current = true
-        const targetY = Number(saved.scrollY)
-        const main = document.querySelector('main')
-        const tryScroll = (n) => {
-          if (main && main.scrollHeight > targetY) {
-            main.scrollTo(0, targetY)
-            // 延迟清除标记，确保 scroll 事件已被抑制
-            setTimeout(() => { restoringScroll.current = false }, 300)
-            // 触发懒加载
-            setTimeout(() => {
-              if (main) main.dispatchEvent(new Event('scroll', { bubbles: true }))
-            }, 150)
-          } else if (n > 0) {
-            setTimeout(() => tryScroll(n - 1), 200)
-          }
-        }
-        tryScroll(10)
-      }
-    })
-  }, [characters])
 
   // 滚动时保存
   useLayoutEffect(() => {
@@ -114,7 +149,7 @@ export default function CharactersPage() {
     let timer = null
     const save = () => {
       if (restoringScroll.current) return
-      savePage('characters', { viewMode: viewModeRef.current })
+      savePage('characters', stateRef.current)
     }
     const onScroll = () => {
       clearTimeout(timer)
@@ -126,9 +161,7 @@ export default function CharactersPage() {
       clearTimeout(timer)
       save() // 离开前最终保存（此时 DOM 尚未替换，scrollTop 正确）
     }
-  }, [viewMode, savePage])
-  const viewModeRef = useRef(viewMode)
-  viewModeRef.current = viewMode
+  }, [savePage])
 
   async function loadData() {
     try {
@@ -174,7 +207,7 @@ export default function CharactersPage() {
   }
 
   function navigateToDetail(id) {
-    savePage('characters', { viewMode: viewModeRef.current })
+    savePage('characters', stateRef.current)
     push(`/characters/${id}`)
   }
 
@@ -352,11 +385,15 @@ export default function CharactersPage() {
 
   // Shared sort/filter state for both views
   const {
-    sortKeys, handleSort, removeSort, clearSorts, reorderSorts,
+    sortKeys, setSortKeys, handleSort, removeSort, clearSorts, reorderSorts,
     filters, setFilter, clearFilters,
     showFilters, setShowFilters, filterableCols, filterOptions,
     processed, activeFilterCount,
   } = useSortFilter(filtered, columns)
+
+  // 用 ref 保持最新状态，避免 useLayoutEffect 频繁重建
+  const stateRef = useRef({ viewMode, search, sortKeys, filters })
+  stateRef.current = { viewMode, search, sortKeys, filters }
 
   return (
     <div className="p-6">
@@ -459,6 +496,7 @@ export default function CharactersPage() {
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
           onRowClick={row => navigateToDetail(row.id)}
+          itemIdKey="id"
         />
       )}
 
@@ -472,6 +510,7 @@ export default function CharactersPage() {
             return (
               <div
                 key={char.id}
+                data-item-id={char.id}
                 onClick={() => navigateToDetail(char.id)}
                 className={`group relative rounded-xl overflow-hidden border cursor-pointer
                   bg-gradient-to-b ${ELEMENT_BG[char.element_id] || 'from-surface-800 to-surface-900'}

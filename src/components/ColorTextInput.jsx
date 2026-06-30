@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Eraser, Bold, Italic, GripHorizontal, Eye, EyeOff, StickyNote, X } from 'lucide-react'
+import ColorPicker from './ColorPicker'
 import {
   PRESET_COLORS, wrapWithColor, unwrapColor,
   wrapWithBold, wrapWithItalic, parseColorMarkup,
@@ -814,13 +815,10 @@ export default function ColorTextInput({
         ))}
 
         {/* 自定义颜色 */}
-        <input
-          type="color"
-          onChange={e => !preview && applyRichFormat('color', e.target.value)}
+        <ColorPicker
+          value="#000000"
+          onChange={hex => !preview && applyRichFormat('color', hex)}
           disabled={preview}
-          className={`w-5 h-5 rounded cursor-pointer border-0 p-0 bg-transparent ${
-            preview ? 'opacity-40 pointer-events-none' : ''
-          }`}
           title="自定义颜色"
         />
 
@@ -978,8 +976,13 @@ export default function ColorTextInput({
                   className="w-4 h-4 rounded-full border border-surface-500 hover:scale-125 transition-transform"
                   style={{ backgroundColor: color }} title={`${label}色`} />
               ))}
-              <input type="color" onChange={e => applyNoteColor(e.target.value)}
-                className="w-4 h-4 rounded cursor-pointer border-0 p-0 bg-transparent" title="自定义颜色" />
+              <ColorPicker
+                value="#000000"
+                onChange={hex => applyNoteColor(hex)}
+                className="w-4 h-4"
+                buttonClassName="w-4 h-4 rounded-full border border-surface-500"
+                title="自定义颜色"
+              />
             </div>
 
             {/* 正文 */}

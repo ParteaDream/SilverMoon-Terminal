@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
+import { useLazyImage } from '../hooks/useLazyImage'
 import DataTable from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
@@ -14,30 +15,82 @@ export default function ArtifactsPage() {
   const { query } = useDb()
   const { restorePage, savePage, push, consumeBackToList } = useNav()
   const [artifacts, setArtifacts] = useState([])
+
+  // ── 同步初始化：仅 viewMode 从缓存恢复 ──
+  const initViewMode = loadPageStateSync('artifacts')?.state?.viewMode
   const [search, setSearch] = useState('')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({})
   const [viewMode, setViewMode] = useState(() => {
-    const saved = loadPageStateSync('artifacts')
-    if (saved?.state?.viewMode) return saved.state.viewMode
+    if (initViewMode) return initViewMode
     try {
       const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
       if (defs.artifacts) return defs.artifacts
     } catch (_) {}
     return 'gallery'
   })
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState({})
   const [selected, setSelected] = useState(new Set())
   const restoringScroll = useRef(false)
+  // 用 ref 保持最新状态
+  const stateRef = useRef({ viewMode, search })
+  stateRef.current = { viewMode, search }
 
   useEffect(() => {
     const isBack = consumeBackToList()
     if (isBack) {
+      // 同步预设 scrollY 消除置顶闪烁
+      const cached = loadPageStateSync('artifacts')
+      if (cached?.scrollY > 0) {
+        const m = document.querySelector('main')
+        if (m) m.scrollTop = cached.scrollY
+      }
       loadData()
+      restoringScroll.current = true
       restorePage('artifacts').then(saved => {
         if (saved) {
           if (saved.viewMode) setViewMode(saved.viewMode)
-          if (saved.scrollY != null) {
+          if (saved.search) setSearch(saved.search)
+          // 等待 React 处理搜索后再恢复滚动位置
+          requestAnimationFrame(() => {
+          const main = document.querySelector('main')
+          // 先尝试 scrollToItem（精确计算 scrollY）
+          const scrollToId = sessionStorage.getItem('_nav_scroll_to_id')
+          if (scrollToId) {
+            sessionStorage.removeItem('_nav_scroll_to_id')
+            const el = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
+            const m = document.querySelector('main')
+            if (el && m) {
+              const elRect = el.getBoundingClientRect()
+              const mRect = m.getBoundingClientRect()
+              const elTopInMain = elRect.top - mRect.top + m.scrollTop
+              const targetY = elTopInMain - (m.clientHeight / 2) + (elRect.height / 2)
+              m.scrollTo(0, Math.max(0, Math.round(targetY)))
+              setTimeout(() => { restoringScroll.current = false }, 300)
+              setTimeout(() => m.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              return
+            }
+            // 元素不在 DOM（可能被筛选隐藏）：后台重试，同时走 scrollY 回退
+            const retryScrollToItem = (n) => {
+              const el2 = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
+              const m2 = document.querySelector('main')
+              if (el2 && m2) {
+                const er = el2.getBoundingClientRect()
+                const mr = m2.getBoundingClientRect()
+                const et = er.top - mr.top + m2.scrollTop
+                const ty = et - (m2.clientHeight / 2) + (er.height / 2)
+                m2.scrollTo(0, Math.max(0, Math.round(ty)))
+                setTimeout(() => { restoringScroll.current = false }, 300)
+                setTimeout(() => m2.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              } else if (n > 0) {
+                setTimeout(() => retryScrollToItem(n - 1), 200)
+              }
+            }
+            setTimeout(() => retryScrollToItem(15), 200)
+            // 不 return — 走下方 scrollY 回退作为近似定位
+          }
+          // 否则恢复保存的 scrollY
+          if (saved.scrollY != null && saved.scrollY > 0) {
             restoringScroll.current = true
             const targetY = Number(saved.scrollY)
             const tryScroll = (attempt) => {
@@ -55,6 +108,7 @@ export default function ArtifactsPage() {
             }
             setTimeout(() => tryScroll(10), 100)
           }
+          }) // end requestAnimationFrame
         }
       })
     } else {
@@ -76,14 +130,14 @@ export default function ArtifactsPage() {
     const onScroll = () => {
       clearTimeout(timer)
       if (restoringScroll.current) return
-      timer = setTimeout(() => savePage('artifacts', { viewMode }), 200)
+      timer = setTimeout(() => savePage('artifacts', stateRef.current), 200)
     }
     main.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       main.removeEventListener('scroll', onScroll)
       clearTimeout(timer)
     }
-  }, [viewMode, savePage])
+  }, [savePage])
 
   async function loadData() {
     const result = await query('SELECT * FROM artifacts ORDER BY id')
@@ -97,7 +151,7 @@ export default function ArtifactsPage() {
   }, [selected, artifacts])
 
   function navigateToDetail(id) {
-    savePage('artifacts', { viewMode })
+    savePage('artifacts', stateRef.current)
     push(`/artifacts/${id}`)
   }
 
@@ -159,11 +213,6 @@ export default function ArtifactsPage() {
       filterType: 'text' },
     { key: 'two_piece_bonus', label: '2件套', render: row => <span className="text-xs text-surface-400 whitespace-normal">{row.two_piece_bonus || '-'}</span> },
     { key: 'four_piece_bonus', label: '4件套', render: row => <span className="text-xs text-surface-400 whitespace-normal">{row.four_piece_bonus || '-'}</span> },
-    { key: 'pieces', label: '部件', render: row => (
-      <span className="text-xs text-surface-500">
-        {[row.flower_name_zh, row.plume_name_zh, row.sands_name_zh, row.goblet_name_zh, row.circlet_name_zh].filter(Boolean).join(' / ') || '-'}
-      </span>
-    )},
   ]
 
   return (
@@ -183,11 +232,11 @@ export default function ArtifactsPage() {
       {viewMode === 'table' ? (
         <DataTable title="" columns={columns} data={filtered} onEdit={openEdit} onDelete={handleDelete} onAdd={null} searchBar={null}
           selectable selectedIds={selected} onToggleSelect={toggleSelect} onToggleSelectAll={toggleSelectAll}
-          onRowClick={row => navigateToDetail(row.id)} />
+          onRowClick={row => navigateToDetail(row.id)} itemIdKey="id" />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3">
           {filtered.map(a => (
-            <div key={a.id} onClick={() => navigateToDetail(a.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
+            <div key={a.id} data-item-id={a.id} onClick={() => navigateToDetail(a.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
               <div className="aspect-[3/4] bg-surface-700 flex items-center justify-center">
                 {(a.flower_image || a.image || a.circlet_image) ? <ArtThumb filename={a.flower_image || a.image || a.circlet_image} large /> : <Gem className="w-10 h-10 text-surface-500" />}
               </div>
@@ -239,15 +288,17 @@ export default function ArtifactsPage() {
 }
 
 function ArtThumb({ filename, large }) {
-  const [src, setSrc] = useState(null)
-  const { readImage } = useDb()
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      if (filename) { const data = await readImage(filename); if (!cancelled && data) setSrc(data) }
-    }
-    load(); return () => { cancelled = true }
-  }, [filename, readImage])
-  if (!src) return large ? <Gem className="w-10 h-10 text-surface-500" /> : <div className="w-10 h-10 rounded bg-surface-700 flex items-center justify-center shrink-0"><Gem className="w-4 h-4 text-surface-500" /></div>
-  return <img src={src} alt="" className={large ? 'w-full h-full object-contain' : 'w-10 h-10 rounded object-cover shrink-0'} />
+  const { ref, src } = useLazyImage(filename)
+  if (large) {
+    return (
+      <div ref={ref} className="w-full h-full flex items-center justify-center overflow-hidden">
+        {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <Gem className="w-10 h-10 text-surface-500" />}
+      </div>
+    )
+  }
+  return (
+    <div ref={ref} className="w-10 h-10 rounded overflow-hidden shrink-0 bg-surface-700 flex items-center justify-center">
+      {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <Gem className="w-4 h-4 text-surface-500" />}
+    </div>
+  )
 }

@@ -167,7 +167,7 @@ export function NavProvider({ children }) {
   }, [cursor, stack])
 
   // ── 返回列表：保存详情页状态，返回列表（不截断导航栈，保留上一步能力）──
-  const backToList = useCallback((listPath) => {
+  const backToList = useCallback((listPath, scrollToItemId) => {
     // Mark this navigation as "返回列表" so detail page hooks save their state
     sessionStorage.setItem('_nav_backToList', '1')
 
@@ -175,11 +175,17 @@ export function NavProvider({ children }) {
     // 在栈中找到列表页位置，将游标移到那里（类似 goBack 但设置了保存标记）
     const listIdx = stackRef.current.findIndex(e => e.pathname === listPath)
     if (listIdx >= 0 && listIdx < cur) {
+      if (scrollToItemId != null) {
+        sessionStorage.setItem('_nav_scroll_to_id', String(scrollToItemId))
+      }
       navigatingRef.current = true
       dispatch({ type: 'SET_CURSOR', index: listIdx })
       navigate(listPath, { replace: true })
     } else {
       // 列表页不在栈中：直接导航
+      if (scrollToItemId != null) {
+        sessionStorage.setItem('_nav_scroll_to_id', String(scrollToItemId))
+      }
       navigatingRef.current = true
       navigate(listPath, { replace: true })
     }

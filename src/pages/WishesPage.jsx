@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
+import { useNav } from '../context/NavContext'
 import { clearDetailScroll } from '../hooks/useDetailState'
 import { useLazyImage } from '../hooks/useLazyImage'
+import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import { Plus, Trash2, Image, List, Search, CheckSquare, Square, ArrowUpDown, GripVertical, User, Sword, ChevronLeft, ChevronRight, Columns } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
@@ -26,6 +28,8 @@ function parseBannerImages(raw) {
 
 export default function WishesPage() {
   const { query, readImage } = useDb()
+  const { restorePage, savePage, consumeBackToList } = useNav()
+  const restoringScroll = useRef(false)
 
   // Data
   const [wishes, setWishes] = useState([])
@@ -55,9 +59,104 @@ export default function WishesPage() {
   const [saving, setSaving] = useState(false)
   const [lightbox, setLightbox] = useState(null)
 
+  const initialLoadDone = useRef(false)
+
   // Load all data
   useEffect(() => { loadAll() }, [])
-  useEffect(() => { loadWishes() }, [bannerType, sortAsc])
+  // bannerType/sortAsc 变化时重新加载（跳过首次，由 mount effect 控制）
+  useEffect(() => {
+    if (!initialLoadDone.current) return
+    loadWishes()
+  }, [bannerType, sortAsc])
+
+  // ── 状态持久化 ──
+  useEffect(() => {
+    const isBack = consumeBackToList()
+    if (isBack) {
+      restorePage('wishes').then(saved => {
+        const restoreType = saved?.bannerType || bannerType
+        if (saved) {
+          if (saved.bannerType) setBannerType(restoreType)
+          if (saved.showImages != null) setShowImages(saved.showImages)
+          if (saved.scrollY != null && saved.scrollY > 0) {
+            sessionStorage.setItem('_wishes_restore_y', String(saved.scrollY))
+          }
+        }
+        initialLoadDone.current = true
+        loadWishes(restoreType)  // 显式传入类型，不依赖闭包中的 bannerType
+      })
+    } else {
+      const main = document.querySelector('main')
+      if (main) main.scrollTo(0, 0)
+      initialLoadDone.current = true
+      loadWishes()
+    }
+  }, [])
+  // 数据加载完成后恢复滚轮位置
+  useEffect(() => {
+    if (wishes.length === 0 && banners.length === 0) return
+    const restoreY = sessionStorage.getItem('_wishes_restore_y')
+    if (!restoreY) return
+    const targetY = Number(restoreY)
+    if (targetY <= 0) { sessionStorage.removeItem('_wishes_restore_y'); return }
+    sessionStorage.removeItem('_wishes_restore_y')
+    const main = document.querySelector('main')
+    if (main) {
+      restoringScroll.current = true
+      const tryScroll = (n) => {
+        if (main.scrollHeight > targetY) {
+          main.scrollTo(0, targetY)
+          setTimeout(() => { restoringScroll.current = false }, 300)
+        } else if (n > 0) {
+          setTimeout(() => tryScroll(n - 1), 200)
+        } else {
+          restoringScroll.current = false
+        }
+      }
+      tryScroll(20)
+    }
+  }, [wishes, banners])
+
+  // 滚动时保存
+  useLayoutEffect(() => {
+    const main = document.querySelector('main')
+    if (!main) return
+    let timer = null
+    const save = () => {
+      if (restoringScroll.current) return
+      savePage('wishes', { bannerType, showImages })
+    }
+    const onScroll = () => {
+      clearTimeout(timer)
+      if (restoringScroll.current) return
+      timer = setTimeout(save, 150)
+    }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => { main.removeEventListener('scroll', onScroll); clearTimeout(timer); save() }
+  }, [bannerType, showImages, savePage])
+  // bannerType/showImages 变化时立即保存状态到 user.json（保留已有的滚轮数据）
+  useEffect(() => {
+    if (!initialLoadDone.current) return
+    const current = loadPageStateSync('wishes')
+    const scrollY = current?.scrollY || 0
+    savePageStateSync('wishes', scrollY, { bannerType, showImages })
+  }, [bannerType, showImages])
+
+  // 快捷键 F：切换卡池图 / 详情模式
+  useEffect(() => {
+    function onKeyDown(e) {
+      // 编辑模式打开时不响应，避免误触
+      if (modalOpen) return
+      // 输入框中不响应
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault()
+        setShowImages(prev => !prev)
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [modalOpen])
 
   async function loadAll() {
     const [chars, weps, fits] = await Promise.all([
@@ -87,13 +186,13 @@ export default function WishesPage() {
     const wm = {}; for (const w of (weps.data || [])) wm[w.id] = w
     setCharMap(cm)
     setWeaponMap(wm)
-    await loadWishes()
   }
 
-  async function loadWishes() {
+  async function loadWishes(type) {
+    const bt = type || bannerType
     const wRes = await query(
       `SELECT * FROM wishes WHERE banner_type = ? ORDER BY version ${sortAsc ? 'ASC' : 'DESC'}, phase ${sortAsc ? 'ASC' : 'DESC'}`,
-      [bannerType]
+      [bt]
     )
     const wList = wRes.data || []
     setWishes(wList)
@@ -336,7 +435,7 @@ export default function WishesPage() {
         </div>
         <div className="flex items-center gap-2">
           {/* Display mode toggle: 卡池图 / 详情 */}
-          <div className="flex items-center rounded-lg bg-surface-800 border border-surface-700 p-0.5">
+          <div className="flex items-center rounded-lg bg-surface-800 border border-surface-700 p-0.5 relative group">
             <button
               onClick={() => setShowImages(true)}
               className={`px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1
@@ -353,6 +452,9 @@ export default function WishesPage() {
             >
               <List className="w-3.5 h-3.5" />详情
             </button>
+            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 rounded bg-surface-950 text-[10px] text-surface-300 whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-20 border border-surface-700 shadow-lg">
+             快捷键 F 切换视图
+            </div>
           </div>
           {/* Layout toggle: 默认 / 紧凑 */}
           <div className="flex items-center rounded-lg bg-surface-800 border border-surface-700 p-0.5">
@@ -591,7 +693,7 @@ export default function WishesPage() {
               </div>
 
               {banner.items.map((item) => (
-                <div key={item.id} className="flex items-center gap-2 mb-2 p-2 rounded bg-surface-800/50"
+                <div key={item.id} className="flex items-center gap-2 mb-2 p-2 rounded bg-surface-800/50 select-none"
                   draggable
                   onDragStart={(e) => { e.dataTransfer.setData('application/banneritem', JSON.stringify({ bannerId: banner.id, itemId: item.id })); e.currentTarget.classList.add('opacity-50') }}
                   onDragEnd={(e) => e.currentTarget.classList.remove('opacity-50')}
@@ -603,6 +705,7 @@ export default function WishesPage() {
                   <select
                     value={item.item_type}
                     onChange={e => updateBannerItem(banner.id, item.id, 'item_type', e.target.value)}
+                    onMouseDown={e => e.stopPropagation()}
                     className="px-2 py-1.5 bg-surface-700 border border-surface-600 rounded text-xs text-white flex-shrink-0"
                   >
                     <option value="character">角色</option>
@@ -618,6 +721,7 @@ export default function WishesPage() {
                   <select
                     value={item.rarity}
                     onChange={e => updateBannerItem(banner.id, item.id, 'rarity', Number(e.target.value))}
+                    onMouseDown={e => e.stopPropagation()}
                     className="px-2 py-1.5 bg-surface-700 border border-surface-600 rounded text-xs text-white flex-shrink-0"
                   >
                     <option value={5}>★★★★★</option>
@@ -683,7 +787,7 @@ function SearchableSelect({ value, onChange, items, itemType, readImage }) {
   return (
     <div ref={containerRef} className="relative flex-1 min-w-0">
       {open ? (
-        <div className="rounded border border-primary-500 bg-surface-700 overflow-hidden">
+        <div className="absolute left-0 right-0 top-0 z-20 rounded border border-primary-500 bg-surface-700 overflow-hidden shadow-lg">
           <input
             autoFocus
             value={query}
@@ -750,7 +854,7 @@ function ThumbPreview({ file, readImage }) {
   }, [file, readImage])
 
   if (!src) return <div className="w-6 h-6 rounded bg-surface-600 flex-shrink-0" />
-  return <img src={src} alt="" className="w-6 h-6 rounded object-cover flex-shrink-0" />
+  return <img src={src} alt="" draggable={false} className="w-6 h-6 rounded object-cover flex-shrink-0" />
 }
 
 // ── BannerCard component ──

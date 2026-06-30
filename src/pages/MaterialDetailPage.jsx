@@ -85,7 +85,7 @@ function MaterialDetailContent() {
   }
 
   function handleBack() {
-    backToList('/materials')
+    backToList('/materials', material?.id)
   }
 
   if (loading) {
@@ -110,7 +110,7 @@ function MaterialDetailContent() {
       {/* Banner */}
       <div className="relative px-8 py-10 border-b border-surface-800 overflow-hidden">
         <div className="absolute inset-0 bg-surface-900" />
-        <button onClick={handleBack} className="relative z-10 inline-flex items-center gap-1.5 text-xs text-surface-400 hover:text-white transition-colors mb-6">
+        <button onClick={handleBack} className="relative z-10 self-start inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-[rgb(var(--color-1))] text-[rgb(var(--btn-text-1)_/_0.8)] hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:scale-105 transition-all mb-6">
           <ArrowLeft className="w-3.5 h-3.5" />
           返回材料列表
         </button>
@@ -137,7 +137,7 @@ function MaterialDetailContent() {
               </span>
             </div>
           </div>
-          <button onClick={() => setEditOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-white/80 transition-colors">
+          <button onClick={() => setEditOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-[rgb(var(--color-1))] text-[rgb(var(--btn-text-1)_/_0.8)] hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:scale-105 transition-all">
             <Edit3 className="w-3.5 h-3.5" />编辑
           </button>
         </div>

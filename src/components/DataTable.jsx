@@ -2,10 +2,10 @@ import { useState, useMemo } from 'react'
 import { Edit3, Trash2, Plus, ArrowUpDown, ArrowUp, ArrowDown, Filter, X, Square, CheckSquare } from 'lucide-react'
 
 // ── Shared sort + filter logic, usable outside DataTable ──
-export function useSortFilter(data, columns) {
-  const [sortKeys, setSortKeys] = useState([])
-  const [filters, setFilters] = useState({})
-  const [showFilters, setShowFilters] = useState(false)
+export function useSortFilter(data, columns, initialSortKeys = [], initialFilters = {}, initialShowFilters = false) {
+  const [sortKeys, setSortKeys] = useState(initialSortKeys)
+  const [filters, setFilters] = useState(initialFilters)
+  const [showFilters, setShowFilters] = useState(initialShowFilters)
 
   function handleSort(key) {
     if (key === 'expand' || !key) return
@@ -108,7 +108,9 @@ export function useSortFilter(data, columns) {
   }, [filterableCols, data])
 
   return {
-    sortKeys, handleSort, removeSort, clearSorts, reorderSorts, filters, setFilter, clearFilters, showFilters, setShowFilters,
+    sortKeys, setSortKeys, handleSort, removeSort, clearSorts, reorderSorts,
+    filters, setFilter, clearFilters,
+    showFilters, setShowFilters,
     filterableCols, filterOptions, processed, activeFilterCount: Object.keys(filters).length,
   }
 }
@@ -236,7 +238,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
   filterableCols: extFilterableCols, filterOptions: extFilterOptions,
   processed: extProcessed, activeFilterCount: extActiveFilterCount,
   selectable, selectedIds, onToggleSelect, onToggleSelectAll, onBulkDelete,
-  onRowClick, onRowReorder,
+  onRowClick, onRowReorder, itemIdKey,
 }) {
   // Use external state if provided (for sync with gallery view), else internal
   const internal = useSortFilter(data, columns)
@@ -359,6 +361,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
             <tbody>
               {processed.map((row, i) => (
                 <tr key={row.id || i}
+                  data-item-id={itemIdKey ? row[itemIdKey] : undefined}
                   className={`border-b border-surface-800/50 last:border-b-0 hover:bg-surface-800/30 transition-colors ${onRowClick ? 'cursor-pointer' : ''} ${onRowReorder ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   draggable={!!onRowReorder}

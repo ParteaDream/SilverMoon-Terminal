@@ -1,20 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useDb } from '../context/DbContext'
+import { useNav } from '../context/NavContext'
 import DataTable from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
 import { useImageDrag } from '../hooks/useImageDrag'
 import { useLazyImage } from '../hooks/useLazyImage'
+import { savePageStateSync } from '../utils/pageStateStore'
 import { Plus, LayoutList, LayoutGrid, ExternalLink, X } from 'lucide-react'
 
 export default function WebsitesPage() {
   const { query, readImage } = useDb()
+  const { restorePage, savePage, consumeBackToList } = useNav()
   const [websites, setWebsites] = useState([])
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState('table')
   const [selected, setSelected] = useState(new Set())
   const [multiSelect, setMultiSelect] = useState(false)
   const [activeDetailId, setActiveDetailId] = useState(null)
+  const restoringScroll = useRef(false)
+  const scrollRef = useRef(null)
 
   // Modal
   const [modalOpen, setModalOpen] = useState(false)
@@ -181,39 +186,69 @@ export default function WebsitesPage() {
     return <img src={src} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />
   }
 
-  // ── Gallery card ──
-  function GalleryCard({ website }) {
-    const { ref, src } = useLazyImage(website.image, '300px')
-    const handleDrag = useImageDrag(website.image)
-    return (
-      <div
-        className="rounded-xl bg-surface-800/50 border border-surface-700 hover:border-surface-600 transition-colors overflow-hidden group cursor-pointer"
-        onClick={() => handleRowClick(website)}
-        onDoubleClick={() => { if (!multiSelect) openEdit(website) }}
-      >
-        <div ref={ref} className="bg-surface-800 flex items-center justify-center overflow-hidden" style={{ minHeight: '200px' }}>
-          {src ? (
-            <img src={src} alt="" className="w-full object-contain group-hover:scale-105 transition-transform duration-300" style={{ maxHeight: '400px' }} draggable onDragStart={handleDrag} />
-          ) : (
-            <ExternalLink className="w-8 h-8 text-surface-500 my-8" />
-          )}
-        </div>
-        <div className="p-3">
-          <p className="text-sm font-medium text-surface-200 truncate">{website.title_zh}</p>
-          {website.url && (
-            <p className="text-[10px] text-surface-500 mt-0.5 truncate">{website.url}</p>
-          )}
-        </div>
-      </div>
-    )
-  }
+  // ── Gallery card （定义在组件外部，避免每次渲染重新创建导致 useLazyImage 重载）──
+  // 实际定义在文件末尾
+
+  // ── 状态持久化 ──
+  useEffect(() => {
+    const isBack = consumeBackToList()
+    if (isBack) {
+      restoringScroll.current = true
+      restorePage('websites').then(saved => {
+        if (saved?.viewMode) setViewMode(saved.viewMode)
+        if (saved?.scrollY != null && saved.scrollY > 0) {
+          sessionStorage.setItem('_websites_restore_y', String(saved.scrollY))
+        }
+      })
+    } else {
+      const el = scrollRef.current
+      if (el) el.scrollTo(0, 0)
+    }
+  }, [])
+  // 数据加载完成后恢复滚轮位置
+  useEffect(() => {
+    if (websites.length === 0) return
+    const restoreY = sessionStorage.getItem('_websites_restore_y')
+    if (!restoreY) return
+    sessionStorage.removeItem('_websites_restore_y')
+    restoringScroll.current = true
+    const el = scrollRef.current || document.querySelector('.overflow-auto')
+    const targetY = Number(restoreY)
+    if (el && targetY > 0) {
+      const tryScroll = (n) => {
+        if (el.scrollHeight > targetY) {
+          el.scrollTo(0, targetY)
+          setTimeout(() => { restoringScroll.current = false }, 300)
+        } else if (n > 0) setTimeout(() => tryScroll(n - 1), 200)
+      }
+      tryScroll(20)
+    }
+  }, [websites])
+
+  // 滚动时保存
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    let timer = null
+    const doSave = () => {
+      if (restoringScroll.current) return
+      savePageStateSync('websites', el.scrollTop, { viewMode })
+    }
+    const onScroll = () => {
+      clearTimeout(timer)
+      if (restoringScroll.current) return
+      timer = setTimeout(doSave, 150)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => { el.removeEventListener('scroll', onScroll); clearTimeout(timer); doSave() }
+  }, [viewMode])
 
   const activeDetail = activeDetailId ? websites.find(w => w.id === activeDetailId) : null
 
   return (
     <div className="p-6 flex gap-4 h-[calc(100vh-60px)]">
       {/* Left: list / gallery */}
-      <div className={`${activeDetail ? 'flex-1 min-w-[340px]' : 'flex-1'} overflow-auto`}>
+      <div ref={scrollRef} className={`${activeDetail ? 'flex-1 min-w-[340px]' : 'flex-1'} overflow-auto`}>
       {/* List view */}
       {viewMode === 'table' && (() => {
         // 右侧详情栏打开时隐藏地址列
@@ -229,12 +264,12 @@ export default function WebsitesPage() {
               {
                 key: 'url', label: '地址',
                 render: row => row.url ? (
-                  <a href="#"
-                    className="text-xs text-primary-400 hover:text-primary-300 hover:underline flex items-center gap-1"
+                  <button type="button"
+                    className="text-xs text-primary-400 hover:text-primary-300 hover:underline flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0"
                     onClick={e => { e.stopPropagation(); window.electronAPI?.openExternal(row.url); }}
                   >
                     {row.url} <ExternalLink className="w-3 h-3" />
-                  </a>
+                  </button>
                 ) : <span className="text-xs text-surface-500">-</span>,
               },
               { key: 'description_zh', label: '描述', render: row => <span className="text-xs text-surface-400 line-clamp-2 max-w-xl">{row.description_zh || '-'}</span> },
@@ -302,7 +337,7 @@ export default function WebsitesPage() {
                 onDragStart={e => { e.dataTransfer.setData('text/plain', String(w.id)); e.dataTransfer.effectAllowed = 'move'; }}
                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                 onDrop={e => { e.preventDefault(); const fromId = parseInt(e.dataTransfer.getData('text/plain'), 10); handleReorder(fromId, w.id, filtered); }}
-              ><GalleryCard website={w} /></div>
+              ><GalleryCard website={w} onRowClick={handleRowClick} onEdit={openEdit} multiSelect={multiSelect} /></div>
             ))}
             {filtered.length === 0 && (
               <div className="col-span-full py-16 text-center text-surface-500 text-sm">暂无站点数据</div>
@@ -379,4 +414,32 @@ function WebsiteDetailImage({ filename }) {
   }, [filename])
   if (!src) return <div className="w-full h-48 rounded-lg bg-surface-800 animate-pulse" />
   return <img src={src} alt="" className="w-full rounded-lg object-contain border border-surface-700" style={{ maxHeight: '400px' }} draggable onDragStart={handleDrag} />
+}
+
+// 独立组件，不在 WebsitesPage 内部定义，避免每次渲染重新创建函数引用
+// 导致 useLazyImage 卸载重装 → 所有图片重新加载
+function GalleryCard({ website, onRowClick, onEdit, multiSelect }) {
+  const { ref, src } = useLazyImage(website.image, '300px')
+  const handleDrag = useImageDrag(website.image)
+  return (
+    <div
+      className="rounded-xl bg-surface-800/50 border border-surface-700 hover:border-surface-600 transition-colors overflow-hidden group cursor-pointer"
+      onClick={() => onRowClick(website)}
+      onDoubleClick={() => { if (!multiSelect) onEdit(website) }}
+    >
+      <div ref={ref} className="bg-surface-800 flex items-center justify-center overflow-hidden" style={{ minHeight: '200px' }}>
+        {src ? (
+          <img src={src} alt="" className="w-full object-contain group-hover:scale-105 transition-transform duration-300" style={{ maxHeight: '400px' }} draggable onDragStart={handleDrag} />
+        ) : (
+          <ExternalLink className="w-8 h-8 text-surface-500 my-8" />
+        )}
+      </div>
+      <div className="p-3">
+        <p className="text-sm font-medium text-surface-200 truncate">{website.title_zh}</p>
+        {website.url && (
+          <p className="text-[10px] text-surface-500 mt-0.5 truncate">{website.url}</p>
+        )}
+      </div>
+    </div>
+  )
 }

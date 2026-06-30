@@ -1,6 +1,7 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { notifySidebarToggled } from '../context/SidebarContext'
+import { useNav } from '../context/NavContext'
 import {
   Users, Swords, Gem, Package, Gift, SwordsIcon, Database, Globe, Settings, Info,
   PanelLeftClose, PanelLeftOpen
@@ -22,7 +23,8 @@ export default function Sidebar() {
   const [appIcon, setAppIcon] = useState('./UI_Talent_U_Columbina_02.webp')
   const [collapsed, setCollapsed] = useState(false) // always start expanded
   const [appVersion, setAppVersion] = useState('1.0')
-  const navigate = useNavigate()
+  const { push } = useNav()
+  const location = useLocation()
 
   useEffect(() => {
     if (window.electronAPI?.getAppVersion) {
@@ -112,30 +114,29 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className={`flex-1 py-4 space-y-0.5 overflow-y-auto ${collapsed ? 'px-2' : 'px-3'}`}>
-        {navItems.map(item => (
-          <NavLink
+        {navItems.map(item => {
+          const isActive = location.pathname === item.to || location.pathname.startsWith(item.to + '/')
+          return (
+          <button
             key={item.to}
-            to={item.to}
+            onClick={() => push(item.to)}
             title={collapsed ? item.label : undefined}
-            draggable={false}
-            onDragStart={e => e.preventDefault()}
-            className={({ isActive }) =>
-              `flex items-center rounded-lg text-sm font-medium
+            className={`flex items-center rounded-lg text-sm font-medium w-full
                transition-all duration-200 no-drag
                ${collapsed
                  ? 'justify-center px-0 py-2.5'
                  : 'gap-3 px-3 py-2.5'
                }
                ${isActive
-                 ? 'bg-primary-500/10 text-primary-400 shadow-sm hover:bg-primary-500/10 hover:text-primary-400'
+                 ? 'bg-primary-500/10 text-primary-400 shadow-sm'
                  : 'text-surface-400 hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:ring-2 hover:ring-[rgb(var(--color-1))] hover:shadow-lg'
                }`
             }
           >
             <item.icon className="w-4 h-4 flex-shrink-0" />
             {!collapsed && <span>{item.label}</span>}
-          </NavLink>
-        ))}
+          </button>
+        )})}
       </nav>
 
       {/* Toggle button */}
@@ -153,7 +154,7 @@ export default function Sidebar() {
       {/* Footer */}
       <div className={`p-3 border-t border-surface-800 flex-shrink-0 ${collapsed ? 'text-center' : ''}`}>
         <button
-          onClick={() => navigate('/settings?module=version')}
+          onClick={() => push('/settings?module=version')}
           title="版本信息"
           className={`flex items-center text-xs text-surface-500 hover:text-primary-400 transition-colors no-drag ${collapsed ? 'w-full justify-center' : 'gap-2 px-2'}`}
         >

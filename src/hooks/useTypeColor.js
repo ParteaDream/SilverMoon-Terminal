@@ -65,15 +65,101 @@ function hslToRgbStr(h, s, l) {
     g = hue2rgb(p, q, h)
     b = hue2rgb(p, q, h - 1/3)
   }
-  const ri = Math.round(r * 255)
-  const gi = Math.round(g * 255)
-  const bi = Math.round(b * 255)
-  return `${ri} ${gi} ${bi}`
+  return `${Math.round(r * 255)} ${Math.round(g * 255)} ${Math.round(b * 255)}`
 }
 
 /**
- * 获取当前主题的 primary-500 色相（主色调）。
- * 如果无法获取，默认使用 230（靛蓝色相）。
+ * HSL → { r, g, b, lightness }
+ */
+function hslToRgbObj(h, s, l) {
+  const str = hslToRgbStr(h, s, l)
+  const parts = str.split(' ').filter(Boolean)
+  return { r: Number(parts[0]), g: Number(parts[1]), b: Number(parts[2]), lightness: l }
+}
+
+/**
+ * RGB 字符串 "r g b" → { r, g, b }
+ */
+function rgbStrToObj(str) {
+  const parts = str.split(' ').filter(Boolean)
+  if (parts.length >= 3) {
+    return {
+      r: Math.min(255, Math.max(0, Number(parts[0]))),
+      g: Math.min(255, Math.max(0, Number(parts[1]))),
+      b: Math.min(255, Math.max(0, Number(parts[2]))),
+    }
+  }
+  return null
+}
+
+/**
+ * 欧几里得 RGB 距离（0-441，越大越不同）
+ */
+function colorDistance(a, b) {
+  const dr = a.r - b.r
+  const dg = a.g - b.g
+  const db = a.b - b.b
+  return Math.sqrt(dr * dr + dg * dg + db * db)
+}
+
+/**
+ * 检查一组颜色是否两两之间差异足够大
+ */
+function areColorsDistinct(colors, minDist = 80) {
+  for (let i = 0; i < colors.length; i++) {
+    for (let j = i + 1; j < colors.length; j++) {
+      if (colorDistance(colors[i], colors[j]) < minDist) return false
+    }
+  }
+  return true
+}
+
+/**
+ * 从主题调色板中筛选合适的颜色（亮度 15-85% 的中等亮度范围）
+ */
+function getSuitablePaletteColors(theme, themes, customColors) {
+  const candidates = []
+  const seen = new Set()
+
+  if (theme === 'custom') {
+    for (let i = 1; i <= 5; i++) {
+      const val = customColors['c' + i]
+      if (!val) continue
+      const rgb = rgbStrToObj(String(val))
+      if (!rgb) continue
+      const { l } = rgbToHsl(rgb.r, rgb.g, rgb.b)
+      if (l >= 15 && l <= 85) {
+        const hex = `#${rgb.r.toString(16).padStart(2,'0')}${rgb.g.toString(16).padStart(2,'0')}${rgb.b.toString(16).padStart(2,'0')}`
+        if (seen.has(hex)) continue
+        seen.add(hex)
+        candidates.push({ r: rgb.r, g: rgb.g, b: rgb.b, hex, lightness: l })
+      }
+    }
+  } else {
+    const palette = themes[theme]?.colors
+    if (palette) {
+      for (const hex of palette) {
+        if (!hex || !hex.startsWith('#')) continue
+        try {
+          const { r, g, b } = hexToRgb(hex)
+          const { l } = rgbToHsl(r, g, b)
+          if (l >= 15 && l <= 85) {
+            if (seen.has(hex)) continue
+            seen.add(hex)
+            candidates.push({ r, g, b, hex, lightness: l })
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // 按亮度排序
+  candidates.sort((a, b) => a.lightness - b.lightness)
+  return candidates
+}
+
+/**
+ * 获取当前主题的 primary hue
  */
 function extractPrimaryHue(theme, themes, customColors) {
   try {
@@ -82,19 +168,13 @@ function extractPrimaryHue(theme, themes, customColors) {
       const c1 = customColors.c1
       if (c1) {
         const parts = c1.split(' ').filter(Boolean)
-        if (parts.length === 3 && !isNaN(Number(parts[0]))) {
-          const r = Math.min(255, Math.max(0, Math.round(Number(parts[0]))))
-          const g = Math.min(255, Math.max(0, Math.round(Number(parts[1]))))
-          const b = Math.min(255, Math.max(0, Math.round(Number(parts[2]))))
-          primaryHex = `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`
+        if (parts.length >= 3) {
+          primaryHex = `#${Math.min(255,Math.max(0,Math.round(Number(parts[0])))).toString(16).padStart(2,'0')}${Math.min(255,Math.max(0,Math.round(Number(parts[1])))).toString(16).padStart(2,'0')}${Math.min(255,Math.max(0,Math.round(Number(parts[2])))).toString(16).padStart(2,'0')}`
         }
       }
     } else {
-      // Attempt to get the primary accent color from theme colors
-      // Typically the 3rd color (index 2) is the primary accent in most themes
       const palette = themes[theme]?.colors
       if (palette && palette.length >= 3) {
-        // Use the most saturated color as primary indicator
         let best = palette[2]
         let bestSat = -1
         for (const c of palette) {
@@ -111,15 +191,75 @@ function extractPrimaryHue(theme, themes, customColors) {
       return h
     }
   } catch (_) {}
-  return 230 // 默认靛蓝色相
+  return 230
 }
 
 /**
- * 根据分类名称从当前主题派生一个高区分度的颜色。
+ * 根据主题构建颜色池：
+ * 1. 从调色板取候选颜色
+ * 2. 如果候选≥3且两两差异足够（距离≥80），直接使用
+ * 3. 否则：保留调色板已有颜色，用 hue 派生色补足到至少3个不同颜色
+ */
+function buildColorPool(theme, themes, customColors) {
+  const palColors = getSuitablePaletteColors(theme, themes, customColors)
+
+  // 调色板颜色足够多且差异明显 → 直接使用
+  if (palColors.length >= 3 && areColorsDistinct(palColors, 70)) {
+    return palColors
+  }
+
+  // 调色板不足或太接近 → 混合策略：保留调色板已有 + 派生填充
+  const pool = [...palColors]
+  const usedHues = new Set()
+
+  // 记录已用色相（来自调色板颜色），避免派生色撞上
+  for (const c of palColors) {
+    const { h } = rgbToHsl(c.r, c.g, c.b)
+    usedHues.add(Math.round(h))
+  }
+
+  const primaryHue = extractPrimaryHue(theme, themes, customColors)
+
+  // 预设 6 个参考色相步长（60°），确保均匀分布在色环上
+  const steps = [0, 60, 120, 180, 240, 300]
+  for (const offset of steps) {
+    if (pool.length >= 3) break
+    const hue = ((primaryHue + offset) % 360 + 360) % 360
+    const roundedHue = Math.round(hue)
+    // 避免与已有的某个调色板颜色色相太接近（< 30°）
+    let tooClose = false
+    for (const used of usedHues) {
+      const diff = Math.abs(roundedHue - used)
+      if (Math.min(diff, 360 - diff) < 30) { tooClose = true; break }
+    }
+    if (tooClose) continue
+    usedHues.add(roundedHue)
+    // 派生色：饱和度 65%、亮度 55%，在深色背景上鲜明且不刺眼
+    pool.push(hslToRgbObj(hue, 65, 55))
+  }
+
+  // 如果还不够（极少数极端情况），放宽色相差约束继续补
+  if (pool.length < 3) {
+    for (const offset of steps) {
+      if (pool.length >= 3) break
+      const hue = ((primaryHue + offset + 30) % 360 + 360) % 360 // 中间偏移
+      pool.push(hslToRgbObj(hue, 65, 55))
+    }
+  }
+
+  return pool
+}
+
+/**
+ * 根据分类名称从当前主题的调色板或派生色中选取颜色。
  *
- * 策略：使用 HSL 色彩空间，固定高饱和度(68%)和中等亮度(58%)以保证在深色
- * 背景上清晰可见，通过 hash 将色相均匀分布在色环上（相对主题主色偏移），
- * 确保不同分类的颜色彼此明显不同且与 UI 背景区分。
+ * 策略：
+ * 1. 从主题调色板中筛选亮度适中的颜色
+ * 2. 如果调色板颜色足够多且差异明显，直接按 hash 分配
+ * 3. 如果不足或太接近，用调色板已有颜色 + 主题主色派生色补足颜色池
+ * 4. 始终保证颜色池中的颜色两两差异足够，避免标签颜色近似
+ *
+ * 文字颜色：根据背景亮度自动选择深色（L>50%）或浅色（L≤50%）。
  *
  * 返回格式: { bg: 'r g b', text: 'r g b' } (空格分隔 RGB)
  */
@@ -127,18 +267,13 @@ export function useTypeColor(name) {
   const { theme, themes, customColors } = useTheme()
 
   return useMemo(() => {
-    const primaryHue = extractPrimaryHue(theme, themes, customColors)
-    // 将分类名称 hash 到 0-11 之间的整数，每个间隔 30° 色相（确保均匀分布）
-    const hueStep = 30
-    const offset = hashIndex(name, 12) * hueStep
-    // 相对于主题主色偏移，让所有颜色围绕主题色分布
-    const hue = ((primaryHue + offset) % 360 + 360) % 360
-    // 固定高饱和度 + 中等亮度，在深色背景上足够鲜明且不过亮
-    const saturation = 68
-    const lightness = 58
-    const bg = hslToRgbStr(hue, saturation, lightness)
-    // 亮色背景用深色文字
-    const text = lightness > 50 ? '0 0 0' : '255 255 255'
+    const pool = buildColorPool(theme, themes, customColors)
+
+    // 从颜色池中按 hash 分配
+    const idx = hashIndex(name || '', pool.length)
+    const color = pool[idx]
+    const bg = `${color.r} ${color.g} ${color.b}`
+    const text = color.lightness > 50 ? '0 0 0' : '255 255 255'
     return { bg, text }
   }, [name, theme, themes, customColors])
 }

@@ -4186,6 +4186,25 @@ ipcMain.handle('install-update', () => {
 
 ipcMain.handle('check-for-update', async () => {
   try {
+    // Windows: 每次检查前重置 autoUpdater 内部状态，避免后续检查超时
+    if (process.platform === 'win32') {
+      autoUpdater.setFeedURL({
+        provider: 'github',
+        owner: 'ParteaDream',
+        repo: 'SilverMoon-Terminal',
+        vPrefixedTagName: true,
+        releaseType: 'release',
+      });
+      // 清理更新缓存目录，消除 stale 状态
+      const updaterCacheDir = path.join(app.getPath('userData'), '..', 'silvermoon-terminal-updater');
+      if (fs.existsSync(updaterCacheDir)) {
+        try { fs.rmSync(updaterCacheDir, { recursive: true, force: true }); } catch (_) {}
+      }
+      const squirrelCache = path.join(app.getPath('cache'), '..', 'silvermoon-terminal-updater');
+      if (fs.existsSync(squirrelCache)) {
+        try { fs.rmSync(squirrelCache, { recursive: true, force: true }); } catch (_) {}
+      }
+    }
     // 设置 20s 超时，避免 GitHub API 无响应时永久卡住
     const result = await Promise.race([
       autoUpdater.checkForUpdates(),
@@ -4379,32 +4398,47 @@ ipcMain.handle('set-app-icon', async (_event, { filename, pngData }) => {
         const appFolder = path.dirname(exePath);
         const appName = path.basename(exePath);
 
-        // 安全转义路径中的反斜杠（bat 中需要双反斜杠或引号保护）
+        // 安全转义路径中的反斜杠（bat 中需要引号保护）
         const safeExe = exePath;
         const safeRcedit = rceditPath;
         const safeIcon = srcPath;
 
-        const batContent = `@echo off
-chcp 65001 >nul
-echo 正在为 SilverMoon-Terminal 更换图标...
-echo 应用将在完成后自动重启。
-:wait
-tasklist /fi "IMAGENAME eq ${appName}" 2>nul | find /i "${appName}" >nul
-if not errorlevel 1 (
-  timeout /t 2 /nobreak >nul
-  goto wait
-)
-"${safeRcedit}" "${safeExe}" --set-icon "${safeIcon}"
-if errorlevel 1 (
-  echo 图标替换失败，请尝试以管理员身份运行此脚本。
-  pause
-  exit /b 1
-)
-echo 图标替换成功！
-start "" "${safeExe}"
-exit /b 0
-`;
-        fs.writeFileSync(batPath, batContent, 'utf-8');
+        // 注意：bat 必须使用 CRLF (\r\n) 行尾，否则 cmd 下 if 块解析可能异常
+        // 不用 BOM、不用中文、不用 chcp，纯 ASCII 确保任何区域设置下都正常工作
+        const CRLF = '\r\n';
+        const batContent = [
+          '@echo off',
+          '',
+          ':wait',
+          'tasklist /fi "IMAGENAME eq ' + appName + '" 2>nul | find /i "' + appName + '" >nul',
+          'if not errorlevel 1 (',
+          '  timeout /t 2 /nobreak >nul',
+          '  goto wait',
+          ')',
+          '',
+          ':: wait for OS to release file handle',
+          'timeout /t 3 /nobreak >nul',
+          '',
+          '"' + safeRcedit + '" "' + safeExe + '" --set-icon "' + safeIcon + '"',
+          'if errorlevel 1 (',
+          '  timeout /t 3 /nobreak >nul',
+          '  "' + safeRcedit + '" "' + safeExe + '" --set-icon "' + safeIcon + '"',
+          '  if errorlevel 1 (',
+          '    timeout /t 3 /nobreak >nul',
+          '    "' + safeRcedit + '" "' + safeExe + '" --set-icon "' + safeIcon + '"',
+          '    if errorlevel 1 (',
+          '      echo Icon replace failed, try Run as Admin',
+          '      pause',
+          '      exit /b 1',
+          '    )',
+          '  )',
+          ')',
+          '',
+          'start "" "' + safeExe + '"',
+          'exit /b 0',
+          '',
+        ].join(CRLF);
+        fs.writeFileSync(batPath, batContent, 'ascii');
 
         // 以分离进程方式启动批处理（不阻塞当前应用）
         const { spawn } = require('child_process');
@@ -4472,7 +4506,40 @@ ipcMain.handle('clear-app-cache', async () => {
 
     if (fs.existsSync(cacheDir)) {
       deletedSize = getDirSize(cacheDir);
-      fs.rmSync(cacheDir, { recursive: true, force: true });
+
+      // 先清除 Chromium 会话缓存，释放文件锁（解决 Windows EPERM）
+      if (mainWindow?.webContents?.session) {
+        try {
+          await mainWindow.webContents.session.clearCache();
+          // 等待文件锁释放（blob 文件可能需要更长时间）
+          await new Promise(r => setTimeout(r, 2000));
+        } catch (_) {}
+      }
+
+      // Windows 特殊处理：尝试解除文件锁定后删除
+      if (process.platform === 'win32') {
+        try {
+          // 先递归移除只读属性，再尝试改名（改名有时能绕过文件锁）
+          renameForDeletion(cacheDir);
+        } catch (_) {}
+      }
+
+      // 带重试的删除（Windows 上某些文件需较长时间释放锁）
+      let retries = 6;
+      let lastErr = null;
+      while (retries > 0) {
+        try {
+          fs.rmSync(cacheDir, { recursive: true, force: true });
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+          retries--;
+          if (retries > 0) await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+      if (lastErr) throw lastErr;
+
       console.log('[clear-app-cache] deleted Cache dir, size:', deletedSize);
     }
 
@@ -4512,6 +4579,41 @@ function getDirSize(dirPath) {
     }
     return total;
   } catch (_) { return 0; }
+}
+
+/**
+ * Windows 上尝试通过改名来解除文件锁，以便后续删除。
+ * 改名可以在某些情况下绕过文件句柄锁定（尤其对 blob 文件有效）。
+ */
+function renameForDeletion(dirPath) {
+  if (!fs.existsSync(dirPath)) return;
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fp = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        renameForDeletion(fp);
+        // 尝试给目录下 blob/data_ 文件改名为随机名
+        try {
+          const sub = fs.readdirSync(fp, { withFileTypes: true });
+          for (const s of sub) {
+            if (s.name.startsWith('blob') || s.name.startsWith('data_')) {
+              const sfp = path.join(fp, s.name);
+              try {
+                const tmp = path.join(fp, '.del_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+                fs.renameSync(sfp, tmp);
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      } else if (entry.name.startsWith('blob') || entry.name.startsWith('data_')) {
+        try {
+          const tmp = path.join(dirPath, '.del_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+          fs.renameSync(fp, tmp);
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
 }
 
 function formatBytes(bytes) {

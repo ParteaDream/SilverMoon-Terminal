@@ -567,7 +567,7 @@ function CharacterDetailContent() {
     return (
       <div className="p-8 text-center text-surface-500">
         角色未找到
-        <button onClick={() => backToList('/characters')} className="ml-2 text-primary-400 hover:underline">返回列表</button>
+        <button onClick={() => backToList('/characters', character.id)} className="ml-2 text-primary-400 hover:underline">返回列表</button>
       </div>
     )
   }
@@ -596,7 +596,7 @@ function CharacterDetailContent() {
         {character.namecard_art && <BannerBg filename={character.namecard_art} />}
         <div className={`absolute inset-0 ${character.namecard_art ? 'bg-transparent' : elemColor.bg}`} />
         <button
-          onClick={() => backToList('/characters')}
+          onClick={() => backToList('/characters', character.id)}
           className="relative z-10 self-start inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-[rgb(var(--color-1))] text-[rgb(var(--btn-text-1)_/_0.8)] hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:scale-105 transition-all mb-6"
         >
           <ArrowLeft className="w-3.5 h-3.5" />

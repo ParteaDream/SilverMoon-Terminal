@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
+import { useNav } from '../context/NavContext'
 import { useTheme, THEMES } from '../context/ThemeContext'
 import { useDownloadProgress } from '../hooks/useDownloadProgress'
-import { savePageStateSync } from '../utils/pageStateStore'
+import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import {
   FolderOpen, RefreshCw, Database, AlertTriangle, CheckCircle2,
   Palette, Image, Upload, Settings, ChevronRight, Sparkles, Paintbrush,
@@ -12,10 +13,11 @@ import {
   LayoutList, LayoutGrid, List, Info, Images, HardDrive, Save, Pencil, Trash2, Shirt, X
 } from 'lucide-react'
 import { PRESET_COLORS } from '../utils/colorMarkup'
+import ColorPicker from '../components/ColorPicker'
 
 // ── Module definitions ──────────────────────────────────────────────
 const MODULES = [
-  { key: 'general', label: '通用', icon: Settings, desc: '数据库位置、初始数据补缺与图包管理' },
+  { key: 'general', label: '通用', icon: Settings, desc: '数据库位置、基准数据更新与图包管理' },
   { key: 'appearance', label: '外观', icon: Sparkles, desc: '颜色主题与默认视图模式' },
   { key: 'color-presets', label: '元素颜色', icon: Palette, desc: '自定义元素颜色与图标' },
   { key: 'version', label: '版本信息', icon: Info, desc: '查看软件版本与检查更新' },
@@ -407,9 +409,9 @@ function GeneralModule() {
             <RefreshCw className="w-5 h-5 text-amber-400" />
           </div>
           <div className="flex-1">
-            <p className="text-sm font-medium">初始数据补缺</p>
+            <p className="text-sm font-medium">基准数据更新</p>
             <p className="text-xs text-surface-400 mt-0.5">
-              添加缺失的角色/武器等初始数据，不会覆盖你已有的修改
+              更新基准数据，不会更改用户修改的数据
             </p>
           </div>
         </button>
@@ -991,8 +993,11 @@ function AppearanceModule() {
     const next = { ...viewDefaults, [section]: mode }
     setViewDefaults(next)
     localStorage.setItem('default_view_mode', JSON.stringify(next))
-    // Update page state cache so list pages pick up immediately
-    savePageStateSync(section, 0, { viewMode: mode })
+    // Update page state cache so list pages pick up immediately,
+    // preserving existing scrollY so returning to the list page still scrolls correctly.
+    const current = loadPageStateSync(section)
+    const scrollY = current?.scrollY || 0
+    savePageStateSync(section, scrollY, { viewMode: mode })
     // Persist to DB (SQLite + user.json)
     try {
       window.electronAPI?.dbQuery(
@@ -1184,17 +1189,14 @@ function AppearanceModule() {
               const hex = rgbTupleToHex(customColors[field.key] || '128 128 128')
               return (
                 <div key={field.key} className="flex items-center gap-3 p-2.5 rounded-lg bg-surface-800/40 border border-surface-700">
-                  <div className="relative">
-                    <input
-                      type="color"
-                      value={hex}
-                      onChange={e => {
-                        const rgb = hexToRgbTuple(e.target.value)
-                        updateCustomColors({ [field.key]: rgb })
-                      }}
-                      className="w-10 h-10 rounded-lg cursor-pointer border-0 p-0 bg-transparent"
-                    />
-                  </div>
+                  <ColorPicker
+                    value={hex}
+                    onChange={col => {
+                      const rgb = hexToRgbTuple(col)
+                      updateCustomColors({ [field.key]: rgb })
+                    }}
+                    buttonClassName="w-10 h-10 rounded-lg"
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-surface-200">{field.label}</p>
                     <p className="text-[10px] text-surface-500">{field.desc}</p>
@@ -1435,16 +1437,15 @@ function ColorPresetsModule() {
                     <Image className="w-4 h-4 text-surface-500 group-hover/icon:text-primary-400" />
                   )}
                 </button>
-                <div className="flex-1 min-w-0">
-                  <input
-                    type="color"
+                <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                  <ColorPicker
                     value={c.color}
-                    onChange={e => {
+                    onChange={col => {
                       const next = [...elementColors]
-                      next[i] = { ...next[i], color: e.target.value }
+                      next[i] = { ...next[i], color: col }
                       setElementColors(next)
                     }}
-                    className="w-full h-8 rounded cursor-pointer border-0 p-0 bg-transparent"
+                    buttonClassName="w-full h-10 rounded"
                   />
                   <span className="text-xs text-surface-300 block text-center">{c.label}</span>
                 </div>
@@ -1545,6 +1546,31 @@ function VersionInfoModule() {
             <p className="text-sm font-medium">软件更新</p>
             <p className="text-xs text-surface-400 mt-0.5">应用内自动更新功能不稳定，请手动下载安装</p>
           </div>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={async () => {
+                try {
+                  setCheckResult('检查中...')
+                  const r = await window.electronAPI?.checkForUpdate()
+                  if (r?.success && r.version && r.version !== appVersion) {
+                    setCheckResult(`发现新版本 v${r.version}，请前往下方链接下载`)
+                  } else if (r?.success) {
+                    setCheckResult('当前已是最新版本')
+                  } else {
+                    setCheckResult(r?.error || '检查失败')
+                  }
+                } catch (e) {
+                  setCheckResult('检查失败: ' + e.message)
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs bg-surface-700 hover:bg-surface-600 text-surface-300 transition-colors whitespace-nowrap"
+            >
+              检查更新
+            </button>
+            {checkResult && (
+              <span className="text-[10px] text-surface-400">{checkResult}</span>
+            )}
+          </div>
         </div>
         <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
           <p className="text-xs text-amber-300 mb-3">⚠️ 自动更新功能异常，请从以下链接下载最新版本后手动覆盖安装</p>
@@ -1559,31 +1585,7 @@ function VersionInfoModule() {
             </button>
           </div>
         </div>
-        <div className="flex items-center gap-2 pt-2">
-          <button
-            onClick={async () => {
-              try {
-                setCheckResult('检查中...')
-                const r = await window.electronAPI?.checkForUpdate()
-                if (r?.success && r.version) {
-                  setCheckResult(`发现新版本 v${r.version}，请前往上方链接下载`)
-                } else if (r?.success) {
-                  setCheckResult('当前已是最新版本')
-                } else {
-                  setCheckResult(r?.error || '检查失败')
-                }
-              } catch (e) {
-                setCheckResult('检查失败: ' + e.message)
-              }
-            }}
-            className="px-3 py-1.5 rounded-lg text-xs bg-surface-700 hover:bg-surface-600 text-surface-300 transition-colors"
-          >
-            检查更新
-          </button>
-          {checkResult && (
-            <span className="text-[10px] text-surface-400">{checkResult}</span>
-          )}
-        </div>
+
         <label className="flex items-center gap-2 cursor-pointer pt-1">
           <span className="text-[10px] text-surface-400">启动时自动检查新版本提醒</span>
           <button onClick={toggleAutoCheck}
@@ -1593,7 +1595,7 @@ function VersionInfoModule() {
         </label>
         <div className="mt-4 p-3 rounded-lg bg-primary-500/10 border border-primary-500/20">
           <p className="text-xs text-primary-300">
-            💡 更新软件版本后，建议在高级设置中重新初始化数据库并检查图包更新，与最新数据保持同步
+            💡 更新软件后，建议使用通用里的「更新基准数据」，并检查图包更新，从而与最新数据保持同步
           </p>
         </div>
       </div>
@@ -1918,12 +1920,63 @@ function AdvancedModule() {
 // ── Main Settings Page ──────────────────────────────────────────────
 export default function SettingsPage() {
   const [searchParams] = useSearchParams()
+  const { restorePage, savePage, consumeBackToList } = useNav()
+  const restoringScroll = useRef(false)
   const [activeModule, setActiveModule] = useState(() => {
     // Check URL query param for initial module selection
     const moduleParam = searchParams.get('module')
     if (moduleParam && MODULES.some(m => m.key === moduleParam)) return moduleParam
+    // 会话内导航返回时，从 localStorage 恢复上次的模块
+    try {
+      if (sessionStorage.getItem('_nav_backToList') === '1') {
+        const saved = localStorage.getItem('settings_active_module')
+        if (saved && MODULES.some(m => m.key === saved)) return saved
+      }
+    } catch (_) {}
+    // 应用启动首次打开，默认通用
     return 'general'
   })
+
+  // 持久化当前模块选择（会话内记住，重启时不读取）
+  useEffect(() => { try { localStorage.setItem('settings_active_module', activeModule) } catch (_) {} }, [activeModule])
+
+  // ── 滚动位置持久化（参考武器板块）──
+  useEffect(() => {
+    const isBack = consumeBackToList()
+    if (isBack) {
+      restoringScroll.current = true
+      restorePage('settings').then(saved => {
+        const main = document.querySelector('main')
+        if (saved?.scrollY != null && saved.scrollY > 0 && main) {
+          const targetY = Number(saved.scrollY)
+          const tryScroll = (n) => {
+            if (main.scrollHeight > targetY) {
+              main.scrollTo(0, targetY)
+              setTimeout(() => { restoringScroll.current = false }, 300)
+            } else if (n > 0) setTimeout(() => tryScroll(n - 1), 200)
+          }
+          tryScroll(10)
+        }
+      })
+    } else {
+      const main = document.querySelector('main')
+      if (main) main.scrollTo(0, 0)
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const main = document.querySelector('main')
+    if (!main) return
+    let timer = null
+    const save = () => { if (!restoringScroll.current) savePage('settings') }
+    const onScroll = () => {
+      clearTimeout(timer)
+      if (restoringScroll.current) return
+      timer = setTimeout(save, 150)
+    }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => { main.removeEventListener('scroll', onScroll); clearTimeout(timer); save() }
+  }, [savePage])
 
   const panelMap = {
     general: GeneralModule,

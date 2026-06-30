@@ -207,7 +207,7 @@ function WeaponDetailContent() {
   }
 
   function handleBack() {
-    backToList('/weapons')
+    backToList('/weapons', weapon?.id)
   }
 
   if (loading) {

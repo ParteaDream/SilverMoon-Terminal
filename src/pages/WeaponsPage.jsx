@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
+import { useLazyImage } from '../hooks/useLazyImage'
 import DataTable, { useSortFilter, FilterBar, SortBar } from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
@@ -26,19 +27,21 @@ export default function WeaponsPage() {
   const { restorePage, savePage, push, consumeBackToList } = useNav()
   const [weapons, setWeapons] = useState([])
   const [weaponTypes, setWeaponTypes] = useState([])
+
+  // ── 同步初始化：仅 viewMode 从缓存恢复 ──
+  const initViewMode = loadPageStateSync('weapons')?.state?.viewMode
   const [search, setSearch] = useState('')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({})
   const [viewMode, setViewMode] = useState(() => {
-    const saved = loadPageStateSync('weapons')
-    if (saved?.state?.viewMode) return saved.state.viewMode
+    if (initViewMode) return initViewMode
     try {
       const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
       if (defs.weapons) return defs.weapons
     } catch (_) {}
     return 'gallery'
   })
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState({})
   const [selected, setSelected] = useState(new Set())
   const [saving, setSaving] = useState(false)
   const restoringScroll = useRef(false)
@@ -46,11 +49,62 @@ export default function WeaponsPage() {
   useEffect(() => {
     const isBack = consumeBackToList()
     if (isBack) {
+      // 同步预设 scrollY 消除置顶闪烁
+      const cached = loadPageStateSync('weapons')
+      if (cached?.scrollY > 0) {
+        const m = document.querySelector('main')
+        if (m) m.scrollTop = cached.scrollY
+      }
       loadData()
+      restoringScroll.current = true
       restorePage('weapons').then(saved => {
         if (saved) {
           if (saved.viewMode) setViewMode(saved.viewMode)
-          if (saved.scrollY != null) {
+          if (saved.search) setSearch(saved.search)
+          if (saved.sortKeys?.length) setSortKeys(saved.sortKeys)
+          if (saved.filters) {
+            Object.entries(saved.filters).forEach(([k, v]) => setFilter(k, v))
+          }
+          // 等待 React 处理筛选/排序状态后再恢复滚动位置
+          requestAnimationFrame(() => {
+          const main = document.querySelector('main')
+          // 先尝试 scrollToItem（精确计算 scrollY）
+          const scrollToId = sessionStorage.getItem('_nav_scroll_to_id')
+          if (scrollToId) {
+            sessionStorage.removeItem('_nav_scroll_to_id')
+            const el = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
+            const m = document.querySelector('main')
+            if (el && m) {
+              const elRect = el.getBoundingClientRect()
+              const mRect = m.getBoundingClientRect()
+              const elTopInMain = elRect.top - mRect.top + m.scrollTop
+              const targetY = elTopInMain - (m.clientHeight / 2) + (elRect.height / 2)
+              m.scrollTo(0, Math.max(0, Math.round(targetY)))
+              setTimeout(() => { restoringScroll.current = false }, 300)
+              setTimeout(() => m.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              return
+            }
+            // 元素不在 DOM（可能被筛选隐藏）：后台重试，同时走 scrollY 回退
+            const retryScrollToItem = (n) => {
+              const el2 = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
+              const m2 = document.querySelector('main')
+              if (el2 && m2) {
+                const er = el2.getBoundingClientRect()
+                const mr = m2.getBoundingClientRect()
+                const et = er.top - mr.top + m2.scrollTop
+                const ty = et - (m2.clientHeight / 2) + (er.height / 2)
+                m2.scrollTo(0, Math.max(0, Math.round(ty)))
+                setTimeout(() => { restoringScroll.current = false }, 300)
+                setTimeout(() => m2.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              } else if (n > 0) {
+                setTimeout(() => retryScrollToItem(n - 1), 200)
+              }
+            }
+            setTimeout(() => retryScrollToItem(15), 200)
+            // 不 return — 走下方 scrollY 回退作为近似定位
+          }
+          // 否则恢复保存的 scrollY
+          if (saved.scrollY != null && saved.scrollY > 0) {
             restoringScroll.current = true
             const targetY = Number(saved.scrollY)
             const tryScroll = (attempt) => {
@@ -68,6 +122,7 @@ export default function WeaponsPage() {
             }
             setTimeout(() => tryScroll(10), 100)
           }
+          }) // end requestAnimationFrame
         }
       })
     } else {
@@ -89,14 +144,14 @@ export default function WeaponsPage() {
     const onScroll = () => {
       clearTimeout(timer)
       if (restoringScroll.current) return
-      timer = setTimeout(() => savePage('weapons', { viewMode }), 200)
+      timer = setTimeout(() => savePage('weapons', stateRef.current), 200)
     }
     main.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       main.removeEventListener('scroll', onScroll)
       clearTimeout(timer)
     }
-  }, [viewMode, savePage])
+  }, [savePage])
 
   async function loadData() {
     const [wps, wtypes] = await Promise.all([
@@ -114,7 +169,7 @@ export default function WeaponsPage() {
   }, [selected, weapons])
 
   function navigateToDetail(id) {
-    savePage('weapons', { viewMode })
+    savePage('weapons', stateRef.current)
     push(`/weapons/${id}`)
   }
 
@@ -213,11 +268,15 @@ export default function WeaponsPage() {
 
   // Shared sort/filter state for both table and gallery
   const {
-    sortKeys, handleSort, removeSort, clearSorts, reorderSorts,
+    sortKeys, setSortKeys, handleSort, removeSort, clearSorts, reorderSorts,
     filters, setFilter, clearFilters,
     showFilters, setShowFilters, filterableCols, filterOptions,
     processed, activeFilterCount,
   } = useSortFilter(searched, columns)
+
+  // 用 ref 保持最新状态，避免 useLayoutEffect 频繁重建
+  const stateRef = useRef({ viewMode, search, sortKeys, filters })
+  stateRef.current = { viewMode, search, sortKeys, filters }
 
   return (
     <div className="p-6">
@@ -272,14 +331,14 @@ export default function WeaponsPage() {
           processed={processed} activeFilterCount={activeFilterCount}
           onEdit={openEdit} onDelete={handleDelete} onAdd={null} searchBar={null}
           selectable selectedIds={selected} onToggleSelect={toggleSelect} onToggleSelectAll={toggleSelectAll}
-          onRowClick={row => navigateToDetail(row.id)} />
+          onRowClick={row => navigateToDetail(row.id)} itemIdKey="id" />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4">
           {processed.map(w => {
             const gradient = RARITY_GRADIENT[w.rarity] || ''
             const borderCls = RARITY_BORDER[w.rarity] || 'border-surface-700'
             return (
-              <div key={w.id} onClick={() => navigateToDetail(w.id)}
+              <div key={w.id} data-item-id={w.id} onClick={() => navigateToDetail(w.id)}
                 className={`group relative rounded-xl overflow-hidden border ${borderCls} bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer`}
               >
                 {/* Rarity gradient background */}
@@ -334,15 +393,17 @@ export default function WeaponsPage() {
 }
 
 function WeaponThumb({ filename, large }) {
-  const [src, setSrc] = useState(null)
-  const { readImage } = useDb()
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      if (filename) { const data = await readImage(filename); if (!cancelled && data) setSrc(data) }
-    }
-    load(); return () => { cancelled = true }
-  }, [filename, readImage])
-  if (!src) return large ? <Sword className="w-10 h-10 text-surface-500" /> : <div className="w-12 h-12 rounded-lg bg-surface-700 flex items-center justify-center shrink-0"><Sword className="w-6 h-6 text-surface-500" /></div>
-  return <img src={src} alt="" className={large ? 'w-full h-full object-contain scale-125' : 'w-12 h-12 rounded-lg object-cover shrink-0'} />
+  const { ref, src } = useLazyImage(filename)
+  if (large) {
+    return (
+      <div ref={ref} className="w-full h-full flex items-center justify-center overflow-hidden">
+        {src ? <img src={src} alt="" className="w-full h-full object-contain scale-125" /> : <Sword className="w-10 h-10 text-surface-500" />}
+      </div>
+    )
+  }
+  return (
+    <div ref={ref} className="w-12 h-12 rounded-lg overflow-hidden shrink-0 bg-surface-700 flex items-center justify-center">
+      {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <Sword className="w-6 h-6 text-surface-500" />}
+    </div>
+  )
 }

@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
+import { useNav } from '../context/NavContext'
 import { clearDetailScroll } from '../hooks/useDetailState'
 import { Plus, Trash2, Search, CheckSquare, Square, ArrowUpDown, GripVertical, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
@@ -8,6 +9,8 @@ import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
 import ColorTextInput from '../components/ColorTextInput'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
+import { useLazyImage } from '../hooks/useLazyImage'
+import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import { SETTINGS_ELEM_ORDER, ELEM_NAME_TO_ID } from '../utils/colorMarkup'
 
 // ── 挑战类型 ──
@@ -92,6 +95,8 @@ async function ensureSchemaColumns() {
 
 export default function ChallengesPage() {
   const { query, readImage } = useDb()
+  const { restorePage, savePage, consumeBackToList } = useNav()
+  const restoringScroll = useRef(false)
 
   // ── 基础数据 ──
   const [challenges, setChallenges] = useState([])
@@ -115,7 +120,86 @@ export default function ChallengesPage() {
 
   // ── 加载 ──
   useEffect(() => { loadMaps() }, [])
-  useEffect(() => { loadChallenges() }, [activeType, sortAsc])
+  // activeType/sortAsc 变化时重新加载
+  // activeType/sortAsc 变化时重新加载（跳过首次，由 mount effect 控制）
+  const initialLoadDone = useRef(false)
+
+  // activeType/sortAsc 变化时重新加载（跳过首次，由 mount effect 控制）
+  useEffect(() => {
+    if (!initialLoadDone.current) return
+    loadChallenges()
+  }, [activeType, sortAsc])
+
+  // ── 状态持久化 ──
+  // 先恢复 activeType（触发数据加载），数据加载完成后恢复滚轮位置
+  useEffect(() => {
+    const isBack = consumeBackToList()
+    if (isBack) {
+      restorePage('challenges').then(saved => {
+        const restoreType = saved?.activeType || activeType
+        if (saved?.activeType) setActiveType(restoreType)
+        if (saved?.scrollY != null && saved.scrollY > 0) {
+          sessionStorage.setItem('_challenges_restore_y', String(saved.scrollY))
+        }
+        initialLoadDone.current = true
+        loadChallenges(restoreType)  // 显式传入类型，不依赖闭包中的 activeType
+      })
+    } else {
+      const main = document.querySelector('main')
+      if (main) main.scrollTo(0, 0)
+      initialLoadDone.current = true
+      loadChallenges()
+    }
+  }, [])
+
+  // 滚动时保存 + activeType 变化时保存
+  useLayoutEffect(() => {
+    const main = document.querySelector('main')
+    if (!main) return
+    let timer = null
+    const save = () => {
+      if (restoringScroll.current) return
+      savePage('challenges', { activeType })
+    }
+    const onScroll = () => {
+      clearTimeout(timer)
+      if (restoringScroll.current) return
+      timer = setTimeout(save, 150)
+    }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => { main.removeEventListener('scroll', onScroll); clearTimeout(timer); save() }
+  }, [activeType, savePage])
+  // activeType 变化时立即保存状态到 user.json（保留已有的滚轮数据）
+  useEffect(() => {
+    if (!initialLoadDone.current) return
+    const current = loadPageStateSync('challenges')
+    const scrollY = current?.scrollY || 0
+    savePageStateSync('challenges', scrollY, { activeType })
+  }, [activeType])
+  // 数据加载完成后恢复滚轮位置（等 activeType 加载完数据后才执行）
+  useEffect(() => {
+    if (challenges.length === 0) return
+    const restoreY = sessionStorage.getItem('_challenges_restore_y')
+    if (!restoreY) return
+    const targetY = Number(restoreY)
+    if (targetY <= 0) { sessionStorage.removeItem('_challenges_restore_y'); return }
+    sessionStorage.removeItem('_challenges_restore_y')
+    const main = document.querySelector('main')
+    if (main) {
+      restoringScroll.current = true
+      const tryScroll = (n) => {
+        if (main.scrollHeight > targetY) {
+          main.scrollTo(0, targetY)
+          setTimeout(() => { restoringScroll.current = false }, 300)
+        } else if (n > 0) {
+          setTimeout(() => tryScroll(n - 1), 200)
+        } else {
+          restoringScroll.current = false
+        }
+      }
+      tryScroll(10)
+    }
+  }, [challenges])
 
   async function loadMaps() {
     const [chars, elems, settingsRes] = await Promise.all([
@@ -166,22 +250,23 @@ export default function ChallengesPage() {
     setElemIcons(icons)
   }
 
-  async function loadChallenges() {
+  async function loadChallenges(type) {
+    const at = type || activeType
     const res = await query(
       `SELECT * FROM challenges WHERE type = ? ORDER BY version ${sortAsc ? 'ASC' : 'DESC'}, start_date ${sortAsc ? 'ASC' : 'DESC'}`,
-      [activeType]
+      [at]
     )
     const list = res.data || []
-    setChallenges(list)
 
-    // Load child data
+    // Load child data BEFORE setting challenges — ensures scrollHeight is complete
+    // when the scroll-restore effect fires on [challenges].
     if (list.length > 0) {
       const ids = list.map(c => c.id)
       const placeholders = ids.map(() => '?').join(',')
       const childMap = {}
       for (const c of list) childMap[c.id] = null
 
-      if (activeType === 'spiral_abyss') {
+      if (at === 'spiral_abyss') {
         const cr = await query(
           `SELECT * FROM spiral_abyss_floors WHERE challenge_id IN (${placeholders}) ORDER BY chamber_number, half`,
           ids
@@ -190,7 +275,7 @@ export default function ChallengesPage() {
           if (!childMap[row.challenge_id]) childMap[row.challenge_id] = []
           childMap[row.challenge_id].push(row)
         }
-      } else if (activeType === 'imaginarium_theater') {
+      } else if (at === 'imaginarium_theater') {
         const cr = await query(
           `SELECT * FROM imaginarium_theater_seasons WHERE challenge_id IN (${placeholders}) ORDER BY id`,
           ids
@@ -198,7 +283,7 @@ export default function ChallengesPage() {
         for (const row of (cr.data || [])) {
           childMap[row.challenge_id] = row
         }
-      } else if (activeType === 'perilous_trail') {
+      } else if (at === 'perilous_trail') {
         const cr = await query(
           `SELECT * FROM perilous_trail_bosses WHERE challenge_id IN (${placeholders}) ORDER BY difficulty, boss_index`,
           ids
@@ -212,6 +297,7 @@ export default function ChallengesPage() {
     } else {
       setChildData({})
     }
+    setChallenges(list)
   }
 
   // ── 增删改 ──
@@ -558,7 +644,6 @@ export default function ChallengesPage() {
             charMap={charMap}
             elemMap={elemMap}
             elemIcons={elemIcons}
-            readImage={readImage}
             selectMode={selectMode}
             selected={selected.has(challenge.id)}
             onToggleSelect={() => toggleSelect(challenge.id)}
@@ -610,7 +695,7 @@ export default function ChallengesPage() {
 // ── 挑战卡片 ──
 // ══════════════════════════════════════════════════════════════════════════════
 
-function ChallengeCard({ challenge, childData, charMap, elemMap, elemIcons, readImage, selectMode, selected, onToggleSelect, onEdit, onDelete, onLightbox, isActive }) {
+function ChallengeCard({ challenge, childData, charMap, elemMap, elemIcons, selectMode, selected, onToggleSelect, onEdit, onDelete, onLightbox, isActive }) {
   return (
     <div
       className={`rounded-xl overflow-hidden group
@@ -643,10 +728,10 @@ function ChallengeCard({ challenge, childData, charMap, elemMap, elemIcons, read
       <div className="px-4 py-3">
         {challenge.type === 'spiral_abyss' && <SpiralAbyssContent childData={childData} challenge={challenge} />}
         {challenge.type === 'imaginarium_theater' && (
-          <ImaginariumTheaterContent childData={childData} charMap={charMap} elemMap={elemMap} elemIcons={elemIcons} readImage={readImage} onLightbox={onLightbox} />
+          <ImaginariumTheaterContent childData={childData} charMap={charMap} elemMap={elemMap} elemIcons={elemIcons} onLightbox={onLightbox} />
         )}
         {challenge.type === 'perilous_trail' && (
-          <PerilousTrailContent childData={childData} elemMap={elemMap} elemIcons={elemIcons} readImage={readImage} onLightbox={onLightbox} />
+          <PerilousTrailContent childData={childData} elemMap={elemMap} elemIcons={elemIcons} onLightbox={onLightbox} />
         )}
       </div>
     </div>
@@ -719,7 +804,7 @@ function HalfDisplay({ label, data }) {
 }
 
 // ── 幻想真境剧诗内容 ──
-function ImaginariumTheaterContent({ childData, charMap, elemMap, elemIcons, readImage, onLightbox }) {
+function ImaginariumTheaterContent({ childData, charMap, elemMap, elemIcons, onLightbox }) {
   if (!childData) return <span className="text-xs text-surface-600">暂无详细数据</span>
 
   const recElements = parseJsonArray(childData.recommended_elements)
@@ -748,7 +833,7 @@ function ImaginariumTheaterContent({ childData, charMap, elemMap, elemIcons, rea
         <div className="flex flex-wrap gap-2">
           {openingChars.length > 0 ? openingChars.map((cid, i) => {
             const char = charMap[cid]
-            return char ? <CharThumb key={i} char={char} readImage={readImage} size="xs" /> : null
+            return char ? <CharThumb key={i} char={char} size="xs" /> : null
           }) : <span className="text-xs text-surface-600">-</span>}
         </div>
       </div>
@@ -759,7 +844,7 @@ function ImaginariumTheaterContent({ childData, charMap, elemMap, elemIcons, rea
         <div className="flex flex-wrap gap-2">
           {specialGuests.length > 0 ? specialGuests.map((cid, i) => {
             const char = charMap[cid]
-            return char ? <CharThumb key={i} char={char} readImage={readImage} size="xs" /> : null
+            return char ? <CharThumb key={i} char={char} size="xs" /> : null
           }) : <span className="text-xs text-surface-600">-</span>}
         </div>
       </div>
@@ -791,7 +876,7 @@ function ImaginariumTheaterContent({ childData, charMap, elemMap, elemIcons, rea
 }
 
 // ── 幽境危战内容 ──
-function PerilousTrailContent({ childData, elemMap, elemIcons, readImage, onLightbox }) {
+function PerilousTrailContent({ childData, elemMap, elemIcons, onLightbox }) {
   const bosses = childData || []
   const DIFFICULTY_LABELS = { treacherous: '险恶', fearless: '无畏', desperate: '绝境' }
   const difficulties = ['treacherous', 'fearless', 'desperate']
@@ -818,7 +903,7 @@ function PerilousTrailContent({ childData, elemMap, elemIcons, readImage, onLigh
                 <span className="flex-shrink-0">{DIFFICULTY_LABELS[diff]}</span>
                 <div className="flex gap-3 flex-1 min-w-0">
                   {diffBosses.map(boss => (
-                    <PerilousBossCompact key={boss.id} boss={boss} readImage={readImage} />
+                    <PerilousBossCompact key={boss.id} boss={boss} />
                   ))}
                 </div>
               </button>
@@ -833,7 +918,7 @@ function PerilousTrailContent({ childData, elemMap, elemIcons, readImage, onLigh
                 </button>
                 <div className="grid grid-cols-3 gap-3">
                   {diffBosses.map(boss => (
-                    <PerilousBossCard key={boss.id} boss={boss} elemMap={elemMap} elemIcons={elemIcons} readImage={readImage} onLightbox={onLightbox} expanded={diff === 'desperate'} />
+                    <PerilousBossCard key={boss.id} boss={boss} elemMap={elemMap} elemIcons={elemIcons} onLightbox={onLightbox} expanded={diff === 'desperate'} />
                   ))}
                 </div>
               </>
@@ -847,22 +932,16 @@ function PerilousTrailContent({ childData, elemMap, elemIcons, readImage, onLigh
 }
 
 // 折叠态：紧凑一行（小头像、名称、等级、血量）
-function PerilousBossCompact({ boss, readImage }) {
-  const [imgSrc, setImgSrc] = useState(null)
-  useEffect(() => {
-    if (!boss.boss_image) { setImgSrc(null); return }
-    let cancelled = false
-    readImage(boss.boss_image).then(data => { if (!cancelled) setImgSrc(data) })
-    return () => { cancelled = true }
-  }, [boss.boss_image, readImage])
+function PerilousBossCompact({ boss }) {
+  const { ref, src } = useLazyImage(boss.boss_image)
 
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-surface-800/50 border border-surface-700 flex-1 min-w-0">
-      {imgSrc ? (
-        <img src={imgSrc} alt="" className="w-6 h-6 rounded object-cover flex-shrink-0" />
-      ) : (
-        <div className="w-6 h-6 rounded bg-surface-700 flex-shrink-0" />
-      )}
+      <div ref={ref} className="w-6 h-6 rounded overflow-hidden flex-shrink-0 bg-surface-700">
+        {src ? (
+          <img src={src} alt="" className="w-full h-full object-cover" />
+        ) : null}
+      </div>
       <span className="text-xs text-white truncate"><ColoredText text={boss.boss_name || '未命名'} /></span>
       {boss.boss_level && <span className="text-[10px] text-surface-500 flex-shrink-0">Lv.{boss.boss_level}</span>}
       {boss.boss_hp && <span className="text-[10px] text-surface-500 flex-shrink-0 truncate">HP:{boss.boss_hp}</span>}
@@ -870,14 +949,8 @@ function PerilousBossCompact({ boss, readImage }) {
   )
 }
 
-function PerilousBossCard({ boss, elemMap, elemIcons, readImage, onLightbox, expanded }) {
-  const [imgSrc, setImgSrc] = useState(null)
-  useEffect(() => {
-    if (!boss.boss_image) { setImgSrc(null); return }
-    let cancelled = false
-    readImage(boss.boss_image).then(data => { if (!cancelled) setImgSrc(data) })
-    return () => { cancelled = true }
-  }, [boss.boss_image, readImage])
+function PerilousBossCard({ boss, elemMap, elemIcons, onLightbox, expanded }) {
+  const { ref, src } = useLazyImage(boss.boss_image, '200px')
 
   const advParts = parseAdvDisadv(boss.advantages, elemMap)
   const disadvParts = parseAdvDisadv(boss.disadvantages, elemMap)
@@ -886,16 +959,18 @@ function PerilousBossCard({ boss, elemMap, elemIcons, readImage, onLightbox, exp
   return (
     <div className="rounded-lg bg-surface-800/50 border border-surface-700 overflow-hidden">
       {/* 图片 — 顶部独占 */}
-      {imgSrc ? (
+      <div ref={ref} className={imgClass}>
+      {src ? (
         <button
           onClick={() => onLightbox?.({ filename: boss.boss_image, label: boss.boss_name })}
-          className={`${imgClass} bg-[#030616] hover:ring-1 ring-primary-500/50 block`}
+          className={`w-full h-full bg-[#030616] hover:ring-1 ring-primary-500/50 block`}
         >
-          <img src={imgSrc} alt="" className={`w-full h-full ${expanded ? 'object-cover' : 'object-contain'} hover:scale-110 transition-transform`} />
+          <img src={src} alt="" className={`w-full h-full ${expanded ? 'object-cover' : 'object-contain'} hover:scale-110 transition-transform`} />
         </button>
       ) : (
-        <div className={`${imgClass} bg-[#030616] flex items-center justify-center text-surface-500 text-xs`}>暂无图片</div>
+        <div className="w-full h-full bg-[#030616] flex items-center justify-center text-surface-500 text-xs">暂无图片</div>
       )}
+      </div>
       {/* 信息区 */}
       <div className="p-3 space-y-2">
         <div>
@@ -974,18 +1049,11 @@ function ElementIcon({ elem, elemIcons, size = 'sm' }) {
   )
 }
 
-function CharThumb({ char, readImage, size = 'xs' }) {
-  const [src, setSrc] = useState(null)
+function CharThumb({ char, size = 'xs' }) {
   const navigate = useNavigate()
   const imageFile = char.card_art
+  const { ref, src } = useLazyImage(imageFile)
   const sizeClass = size === 'xs' ? 'w-8 h-8' : 'w-10 h-10'
-
-  useEffect(() => {
-    if (!imageFile) { setSrc(null); return }
-    let cancelled = false
-    readImage(imageFile).then(data => { if (!cancelled) setSrc(data) })
-    return () => { cancelled = true }
-  }, [imageFile, readImage])
 
   function handleClick(e) {
     e.stopPropagation()
@@ -995,7 +1063,7 @@ function CharThumb({ char, readImage, size = 'xs' }) {
 
   return (
     <button onClick={handleClick} className="flex flex-col items-center gap-1 group cursor-pointer" title={char.name_zh}>
-      <div className={`${sizeClass} rounded overflow-hidden bg-surface-700 flex-shrink-0 border border-surface-600 group-hover:border-primary-500/50 transition-colors`}>
+      <div ref={ref} className={`${sizeClass} rounded overflow-hidden bg-surface-700 flex-shrink-0 border border-surface-600 group-hover:border-primary-500/50 transition-colors`}>
         {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Search className="w-3 h-3 text-surface-500" /></div>}
       </div>
       <span className="text-[10px] text-surface-300 group-hover:text-[rgb(var(--btn-text-4th))] transition-colors text-center max-w-[60px] truncate">{char.name_zh}</span>

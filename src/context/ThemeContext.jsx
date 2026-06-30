@@ -73,6 +73,16 @@ const DEFAULT_CUSTOM_COLORS = {
   iconTo: '140 160 228',
 }
 
+// ── Helpers ──
+/** 根据 RGB triplet 字符串 ('R G B') 计算亮度并返回合适的文字色 ('0 0 0' 或 '255 255 255') */
+function contrastText(rgbStr) {
+  const parts = (rgbStr || '').split(' ').map(Number)
+  if (parts.length < 3 || parts.some(isNaN)) return '255 255 255'
+  // 相对亮度公式 (sRGB)
+  const lum = 0.299 * parts[0] + 0.587 * parts[1] + 0.114 * parts[2]
+  return lum > 140 ? '0 0 0' : '255 255 255'
+}
+
 // Build full palette from custom 5-color scheme
 function buildCustomPalette(c) {
   const c1 = c.c1 || '99 102 241'    // primary accent
@@ -98,6 +108,12 @@ function buildCustomPalette(c) {
     '--primary-600': c1,
     '--primary-300': c1,
     '--primary-700': c1,
+    // ── 按钮 / 悬浮高亮 / 滑块 ──
+    '--color-1': c1,
+    '--scrollbar-thumb': c5,
+    '--btn-text-1': contrastText(c1),
+    '--btn-text-4th': contrastText(c5),
+    '--btn-text': contrastText(c3),
   }
 }
 
