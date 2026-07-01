@@ -3,7 +3,7 @@
 <div align="center">
 本地化游戏维基数据库应用 · 支持查询、编辑与管理游戏数据**
 
-[![Version](https://img.shields.io/badge/version-1.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](package.json)
 [![Electron](https://img.shields.io/badge/electron-31-blue.svg)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/react-18-61dafb.svg)](https://react.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -20,6 +20,7 @@ SilverMoon Terminal（银月终端）是一款基于 Electron 的原神桌面端
 
 ### 主要功能
 - 📊 **数据浏览与编辑** — 角色、武器、圣遗物、材料、祈愿、挑战等数据的表格/详情双视图
+- 📋 **版本速览** — Changelog 板块展示各版本新增内容，支持编辑、折叠、拖拽排序
 - 🖼️ **图包管理** — 智能识别数据库文件夹下的图包，支持多版本图包优先级选择
 - 🎨 **主题定制** — 6 套内置主题 + 自定义颜色方案，元素颜色可独立配置
 - 🔍 **全局搜索** — 快速检索所有数据表
@@ -65,6 +66,7 @@ SilverMoon Terminal（银月终端）是一款基于 Electron 的原神桌面端
 │   │   ├── EditModal.jsx       # 编辑弹窗
 │   │   └── SetupWizard.jsx     # 首次设置向导
 │   ├── pages/              # 页面组件
+│   │   ├── ChangelogPage.jsx       # 版本新增速览
 │   │   ├── CharactersPage.jsx      # 角色列表
 │   │   ├── CharacterDetailPage.jsx # 角色详情
 │   │   ├── WeaponsPage.jsx         # 武器列表
@@ -126,14 +128,6 @@ npm run electron:build:win
 
 # 构建产物在 release/ 目录下
 ```
-
-### 快捷脚本
-
-| 文件 | 作用 |
-|------|------|
-| `运行.command` | macOS 开发模式快速启动 |
-| `#Mac.command` | macOS 构建 |
-| `#Win.command` | Windows 构建 |
 
 ---
 
