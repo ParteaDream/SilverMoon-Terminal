@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
@@ -163,22 +163,42 @@ export default function ChangelogPage() {
 
   async function loadAll() {
     // Load lookup data
-    const [chars, weps, arts, mats, wishes] = await Promise.all([
+    const [chars, weps, arts, mats, wishes, fits] = await Promise.all([
       query('SELECT id, name_zh, card_art, rarity FROM characters'),
       query('SELECT id, name_zh, image, simple_art, rarity FROM weapons'),
       query('SELECT id, name_zh, image, flower_image FROM artifacts'),
       query('SELECT id, name_zh, image, type FROM materials'),
       query('SELECT id, version, phase, banner_type, name_zh, start_date, end_date FROM wishes'),
+      query('SELECT id, character_id, avatar_image FROM character_outfits WHERE avatar_image IS NOT NULL AND avatar_image != \'\''),
     ])
 
-    const cm = {}; for (const c of (chars.data || [])) { c._displayCardArt = c.card_art; cm[c.id] = c }
+    // Build outfit avatar map
+    const fitsData = fits.data || []
+    const outfitAvatarMap = {}
+    for (const f of fitsData) {
+      outfitAvatarMap[f.id] = f.avatar_image
+    }
+    // Read outfit selections from user.json
+    let outfitSelections = {}
+    try {
+      const uRes = await window.electronAPI?.getUserConfig()
+      if (uRes?.success && uRes.config?.outfitSelections) {
+        outfitSelections = uRes.config.outfitSelections
+      }
+    } catch (_) {}
+
+    const cm = {}; for (const c of (chars.data || [])) {
+      const outfitId = outfitSelections[c.id]
+      c._displayCardArt = (outfitId && outfitAvatarMap[outfitId]) || c.card_art
+      cm[c.id] = c
+    }
     const wm = {}; for (const w of (weps.data || [])) wm[w.id] = w
     const am = {}; for (const a of (arts.data || [])) am[a.id] = a
     const mm = {}; for (const m of (mats.data || [])) mm[m.id] = m
     setCharMap(cm); setWeaponMap(wm); setArtifactMap(am); setMaterialMap(mm)
 
     // Build options for selects
-    setCharOptions((chars.data || []).map(c => ({ value: c.id, label: c.name_zh, image: c.card_art, rarity: c.rarity })))
+    setCharOptions((chars.data || []).map(c => ({ value: c.id, label: c.name_zh, image: c._displayCardArt, rarity: c.rarity })))
     setWeaponOptions((weps.data || []).map(w => ({ value: w.id, label: w.name_zh, image: w.simple_art || w.image, rarity: w.rarity })))
     setArtifactOptions((arts.data || []).map(a => ({ value: a.id, label: a.name_zh, image: a.flower_image || a.image })))
     setMaterialOptions((mats.data || []).map(m => ({ value: m.id, label: m.name_zh, image: m.image })))
@@ -487,12 +507,14 @@ export default function ChangelogPage() {
               ItemCard={ItemCard}
               isExpanded={isExpanded}
               defaultExpanded={version === latestVersion}
-              onToggleExpand={() => {
+              onToggleExpand={(currentlyCollapsed) => {
                 hasRestored.current = true
                 setExpandedVersions(prev => {
                   const next = new Set(prev)
-                  if (next.has(version)) next.delete(version)
-                  else next.add(version)
+                  // If currently collapsed → expand (add to set)
+                  // If currently expanded → collapse (remove from set)
+                  if (currentlyCollapsed) next.add(version)
+                  else next.delete(version)
                   return next
                 })
               }}
@@ -558,7 +580,7 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
     <div className="rounded-xl border border-surface-700 bg-surface-900/60 overflow-hidden">
       {/* Version header */}
       <div
-        onClick={onToggleExpand}
+        onClick={() => onToggleExpand(collapsed)}
         className="px-5 py-4 border-b border-surface-700 flex items-center gap-3 flex-wrap cursor-pointer hover:bg-surface-800/30 transition-colors"
       >
         <span className="p-1 text-surface-500">
@@ -589,152 +611,111 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
         </button>
       </div>
 
-      {/* Content sections */}
+      {/* Content sections — unified tree, collapsed uses CSS to compact/hide */}
       {!hasAnyContent ? (
         <div className="px-5 py-8 text-center text-surface-500 text-sm">暂无新增内容，点击编辑添加</div>
-      ) : collapsed ? (
-        // ── Collapsed: compact grid of char/weapon/artifact only ──
-        <div className="p-4">
-          <div className="flex flex-wrap gap-3">
-            {compactTypes.map(type => {
-              const items = additions[type]
-              if (!items || items.length === 0) return null
-              return items.map(item => {
-                let imageFile, name, rarity, navTo
-                switch (type) {
-                  case 'character':
-                    imageFile = item.card_art
-                    name = item.name_zh
-                    rarity = item.rarity
-                    navTo = `/characters/${item.id}`
-                    break
-                  case 'weapon':
-                    imageFile = item.simple_art || item.image
-                    name = item.name_zh
-                    rarity = item.rarity
-                    navTo = `/weapons/${item.id}`
-                    break
-                  case 'artifact':
-                    imageFile = item.flower_image || item.image
-                    name = item.name_zh
-                    rarity = item.max_rarity
-                    navTo = `/artifacts/${item.id}`
-                    break
-                  default: return null
-                }
-                return (
-                  <ItemCard
-                    key={`${type}-${item.id}`}
-                    imageFile={imageFile}
-                    name={name}
-                    rarity={rarity}
-                    navTo={navTo}
-                  />
-                )
-              })
-            })}
-          </div>
-        </div>
       ) : (
-        // ── Expanded: full sections ──
-        (() => {
-          const wishConfig = SECTION_CONFIG.wish
-          const nonWishTypes = Object.keys(SECTION_CONFIG).filter(t => t !== 'wish')
-          const hasNonWish = nonWishTypes.some(t => additions[t]?.length > 0)
-
-          return (
-        <div className="p-5 space-y-6">
-          {/* Non-wish sections: flex-wrap to share rows when space allows */}
-          {hasNonWish && (
-            <div className="flex flex-wrap gap-x-6 gap-y-4">
-              {nonWishTypes.map(type => {
-                const items = additions[type]
-                if (!items || items.length === 0) return null
-                const config = SECTION_CONFIG[type]
-                return (
-                  <div key={type} className="min-w-[200px] flex-1">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="text-sm">{config.icon}</span>
-                      <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">{config.label}</h3>
-                      <span className="text-[10px] text-surface-600 ml-1">({items.length})</span>
-                      <div className="flex-1 h-px bg-surface-800 ml-2" />
-                    </div>
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))' }}>
-                      {items.map(item => {
-                        let imageFile, name, rarity, navTo
-                        switch (type) {
-                          case 'character':
-                            imageFile = item.card_art; name = item.name_zh; rarity = item.rarity; navTo = `/characters/${item.id}`; break
-                          case 'weapon':
-                            imageFile = item.simple_art || item.image; name = item.name_zh; rarity = item.rarity; navTo = `/weapons/${item.id}`; break
-                          case 'artifact':
-                            imageFile = item.flower_image || item.image; name = item.name_zh; rarity = item.max_rarity; navTo = `/artifacts/${item.id}`; break
-                          case 'material':
-                            imageFile = item.image; name = item.name_zh; rarity = item.rarity; navTo = `/materials/${item.id}`; break
-                          default: return null
-                        }
-                        return (
-                          <ItemCard key={item.id} imageFile={imageFile} name={name} rarity={rarity} navTo={navTo} />
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Wish section: always full-width */}
-          {additions.wish?.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-sm">{wishConfig.icon}</span>
-                <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">{wishConfig.label}</h3>
-                <span className="text-[10px] text-surface-600 ml-1">({additions.wish.length})</span>
-                <div className="flex-1 h-px bg-surface-800 ml-2" />
-              </div>
-              {(() => {
-                const byPhase = {}
-                for (const wish of additions.wish) {
-                  const p = wish.phase || 1
-                  if (!byPhase[p]) byPhase[p] = []
-                  byPhase[p].push(wish)
-                }
-                const phaseKeys = Object.keys(byPhase).map(Number).sort()
-                return phaseKeys.map(phase => {
-                  const phaseWishes = byPhase[phase]
-                  let phaseStart = null, phaseEnd = null
-                  for (const w of phaseWishes) {
-                    if (w.start_date && (!phaseStart || w.start_date < phaseStart)) phaseStart = w.start_date
-                    if (w.end_date && (!phaseEnd || w.end_date > phaseEnd)) phaseEnd = w.end_date
-                  }
-                  const phaseDateStr = phaseStart && phaseEnd ? `${phaseStart} ~ ${phaseEnd}` : phaseStart || phaseEnd || null
-                  const sorted = [...phaseWishes].sort((a, b) => {
-                    const ai = BANNER_TYPE_ORDER.indexOf(a.banner_type || 'standard')
-                    const bi = BANNER_TYPE_ORDER.indexOf(b.banner_type || 'standard')
-                    return ai - bi
-                  })
+        <div className={collapsed ? 'p-4' : 'p-5 space-y-6'}>
+          {/* Non-wish sections: flex-wrap, each section sized by item count */}
+          {(() => {
+            const nonWishTypes = Object.keys(SECTION_CONFIG).filter(t => t !== 'wish')
+            const visibleTypes = collapsed ? nonWishTypes.filter(t => t !== 'material') : nonWishTypes
+            const hasAny = visibleTypes.some(t => additions[t]?.length > 0)
+            if (!hasAny) return null
+            return (
+              <div className="flex flex-wrap gap-x-6 gap-y-4">
+                {visibleTypes.map(type => {
+                  const items = additions[type]
+                  if (!items || items.length === 0) return null
+                  const config = SECTION_CONFIG[type]
+                  // Size section proportionally: ~88px per column (80px card + 8px gap)
+                  const cols = collapsed ? items.length : Math.min(items.length, 8)
+                  const minW = Math.max(cols * 88, 160)
                   return (
-                    <div key={phase} className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-medium text-primary-400 bg-primary-500/10 px-1.5 py-0.5 rounded">第{phase}期</span>
-                        {phaseDateStr && <span className="text-[10px] text-surface-500">{phaseDateStr}</span>}
-                        <div className="flex-1 h-px bg-surface-800 ml-1" />
-                      </div>
-                      <div className="flex flex-wrap gap-3">
-                        {sorted.map(wish => (
-                          <WishDisplay key={wish.id} wish={wish} charMap={charMap} weaponMap={weaponMap} />
-                        ))}
+                    <div key={type} style={{ flex: `0 1 ${minW}px`, minWidth: minW, maxWidth: '100%' }}>
+                      {!collapsed && (
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-sm">{config.icon}</span>
+                          <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">{config.label}</h3>
+                          <span className="text-[10px] text-surface-600 ml-1">({items.length})</span>
+                          <div className="flex-1 h-px bg-surface-800 ml-2" />
+                        </div>
+                      )}
+                      <div className={collapsed ? 'flex flex-wrap gap-3' : 'grid gap-3'} style={collapsed ? undefined : { gridTemplateColumns: `repeat(auto-fill, minmax(80px, 1fr))` }}>
+                        {items.map(item => {
+                          let imageFile, name, rarity, navTo
+                          switch (type) {
+                            case 'character':
+                              imageFile = item._displayCardArt || item.card_art; name = item.name_zh; rarity = item.rarity; navTo = `/characters/${item.id}`; break
+                            case 'weapon':
+                              imageFile = item.simple_art || item.image; name = item.name_zh; rarity = item.rarity; navTo = `/weapons/${item.id}`; break
+                            case 'artifact':
+                              imageFile = item.flower_image || item.image; name = item.name_zh; rarity = item.max_rarity; navTo = `/artifacts/${item.id}`; break
+                            case 'material':
+                              imageFile = item.image; name = item.name_zh; rarity = item.rarity; navTo = `/materials/${item.id}`; break
+                            default: return null
+                          }
+                          return <ItemCard key={`${type}-${item.id}`} imageFile={imageFile} name={name} rarity={rarity} navTo={navTo} />
+                        })}
                       </div>
                     </div>
                   )
-                })
-              })()}
-            </div>
-          )}
+                })}
+              </div>
+            )
+          })()}
+
+          {/* Wish section: always full-width, hidden when collapsed */}
+          <div className={collapsed ? 'hidden' : ''}>
+            {additions.wish?.length > 0 && (
+              <div className="mt-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm">{SECTION_CONFIG.wish.icon}</span>
+                  <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">{SECTION_CONFIG.wish.label}</h3>
+                  <span className="text-[10px] text-surface-600 ml-1">({additions.wish.length})</span>
+                  <div className="flex-1 h-px bg-surface-800 ml-2" />
+                </div>
+                {(() => {
+                  const byPhase = {}
+                  for (const wish of additions.wish) {
+                    const p = wish.phase || 1
+                    if (!byPhase[p]) byPhase[p] = []
+                    byPhase[p].push(wish)
+                  }
+                  const phaseKeys = Object.keys(byPhase).map(Number).sort()
+                  return phaseKeys.map(phase => {
+                    const phaseWishes = byPhase[phase]
+                    let phaseStart = null, phaseEnd = null
+                    for (const w of phaseWishes) {
+                      if (w.start_date && (!phaseStart || w.start_date < phaseStart)) phaseStart = w.start_date
+                      if (w.end_date && (!phaseEnd || w.end_date > phaseEnd)) phaseEnd = w.end_date
+                    }
+                    const phaseDateStr = phaseStart && phaseEnd ? `${phaseStart} ~ ${phaseEnd}` : phaseStart || phaseEnd || null
+                    const sorted = [...phaseWishes].sort((a, b) => {
+                      const ai = BANNER_TYPE_ORDER.indexOf(a.banner_type || 'standard')
+                      const bi = BANNER_TYPE_ORDER.indexOf(b.banner_type || 'standard')
+                      return ai - bi
+                    })
+                    return (
+                      <div key={phase} className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-medium text-primary-400 bg-primary-500/10 px-1.5 py-0.5 rounded">第{phase}期</span>
+                          {phaseDateStr && <span className="text-[10px] text-surface-500">{phaseDateStr}</span>}
+                          <div className="flex-1 h-px bg-surface-800 ml-1" />
+                        </div>
+                        <div className="flex flex-wrap gap-3">
+                          {sorted.map(wish => (
+                            <WishDisplay key={wish.id} wish={wish} charMap={charMap} weaponMap={weaponMap} />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })
+                })()}
+              </div>
+            )}
+          </div>
         </div>
-          )
-        })()
       )}
     </div>
   )
@@ -761,15 +742,15 @@ function WishDisplay({ wish, charMap, weaponMap }) {
   return (
     <div className="rounded-lg border border-surface-700 bg-surface-800/30 overflow-hidden min-w-0">
       {/* Wish header: type badge + name */}
-      <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-surface-700/30">
+      <div className="flex items-center gap-1.5 px-2 py-1 border-b border-surface-700/30">
         {typeLabel && (
-          <span className="text-[9px] text-surface-500 bg-surface-700/50 px-1.5 py-0.5 rounded flex-shrink-0">{typeLabel}</span>
+          <span className="text-[8px] text-surface-500 bg-surface-700/50 px-1.5 py-0.5 rounded flex-shrink-0">{typeLabel}</span>
         )}
         {wish.name_zh && (
-          <span className="text-[11px] text-surface-400 font-medium truncate">{wish.name_zh}</span>
+          <span className="text-[10px] text-surface-400 font-medium truncate">{wish.name_zh}</span>
         )}
       </div>
-      <div className="p-2.5 space-y-2">
+      <div className="p-1.5 space-y-1.5">
         {banners.map(banner => {
           const charItems = (banner.items || []).filter(i => i.item_type === 'character')
           const weaponItems = (banner.items || []).filter(i => i.item_type === 'weapon')
@@ -777,18 +758,18 @@ function WishDisplay({ wish, charMap, weaponMap }) {
 
           return (
             <div key={banner.id}>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {charItems.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1">
                     {charItems.map(item => (
-                      <ItemThumb key={item.id} item={item} charMap={charMap} weaponMap={weaponMap} small />
+                      <ItemThumb key={item.id} item={item} charMap={charMap} weaponMap={weaponMap} compact />
                     ))}
                   </div>
                 )}
                 {weaponItems.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1">
                     {weaponItems.map(item => (
-                      <ItemThumb key={item.id} item={item} charMap={charMap} weaponMap={weaponMap} small={item.rarity === 4} />
+                      <ItemThumb key={item.id} item={item} charMap={charMap} weaponMap={weaponMap} compact />
                     ))}
                   </div>
                 )}
