@@ -9,7 +9,7 @@ import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
 import ColorTextInput from '../components/ColorTextInput'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
-import { useLazyImage } from '../hooks/useLazyImage'
+import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import { SETTINGS_ELEM_ORDER, ELEM_NAME_TO_ID } from '../utils/colorMarkup'
 
@@ -129,6 +129,9 @@ export default function ChallengesPage() {
     if (!initialLoadDone.current) return
     loadChallenges()
   }, [activeType, sortAsc])
+
+  // 搜索/排序变化时通知懒加载图片重新检查视口
+  useEffect(() => { bumpLazyRevision() }, [search, sortAsc])
 
   // ── 状态持久化 ──
   // 先恢复 activeType（触发数据加载），数据加载完成后恢复滚轮位置
@@ -638,7 +641,7 @@ export default function ChallengesPage() {
           const isActive = started && notEnded
           return (
           <ChallengeCard
-            key={challenge.id}
+            key={challenge.id + '|s' + search + sortAsc}
             challenge={challenge}
             childData={childData[challenge.id]}
             charMap={charMap}
@@ -667,6 +670,7 @@ export default function ChallengesPage() {
         title={editing ? `编辑挑战 - ${editing.version}` : `添加${CHALLENGE_TYPES[activeType]}`}
         wide
         wider
+        closeOnBackdrop={false}
       >
         <ChallengeEditForm
           form={form}

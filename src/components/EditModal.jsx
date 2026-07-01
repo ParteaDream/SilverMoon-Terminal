@@ -4,15 +4,15 @@ import { X, Save, Loader2, ImagePlus } from 'lucide-react'
 import { useDb } from '../context/DbContext'
 import ColorTextInput from './ColorTextInput'
 
-export default function EditModal({ isOpen, onClose, onSave, title, children, saving, wide, wider }) {
+export default function EditModal({ isOpen, onClose, onSave, title, children, saving, wide, wider, closeOnBackdrop = true }) {
   if (!isOpen) return null
 
   const maxW = wider ? 'max-w-7xl' : wide ? 'max-w-6xl' : 'max-w-2xl'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative bg-surface-900 border border-surface-700 rounded-xl w-full ${maxW} max-h-[85vh] overflow-hidden shadow-2xl animate-scale-in`}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 no-drag">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeOnBackdrop ? onClose : undefined} />
+      <div className={`relative z-10 bg-surface-900 border border-surface-700 rounded-xl w-full ${maxW} max-h-[85vh] overflow-hidden shadow-2xl`}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-surface-700">
           <h2 className="text-base font-semibold">{title}</h2>

@@ -2,11 +2,11 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
-import { useLazyImage } from '../hooks/useLazyImage'
-import DataTable from '../components/DataTable'
+import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
+import DataTable, { useSortFilter, SortBar } from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
-import { LayoutList, LayoutGrid, Plus, Gem } from 'lucide-react'
+import { LayoutList, LayoutGrid, Plus, Gem, ArrowUpDown } from 'lucide-react'
 
 const RARITY_STARS = { 1: '★', 2: '★★', 3: '★★★', 4: '★★★★', 5: '★★★★★' }
 const RARITY_COLOR = { 1: 'text-gray-300', 2: 'text-green-400', 3: 'text-blue-400', 4: 'text-purple-400', 5: 'text-accent-gold' }
@@ -33,7 +33,7 @@ export default function ArtifactsPage() {
   const [selected, setSelected] = useState(new Set())
   const restoringScroll = useRef(false)
   // 用 ref 保持最新状态
-  const stateRef = useRef({ viewMode, search })
+  const stateRef = useRef({ viewMode, search, sortKeys: [], filters: {} })
   stateRef.current = { viewMode, search }
 
   useEffect(() => {
@@ -163,7 +163,7 @@ export default function ArtifactsPage() {
     })
   }
   function toggleSelectAll() {
-    const ids = filtered.map(r => r.id)
+    const ids = processed.map(r => r.id)
     if (ids.every(id => selected.has(id))) setSelected(new Set())
     else setSelected(new Set(ids))
   }
@@ -215,28 +215,60 @@ export default function ArtifactsPage() {
     { key: 'four_piece_bonus', label: '4件套', render: row => <span className="text-xs text-surface-400 whitespace-normal">{row.four_piece_bonus || '-'}</span> },
   ]
 
+  const {
+    sortKeys, setSortKeys, handleSort, removeSort, clearSorts, reorderSorts,
+    filters, setFilter, clearFilters,
+    showFilters, setShowFilters, filterableCols, filterOptions,
+    processed, activeFilterCount,
+  } = useSortFilter(filtered, columns)
+
+  // 排序/筛选变化时通知懒加载图片重新检查视口
+  useEffect(() => { bumpLazyRevision() }, [sortKeys, filters])
+
+  // 用 ref 保持最新状态
+  stateRef.current = { viewMode, search, sortKeys, filters }
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
-        <div><h1 className="text-lg font-semibold tracking-tight">圣遗物</h1><p className="text-xs text-surface-500 mt-0.5">{filtered.length} 条记录</p></div>
+        <div><h1 className="text-lg font-semibold tracking-tight">圣遗物</h1><p className="text-xs text-surface-500 mt-0.5">{processed.length} 条记录</p></div>
         <div className="flex items-center gap-2">
           <div className="flex items-center rounded-lg bg-surface-800 border border-surface-700 p-0.5">
             <button onClick={() => setViewMode('table')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'table' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}><LayoutList className="w-3.5 h-3.5" /></button>
             <button onClick={() => setViewMode('gallery')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'gallery' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}><LayoutGrid className="w-3.5 h-3.5" /></button>
           </div>
           <SearchBar value={search} onChange={setSearch} placeholder="搜索圣遗物..." />
+          <button
+            onClick={() => {
+              if (sortKeys.length === 0) setSortKeys([{ key: 'id', dir: 'desc' }])
+              else setSortKeys(prev => prev.map(s => ({ ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' })))
+            }}
+            className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs flex-shrink-0 text-surface-400"
+            title="颠倒排序"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5" />
+          </button>
           <button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-2 bg-primary-600 hover:bg-primary-500 rounded-lg text-xs font-medium text-white transition-colors"><Plus className="w-3.5 h-3.5" />添加</button>
         </div>
       </div>
 
+      {/* Sort bar */}
+      <SortBar sortKeys={sortKeys} columns={columns}
+        onToggleSort={handleSort} onRemoveSort={removeSort} onClearSorts={clearSorts} onReorderSorts={reorderSorts} />
+
       {viewMode === 'table' ? (
-        <DataTable title="" columns={columns} data={filtered} onEdit={openEdit} onDelete={handleDelete} onAdd={null} searchBar={null}
+        <DataTable title="" columns={columns} data={filtered}
+          sortKeys={sortKeys} handleSort={handleSort} removeSort={removeSort} clearSorts={clearSorts} reorderSorts={reorderSorts}
+          filters={filters} setFilter={setFilter} clearFilters={clearFilters}
+          showFilters={false} filterableCols={filterableCols} filterOptions={filterOptions}
+          processed={processed} activeFilterCount={activeFilterCount}
+          onEdit={openEdit} onDelete={handleDelete} onAdd={null} searchBar={null}
           selectable selectedIds={selected} onToggleSelect={toggleSelect} onToggleSelectAll={toggleSelectAll}
           onRowClick={row => navigateToDetail(row.id)} itemIdKey="id" />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3">
-          {filtered.map(a => (
-            <div key={a.id} data-item-id={a.id} onClick={() => navigateToDetail(a.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
+          {processed.map(a => (
+            <div key={a.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')} data-item-id={a.id} onClick={() => navigateToDetail(a.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
               <div className="aspect-[3/4] bg-surface-700 flex items-center justify-center">
                 {(a.flower_image || a.image || a.circlet_image) ? <ArtThumb filename={a.flower_image || a.image || a.circlet_image} large /> : <Gem className="w-10 h-10 text-surface-500" />}
               </div>

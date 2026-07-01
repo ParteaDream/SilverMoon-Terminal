@@ -2,13 +2,13 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
-import { clearDetailScroll } from '../hooks/useDetailState'
-import { useLazyImage } from '../hooks/useLazyImage'
+import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
-import { Plus, Trash2, Image, List, Search, CheckSquare, Square, ArrowUpDown, GripVertical, User, Sword, ChevronLeft, ChevronRight, Columns } from 'lucide-react'
+import { Plus, Trash2, Image, List, CheckSquare, Square, ArrowUpDown, GripVertical, User, Sword, ChevronLeft, ChevronRight, Columns } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
 import Lightbox from '../components/Lightbox'
+import ItemThumb from '../components/ItemThumb'
 
 const BANNER_TYPES = {
   'character-event': '角色活动祈愿',
@@ -68,6 +68,9 @@ export default function WishesPage() {
     if (!initialLoadDone.current) return
     loadWishes()
   }, [bannerType, sortAsc])
+
+  // 搜索/排序变化时通知懒加载图片重新检查视口
+  useEffect(() => { bumpLazyRevision() }, [search, sortAsc])
 
   // ── 状态持久化 ──
   useEffect(() => {
@@ -525,7 +528,7 @@ export default function WishesPage() {
           const notEnded = !wish.end_date || wish.end_date >= today
           const isActive = started && notEnded
           return (
-            <div key={wish.id}
+            <div key={wish.id + '|s' + search + sortAsc}
               className={`rounded-xl overflow-hidden
                 ${isActive
                   ? 'border-2 animate-rainbow-border'
@@ -586,6 +589,7 @@ export default function WishesPage() {
         saving={saving}
         title={editing ? `编辑祈愿 - ${editing.version} 第${editing.phase}期` : '添加祈愿'}
         wide
+        closeOnBackdrop={false}
       >
         {/* Wish basic info */}
         <div className="grid grid-cols-3 gap-x-4 mb-4">
@@ -997,40 +1001,5 @@ function BannerCard({ banner, items, charMap, weaponMap, showImages, compactMode
         </div>
       )}
     </div>
-  )
-}
-
-// ── Item thumbnail ──
-function ItemThumb({ item, charMap, weaponMap, small, compact }) {
-  const navigate = useNavigate()
-  const entity = item.item_type === 'character' ? charMap[item.item_id] : weaponMap[item.item_id]
-  const imageFile = item.item_type === 'character' ? entity?._displayCardArt : entity?.simple_art || entity?.image
-  const { ref, src } = useLazyImage(imageFile, '300px')
-
-  const size = compact ? 'w-10 h-10' : (small ? 'w-12 h-12' : 'w-16 h-16')
-  const textSize = compact ? 'text-[9px] max-w-[48px]' : 'text-[10px] leading-tight max-w-[60px]'
-
-  function handleClick(e) {
-    e.stopPropagation()
-    const route = item.item_type === 'character' ? 'characters' : 'weapons'
-    clearDetailScroll(item.item_type, item.item_id)
-    navigate(`/${route}/${item.item_id}`)
-  }
-
-  return (
-    <button onClick={handleClick} className="flex flex-col items-center gap-1 group cursor-pointer" title={entity?.name_zh}>
-      <div ref={ref} className={`${size} rounded-lg border-2 ${item.rarity === 5 ? 'border-amber-400/60' : 'border-purple-400/60'} overflow-hidden bg-surface-700 flex-shrink-0 group-hover:border-white/60 transition-all`}>
-        {src ? (
-          <img src={src} alt="" className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <Search className="w-4 h-4 text-surface-500" />
-          </div>
-        )}
-      </div>
-      <span className={`${textSize} text-center truncate group-hover:text-[rgb(var(--btn-text-4th))] transition-colors ${item.rarity === 5 ? 'text-accent-gold' : 'text-purple-400'}`}>
-        {entity?.name_zh || `ID:${item.item_id}`}
-      </span>
-    </button>
   )
 }

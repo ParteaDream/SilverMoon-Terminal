@@ -20,6 +20,7 @@ import ChallengesPage from './pages/ChallengesPage'
 import GameDataPage from './pages/GameDataPage'
 import WebsitesPage from './pages/WebsitesPage'
 import SettingsPage from './pages/SettingsPage'
+import ChangelogPage from './pages/ChangelogPage'
 
 // macOS hiddenInset titlebar: reserve 38px for traffic light buttons
 const TITLEBAR_HEIGHT = 38
@@ -80,6 +81,7 @@ export default function App() {
           <Route path="/data" element={<GameDataPage />} />
           <Route path="/websites" element={<WebsitesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/changelog" element={<ChangelogPage />} />
         </Routes>
         </div>
 

@@ -829,6 +829,23 @@ function migrateSchema() {
         dbRun('ALTER TABLE characters ADD COLUMN active_outfit_id INTEGER');
       }
     }
+
+    // 创建 version_tags 和 version_additions 表（版本新增数据速览）
+    dbRun(`CREATE TABLE IF NOT EXISTS version_tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      color TEXT DEFAULT '#6366f1',
+      sort_order INTEGER DEFAULT 0
+    )`);
+    dbRun(`CREATE TABLE IF NOT EXISTS version_additions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version TEXT NOT NULL,
+      item_type TEXT NOT NULL,
+      item_id INTEGER NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      UNIQUE(version, item_type, item_id)
+    )`);
   } catch (e) {
     console.error('[migrate] error:', e.message);
   }

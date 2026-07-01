@@ -610,6 +610,7 @@ export default function GameDataPage() {
         saving={saving}
         title={editing ? `编辑数据 - ${editing.title_zh}` : '添加数据条目'}
         wide
+        closeOnBackdrop={false}
       >
         <div className="grid grid-cols-2 gap-x-6">
           <FormInput label="标题" value={form.title_zh} onChange={v => setForm({ ...form, title_zh: v })} />

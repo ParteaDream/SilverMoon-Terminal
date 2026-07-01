@@ -5,7 +5,7 @@ import DataTable from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
 import { useImageDrag } from '../hooks/useImageDrag'
-import { useLazyImage } from '../hooks/useLazyImage'
+import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import { savePageStateSync } from '../utils/pageStateStore'
 import { Plus, LayoutList, LayoutGrid, ExternalLink, X } from 'lucide-react'
 
@@ -175,6 +175,9 @@ export default function WebsitesPage() {
       w.description_zh?.toLowerCase().includes(s)
   })
 
+  // 搜索变化时通知懒加载图片重新检查视口
+  useEffect(() => { bumpLazyRevision() }, [search])
+
   // ── Icon preview component ──
   function IconCell({ filename }) {
     const [src, setSrc] = useState(null)
@@ -332,7 +335,7 @@ export default function WebsitesPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-fade-in">
             {filtered.map((w, i) => (
-              <div key={w.id}
+              <div key={w.id + '|s' + search}
                 draggable
                 onDragStart={e => { e.dataTransfer.setData('text/plain', String(w.id)); e.dataTransfer.effectAllowed = 'move'; }}
                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
@@ -393,6 +396,7 @@ export default function WebsitesPage() {
         onSave={handleSave}
         saving={saving}
         title={editing ? `编辑站点 - ${editing.title_zh}` : '添加站点'}
+        closeOnBackdrop={false}
       >
         <FormInput label="标题" value={form.title_zh || ''} onChange={v => setForm({ ...form, title_zh: v })} />
         <FormInput label="地址 (URL)" value={form.url || ''} onChange={v => setForm({ ...form, url: v })} placeholder="https://..." />

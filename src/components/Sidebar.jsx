@@ -4,7 +4,7 @@ import { notifySidebarToggled } from '../context/SidebarContext'
 import { useNav } from '../context/NavContext'
 import {
   Users, Swords, Gem, Package, Gift, SwordsIcon, Database, Globe, Settings, Info,
-  PanelLeftClose, PanelLeftOpen
+  PanelLeftClose, PanelLeftOpen, ScrollText
 } from 'lucide-react'
 
 const navItems = [
@@ -138,6 +138,27 @@ export default function Sidebar() {
           </button>
         )})}
       </nav>
+
+      {/* Changelog button — fixed at bottom, above collapse */}
+      <div className={`flex-shrink-0 ${collapsed ? 'px-2' : 'px-3'} pb-1`}>
+        <button
+          onClick={() => push('/changelog')}
+          title={collapsed ? 'Changelog' : undefined}
+          className={`flex items-center rounded-lg w-full no-drag transition-all duration-200
+            ${collapsed
+              ? 'justify-center px-0 py-3'
+              : 'gap-3 px-3 py-3.5'
+            }
+            ${location.pathname.startsWith('/changelog')
+              ? 'bg-primary-500/10 text-primary-400 shadow-sm'
+              : 'text-surface-400 hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:ring-2 hover:ring-[rgb(var(--color-1))] hover:shadow-lg'
+            }`
+        }
+        >
+          <ScrollText className={`flex-shrink-0 ${collapsed ? 'w-5 h-5' : 'w-5 h-5'}`} />
+          {!collapsed && <span className="text-lg font-bold italic tracking-wide">Changelog</span>}
+        </button>
+      </div>
 
       {/* Toggle button */}
       <div className="p-2 border-t border-surface-800 flex-shrink-0">

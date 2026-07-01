@@ -323,3 +323,20 @@ CREATE TABLE IF NOT EXISTS wishes (
   description_zh TEXT
 );
 
+CREATE TABLE IF NOT EXISTS version_tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version TEXT NOT NULL,              -- 版本号 (如 5.7)
+  tag TEXT NOT NULL,                  -- 标签文字
+  color TEXT DEFAULT '#6366f1',       -- 标签颜色 hex
+  sort_order INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS version_additions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version TEXT NOT NULL,              -- 版本号 (如 5.7)
+  item_type TEXT NOT NULL,            -- 'character' / 'weapon' / 'artifact' / 'material' / 'wish'
+  item_id INTEGER NOT NULL,           -- 对应表的 ID
+  sort_order INTEGER DEFAULT 0,
+  UNIQUE(version, item_type, item_id)
+);
+

@@ -3,11 +3,11 @@ import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
 import { useImageDrag } from '../hooks/useImageDrag'
-import { useLazyImage } from '../hooks/useLazyImage'
+import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import DataTable, { useSortFilter, SortBar, FilterBar } from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
-import { Plus, LayoutList, LayoutGrid, Sword, MapPin, Trash2 } from 'lucide-react'
+import { Plus, LayoutList, LayoutGrid, Sword, MapPin, Trash2, ArrowUpDown } from 'lucide-react'
 
 const ELEMENT_COLORS = {
   1: 'text-red-400', 2: 'text-blue-400', 3: 'text-cyan-400',
@@ -391,6 +391,9 @@ export default function CharactersPage() {
     processed, activeFilterCount,
   } = useSortFilter(filtered, columns)
 
+  // 排序/筛选变化时通知懒加载图片重新检查视口
+  useEffect(() => { bumpLazyRevision() }, [sortKeys, filters])
+
   // 用 ref 保持最新状态，避免 useLayoutEffect 频繁重建
   const stateRef = useRef({ viewMode, search, sortKeys, filters })
   stateRef.current = { viewMode, search, sortKeys, filters }
@@ -422,6 +425,16 @@ export default function CharactersPage() {
             </button>
           </div>
           <SearchBar value={search} onChange={setSearch} placeholder="搜索角色名称..." />
+          <button
+            onClick={() => {
+              if (sortKeys.length === 0) setSortKeys([{ key: 'id', dir: 'desc' }])
+              else setSortKeys(prev => prev.map(s => ({ ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' })))
+            }}
+            className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs flex-shrink-0 text-surface-400"
+            title="颠倒排序"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5" />
+          </button>
           {filterableCols.length > 0 && (
             <button
               onClick={() => setShowFilters(!showFilters)}
@@ -509,7 +522,7 @@ export default function CharactersPage() {
             const reg = regions.find(r => r.id === char.region_id)
             return (
               <div
-                key={char.id}
+                key={char.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
                 data-item-id={char.id}
                 onClick={() => navigateToDetail(char.id)}
                 className={`group relative rounded-xl overflow-hidden border cursor-pointer

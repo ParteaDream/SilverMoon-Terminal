@@ -360,7 +360,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
             </thead>
             <tbody>
               {processed.map((row, i) => (
-                <tr key={row.id || i}
+                <tr key={`${row.id || i}--s${sortKeys.map(s => s.key + s.dir).join(',')}|f${Object.entries(filters).flat().join(',')}`}
                   data-item-id={itemIdKey ? row[itemIdKey] : undefined}
                   className={`border-b border-surface-800/50 last:border-b-0 hover:bg-surface-800/30 transition-colors ${onRowClick ? 'cursor-pointer' : ''} ${onRowReorder ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}

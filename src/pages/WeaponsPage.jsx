@@ -2,12 +2,12 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
-import { useLazyImage } from '../hooks/useLazyImage'
+import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import DataTable, { useSortFilter, FilterBar, SortBar } from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
-import { LayoutList, LayoutGrid, Plus, Sword, Filter } from 'lucide-react'
+import { LayoutList, LayoutGrid, Plus, Sword, Filter, ArrowUpDown } from 'lucide-react'
 
 const RARITY_STARS = { 1: '★', 2: '★★', 3: '★★★', 4: '★★★★', 5: '★★★★★' }
 const RARITY_COLOR = { 1: 'text-gray-300', 2: 'text-green-400', 3: 'text-blue-400', 4: 'text-purple-400', 5: 'text-accent-gold' }
@@ -274,6 +274,9 @@ export default function WeaponsPage() {
     processed, activeFilterCount,
   } = useSortFilter(searched, columns)
 
+  // 排序/筛选变化时通知懒加载图片重新检查视口
+  useEffect(() => { bumpLazyRevision() }, [sortKeys, filters])
+
   // 用 ref 保持最新状态，避免 useLayoutEffect 频繁重建
   const stateRef = useRef({ viewMode, search, sortKeys, filters })
   stateRef.current = { viewMode, search, sortKeys, filters }
@@ -292,6 +295,17 @@ export default function WeaponsPage() {
             <button onClick={() => setViewMode('gallery')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'gallery' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}><LayoutGrid className="w-3.5 h-3.5" /></button>
           </div>
           <SearchBar value={search} onChange={setSearch} placeholder="搜索武器名称..." />
+          {/* 筛选按钮 */}
+          <button
+            onClick={() => {
+              if (sortKeys.length === 0) setSortKeys([{ key: 'id', dir: 'desc' }])
+              else setSortKeys(prev => prev.map(s => ({ ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' })))
+            }}
+            className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs flex-shrink-0 text-surface-400"
+            title="颠倒排序"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5" />
+          </button>
           {/* Filter toggle button */}
           <button
             onClick={() => setShowFilters(!showFilters)}
@@ -338,7 +352,7 @@ export default function WeaponsPage() {
             const gradient = RARITY_GRADIENT[w.rarity] || ''
             const borderCls = RARITY_BORDER[w.rarity] || 'border-surface-700'
             return (
-              <div key={w.id} data-item-id={w.id} onClick={() => navigateToDetail(w.id)}
+              <div key={w.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')} data-item-id={w.id} onClick={() => navigateToDetail(w.id)}
                 className={`group relative rounded-xl overflow-hidden border ${borderCls} bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer`}
               >
                 {/* Rarity gradient background */}
