@@ -926,6 +926,26 @@ function migrateSchema() {
       sort_order INTEGER DEFAULT 0,
       UNIQUE(version, item_type, item_id)
     )`);
+    dbRun(`CREATE TABLE IF NOT EXISTS version_meta (
+      version TEXT PRIMARY KEY,
+      images TEXT DEFAULT '[]'
+    )`);
+    // Migrate old version_meta.image → images (single value to JSON array)
+    try {
+      const hasImageCol = db.exec("PRAGMA table_info('version_meta')")
+      if (hasImageCol.length > 0) {
+        const cols = hasImageCol[0].values.map(r => r[1])
+        if (cols.includes('image') && !cols.includes('images')) {
+          db.run("ALTER TABLE version_meta ADD COLUMN images TEXT DEFAULT '[]'")
+          const oldRows = db.exec("SELECT version, image FROM version_meta WHERE image IS NOT NULL AND image != ''")
+          if (oldRows.length > 0) {
+            for (const row of oldRows[0].values) {
+              db.run("UPDATE version_meta SET images = ? WHERE version = ?", [JSON.stringify([row[1]]), row[0]])
+            }
+          }
+        }
+      }
+    } catch (_) {}
   } catch (e) {
     console.error('[migrate] error:', e.message);
   }
@@ -2149,6 +2169,24 @@ ipcMain.handle('export-image-file', async (_event, { data, defaultName }) => {
     });
     if (result.canceled || !result.filePath) return { success: false, message: '已取消' };
     fs.writeFileSync(result.filePath, Buffer.from(data));
+    return { success: true, path: result.filePath };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 导出原始图片文件（不转换，直接复制）──
+ipcMain.handle('export-image-file-raw', async (_event, filename) => {
+  try {
+    if (!dbDir) throw new Error('数据库路径未设置');
+    const fp = resolveImagePath(getImagesDir(dbDir), filename);
+    if (!fp || !fs.existsSync(fp)) return { error: '文件不存在' };
+    const ext = path.extname(filename);
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出图片',
+      defaultPath: filename,
+      filters: [{ name: '图片文件', extensions: [ext.replace('.', '') || 'png'] }],
+    });
+    if (result.canceled || !result.filePath) return { success: false, message: '已取消' };
+    fs.copyFileSync(fp, result.filePath);
     return { success: true, path: result.filePath };
   } catch (e) { return { error: e.message }; }
 });

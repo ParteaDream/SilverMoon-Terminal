@@ -1,6 +1,6 @@
 {
   "name": "silvermoon-terminal",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "SilverMoon Terminal - 银月终端",
   "main": "electron/main.js",
   "scripts": {
@@ -43,15 +43,23 @@
     "mac": {
       "category": "public.app-category.reference",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["arm64"]
+        }
       ],
       "icon": "assets/icon.icns"
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
       ],
       "icon": "assets/icon.ico"
     },

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { PageMemoryProvider } from '../context/PageMemoryContext'
@@ -70,6 +70,7 @@ export default function CharacterDetailPage() {
 
 function CharacterDetailContent() {
   const { id } = useParams()
+  const location = useLocation()
   const { query, importImage } = useDb()
   const { backToList, consumeBackToList } = useNav()
   const [character, setCharacter] = useState(null)
@@ -199,6 +200,17 @@ function CharacterDetailContent() {
       setTalents(tals.data || [])
       setConstellations(cons.data || [])
       setOutfits(fits.data || [])
+
+      // Scroll to outfit if hash present (e.g. #outfit-123)
+      const hash = location.hash
+      if (hash && hash.startsWith('#outfit-')) {
+        setTimeout(() => {
+          const el = document.getElementById(hash.slice(1))
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }
+        }, 300)
+      }
       setStories(strs.data || [])
       setAscMats(am.data || [])
       setTalentMats(tm.data || [])
@@ -932,7 +944,7 @@ function CharacterDetailContent() {
                 const displayImage = o.image || (o.is_default ? character.splash_art : null)
                 const displayAvatar = o.avatar_image || (o.is_default ? character.card_art : null)
                 return (
-                <div key={o.id} className={`rounded-xl bg-surface-800/50 border overflow-hidden group transition-all duration-200 flex flex-col
+                <div key={o.id} id={`outfit-${o.id}`} className={`rounded-xl bg-surface-800/50 border overflow-hidden group transition-all duration-200 flex flex-col
                   ${isSelected
                     ? 'border-primary-500 ring-1 ring-primary-500/30 shadow-lg shadow-primary-500/10'
                     : isDragOver

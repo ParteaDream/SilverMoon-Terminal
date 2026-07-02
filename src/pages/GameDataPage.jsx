@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
@@ -209,6 +210,7 @@ export default function GameDataPage() {
   const [saving, setSaving] = useState(false)
   const [multiSelect, setMultiSelect] = useState(false)      // 多选模式开关
   const [activeDetailId, setActiveDetailId] = useState(null)  // 右侧详情面板当前条目 ID
+  const [searchParams] = useSearchParams()
 
 
   async function loadData() {
@@ -374,6 +376,17 @@ export default function GameDataPage() {
       loadData()
     }
   }, [])
+
+  // Handle ?detail=ID query param for direct navigation
+  useEffect(() => {
+    const detailId = searchParams.get('detail')
+    if (detailId && data.length > 0) {
+      const id = Number(detailId)
+      if (!isNaN(id) && data.some(d => d.id === id)) {
+        setActiveDetailId(id)
+      }
+    }
+  }, [data, searchParams])
 
   useLayoutEffect(() => {
     const main = document.querySelector('main')

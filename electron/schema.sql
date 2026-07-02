@@ -340,3 +340,8 @@ CREATE TABLE IF NOT EXISTS version_additions (
   UNIQUE(version, item_type, item_id)
 );
 
+CREATE TABLE IF NOT EXISTS version_meta (
+  version TEXT PRIMARY KEY,
+  images TEXT DEFAULT '[]'
+);
+

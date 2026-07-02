@@ -2,25 +2,24 @@
 
 <div align="center">
 本地化游戏维基数据库应用 · 支持查询、编辑与管理游戏数据**
-
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-1.2.1-blue.svg)](package.json)
 [![Electron](https://img.shields.io/badge/electron-31-blue.svg)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/react-18-61dafb.svg)](https://react.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
 </div>
 
 ---
 
 ## 简介
 
-SilverMoon Terminal（银月终端）是一款基于 Electron 的原神桌面端数据库应用，提供本地化的数据查询、编辑与管理功能。数据存储于本地 SQLite 数据库，无需网络即可离线使用。
+SilverMoon Terminal（银月终端）是一款基于 Electron 的桌面端数据库应用，提供本地化的数据查询、编辑与管理功能。数据存储于本地 SQLite 数据库，无需网络即可离线使用。
 
 ![SilverMoon_Terminal_Win](public/SilverMoon_Terminal_Win.jpeg)
 
 ### 主要功能
-- 📊 **数据浏览与编辑** — 角色、武器、圣遗物、材料、祈愿、挑战等数据的表格/详情双视图
-- 📋 **版本速览** — Changelog 板块展示各版本新增内容，支持编辑、折叠、拖拽排序
+- 📊 **数据浏览与编辑** — 角色、武器、圣遗物、材料、祈愿、挑战、游戏数据等板块的表格/详情双视图
+- 📋 **版本速览** — Changelog 板块展示各版本新增内容（角色/武器/圣遗物/时装/材料/数据/祈愿），支持版本图、折叠、拖拽排序
+- 🔄 **多基准库切换** — 支持识别 silvermoon_terminal-v{version}.db 格式的版本化基准库，可在设置中随时切换
 - 🖼️ **图包管理** — 智能识别数据库文件夹下的图包，支持多版本图包优先级选择
 - 🎨 **主题定制** — 6 套内置主题 + 自定义颜色方案，元素颜色可独立配置
 - 🔍 **全局搜索** — 快速检索所有数据表
@@ -126,6 +125,9 @@ npm run electron:build
 # Windows (x64)
 npm run electron:build:win
 
+# 构建 + 发布到 GitHub Release
+npm run electron:publish
+
 # 构建产物在 release/ 目录下
 ```
 
@@ -150,7 +152,7 @@ SilverMoon Terminal 支持从数据库文件夹自动识别图包。任何名称
 
 | 模块 | 功能 |
 |------|------|
-| **通用** | 数据库文件夹选择、初始数据补缺 |
+| **通用** | 数据库文件夹选择、基准库切换、数据更新、图包管理 |
 | **外观** | 6 套主题切换、自定义配色、默认视图模式 |
 | **颜色预设** | 7 种元素颜色自定义、图标导入 |
 | **版本信息** | 查看软件版本、图包管理与切换 |

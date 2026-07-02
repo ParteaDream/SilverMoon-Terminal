@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
-import { Plus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight, ChevronLeft, ImagePlus, Download } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormField } from '../components/EditModal'
 import ItemThumb from '../components/ItemThumb'
@@ -19,7 +19,9 @@ const SECTION_CONFIG = {
   character: { label: '角色', icon: '👤' },
   weapon: { label: '武器', icon: '⚔️' },
   artifact: { label: '圣遗物', icon: '💠' },
+  outfit: { label: '角色时装', icon: '👗' },
   material: { label: '重要材料', icon: '📦' },
+  game_data: { label: '游戏数据', icon: '📊' },
   wish: { label: '祈愿', icon: '✨' },
 }
 
@@ -58,7 +60,13 @@ export default function ChangelogPage() {
   const [artifactMap, setArtifactMap] = useState({})
   const [materialMap, setMaterialMap] = useState({})
   const [wishMap, setWishMap] = useState({})       // wish id -> { ...wish, banners: [...] }
+  const [outfitMap, setOutfitMap] = useState({})    // outfit id -> { id, name_zh, avatar_image, character_id }
+  const [gameDataMap, setGameDataMap] = useState({}) // game_data id -> { id, title_zh }
+  const [versionImages, setVersionImages] = useState({}) // version -> [filenames]
   const [loaded, setLoaded] = useState(false)
+
+  // Random version image display (picked once per load)
+  const randomVersionImages = useRef({})
 
   // UI
   const [search, setSearch] = useState('')
@@ -71,6 +79,7 @@ export default function ChangelogPage() {
   const [formVersion, setFormVersion] = useState('')
   const [formTags, setFormTags] = useState([])       // [{ id, tag, color }]
   const [formAdditions, setFormAdditions] = useState({}) // { character: [id], weapon: [id], ... }
+  const [formVersionImages, setFormVersionImages] = useState([]) // array of filenames
   const [saving, setSaving] = useState(false)
 
   // Options for SearchableSelect
@@ -79,6 +88,8 @@ export default function ChangelogPage() {
   const [artifactOptions, setArtifactOptions] = useState([])
   const [materialOptions, setMaterialOptions] = useState([])
   const [wishOptions, setWishOptions] = useState([])
+  const [outfitOptions, setOutfitOptions] = useState([])
+  const [gameDataOptions, setGameDataOptions] = useState([])
 
   // ── Load all data ──
   useEffect(() => {
@@ -163,21 +174,48 @@ export default function ChangelogPage() {
 
   async function loadAll() {
     // Load lookup data
-    const [chars, weps, arts, mats, wishes, fits] = await Promise.all([
+    const [chars, weps, arts, mats, wishes, fits, gds, vms] = await Promise.all([
       query('SELECT id, name_zh, card_art, rarity FROM characters'),
       query('SELECT id, name_zh, image, simple_art, rarity FROM weapons'),
       query('SELECT id, name_zh, image, flower_image FROM artifacts'),
       query('SELECT id, name_zh, image, type FROM materials'),
       query('SELECT id, version, phase, banner_type, name_zh, start_date, end_date FROM wishes'),
-      query('SELECT id, character_id, avatar_image FROM character_outfits WHERE avatar_image IS NOT NULL AND avatar_image != \'\''),
+      query('SELECT id, character_id, name_zh, avatar_image FROM character_outfits'),
+      query('SELECT id, title_zh FROM game_data'),
+      query('SELECT version, images FROM version_meta'),
     ])
 
-    // Build outfit avatar map
+    // Build outfit avatar map (only those with avatars, for character display)
     const fitsData = fits.data || []
     const outfitAvatarMap = {}
+    const om = {} // outfit id -> full outfit data
     for (const f of fitsData) {
-      outfitAvatarMap[f.id] = f.avatar_image
+      if (f.avatar_image) outfitAvatarMap[f.id] = f.avatar_image
+      om[f.id] = f
     }
+    setOutfitMap(om)
+
+    // Build game_data map
+    const gdsData = gds.data || []
+    const gdm = {}
+    for (const g of gdsData) gdm[g.id] = g
+    setGameDataMap(gdm)
+
+    // Build version images map (parse JSON arrays, pick one random for display)
+    const vmsData = vms.data || []
+    const viMap = {}
+    const rvi = {}
+    for (const v of vmsData) {
+      let images = []
+      try { images = JSON.parse(v.images || '[]') } catch (_) { images = v.image ? [v.image] : [] }
+      images = images.filter(Boolean)
+      if (images.length > 0) {
+        viMap[v.version] = images
+        rvi[v.version] = images[Math.floor(Math.random() * images.length)]
+      }
+    }
+    setVersionImages(viMap)
+    randomVersionImages.current = rvi
     // Read outfit selections from user.json
     let outfitSelections = {}
     try {
@@ -240,18 +278,52 @@ export default function ChangelogPage() {
     }))
     setWishOptions(wishOpts)
 
+    // Outfit options for edit form
+    const outfitOpts = fitsData.map(f => ({
+      value: f.id,
+      label: `${f.name_zh}（${cm[f.character_id]?.name_zh || '未知角色'}）`,
+      image: f.avatar_image || null,
+      character_id: f.character_id,
+    }))
+    setOutfitOptions(outfitOpts)
+
+    // Game data options for edit form
+    const gdOpts = gdsData.map(g => ({
+      value: g.id,
+      label: g.title_zh,
+      image: null,
+    }))
+    setGameDataOptions(gdOpts)
+
     // Load version data
-    await loadVersionData(cm, wm, am, mm, wishMapTemp)
+    await loadVersionData(cm, wm, am, mm, wishMapTemp, om, gdm)
     setLoaded(true)
   }
 
-  async function loadVersionData(cm, wm, am, mm, wishMapTemp) {
-    const [tagsRes, addsRes] = await Promise.all([
+  async function loadVersionData(cm, wm, am, mm, wishMapTemp, om, gdm) {
+    const [tagsRes, addsRes, metaRes] = await Promise.all([
       query('SELECT * FROM version_tags ORDER BY sort_order, id'),
       query('SELECT * FROM version_additions ORDER BY sort_order, id'),
+      query('SELECT version, images FROM version_meta'),
     ])
     const tagsData = tagsRes.data || []
     const addsData = addsRes.data || []
+    const metaData = metaRes.data || []
+
+    // Build version images from meta (parse JSON arrays)
+    const viMap = {}
+    const rvi = {}
+    for (const m of metaData) {
+      let images = []
+      try { images = JSON.parse(m.images || '[]') } catch (_) { images = m.image ? [m.image] : [] }
+      images = images.filter(Boolean)
+      if (images.length > 0) {
+        viMap[m.version] = images
+        rvi[m.version] = images[Math.floor(Math.random() * images.length)]
+      }
+    }
+    setVersionImages(viMap)
+    randomVersionImages.current = rvi
 
     const verMap = {}
     for (const t of tagsData) {
@@ -261,13 +333,14 @@ export default function ChangelogPage() {
     for (const a of addsData) {
       if (!verMap[a.version]) verMap[a.version] = { tags: [], additions: {} }
       if (!verMap[a.version].additions[a.item_type]) verMap[a.version].additions[a.item_type] = []
-      // Look up the entity
       let entity = null
       switch (a.item_type) {
         case 'character': entity = cm[a.item_id]; break
         case 'weapon': entity = wm[a.item_id]; break
         case 'artifact': entity = am[a.item_id]; break
+        case 'outfit': entity = om[a.item_id]; break
         case 'material': entity = mm[a.item_id]; break
+        case 'game_data': entity = gdm[a.item_id]; break
         case 'wish': entity = wishMapTemp[a.item_id]; break
       }
       if (entity) verMap[a.version].additions[a.item_type].push({ ...entity, _addId: a.id })
@@ -316,6 +389,7 @@ export default function ChangelogPage() {
     setFormVersion('')
     setFormTags([])
     setFormAdditions({})
+    setFormVersionImages([])
     setModalOpen(true)
   }
 
@@ -329,6 +403,7 @@ export default function ChangelogPage() {
       adds[type] = items.map(i => i.id)
     }
     setFormAdditions(adds)
+    setFormVersionImages(versionImages[version] || [])
     setModalOpen(true)
   }
 
@@ -340,6 +415,7 @@ export default function ChangelogPage() {
       // Delete existing data for this version
       await query('DELETE FROM version_tags WHERE version = ?', [version])
       await query('DELETE FROM version_additions WHERE version = ?', [version])
+      await query('DELETE FROM version_meta WHERE version = ?', [version])
 
       // Insert tags
       for (let i = 0; i < formTags.length; i++) {
@@ -360,8 +436,16 @@ export default function ChangelogPage() {
         }
       }
 
+      // Insert version images (JSON array)
+      if (formVersionImages.length > 0) {
+        await query(
+          'INSERT OR REPLACE INTO version_meta (version, images) VALUES (?, ?)',
+          [version, JSON.stringify(formVersionImages)]
+        )
+      }
+
       // Reload
-      await loadVersionData(charMap, weaponMap, artifactMap, materialMap, wishMap)
+      await loadVersionData(charMap, weaponMap, artifactMap, materialMap, wishMap, outfitMap, gameDataMap)
       setModalOpen(false)
     } catch (e) {
       console.error('Save failed:', e)
@@ -503,6 +587,10 @@ export default function ChangelogPage() {
               artifactMap={artifactMap}
               materialMap={materialMap}
               wishMap={wishMap}
+              outfitMap={outfitMap}
+              gameDataMap={gameDataMap}
+              versionImages={versionImages[version] || []}
+              randomVersionImage={randomVersionImages.current[version] || null}
               onEdit={() => openEdit(version)}
               ItemCard={ItemCard}
               isExpanded={isExpanded}
@@ -552,41 +640,234 @@ export default function ChangelogPage() {
           artifactOptions={artifactOptions}
           materialOptions={materialOptions}
           wishOptions={wishOptions}
+          outfitOptions={outfitOptions}
+          gameDataOptions={gameDataOptions}
           charMap={charMap}
           weaponMap={weaponMap}
           artifactMap={artifactMap}
           materialMap={materialMap}
           wishMap={wishMap}
+          outfitMap={outfitMap}
+          gameDataMap={gameDataMap}
           readImage={readImage}
+          formVersionImages={formVersionImages}
+          setFormVersionImages={setFormVersionImages}
         />
       </EditModal>
     </div>
   )
 }
 
+// ── Version image background (right-to-left opacity gradient) ──
+function VersionImageBg({ imageFile }) {
+  const { readImage } = useDb()
+  const [src, setSrc] = useState(null)
+
+  useEffect(() => {
+    if (!imageFile) return
+    let cancelled = false
+    readImage(imageFile).then(data => { if (!cancelled && data) setSrc(data) })
+    return () => { cancelled = true }
+  }, [imageFile, readImage])
+
+  if (!src) return null
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl" style={{ zIndex: 0 }}>
+      <img
+        src={src}
+        alt=""
+        className="absolute top-0 right-0 h-full w-auto object-cover opacity-40"
+        style={{ maskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)' }}
+      />
+    </div>
+  )
+}
+
+// ── Version image lightbox (multi-image with prev/next, zoom + pan) ──
+function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
+  const { readImage } = useDb()
+  const [src, setSrc] = useState(null)
+  const [scale, setScale] = useState(1)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const dragging = useRef(false)
+  const dragStart = useRef({ x: 0, y: 0 })
+  const posStart = useRef({ x: 0, y: 0 })
+  const containerRef = useRef(null)
+
+  // Reset zoom/pan on image change
+  useEffect(() => {
+    setScale(1)
+    setPosition({ x: 0, y: 0 })
+  }, [index])
+
+  useEffect(() => {
+    let cancelled = false
+    readImage(images[index]).then(data => { if (!cancelled) setSrc(data) })
+    return () => { cancelled = true }
+  }, [images, index, readImage])
+
+  // Mouse drag handlers
+  const handleMouseDown = useCallback((e) => {
+    if (scale <= 1) return
+    e.preventDefault()
+    dragging.current = true
+    dragStart.current = { x: e.clientX, y: e.clientY }
+    posStart.current = { ...position }
+  }, [scale, position])
+
+  const handleMouseMove = useCallback((e) => {
+    if (!dragging.current) return
+    const dx = e.clientX - dragStart.current.x
+    const dy = e.clientY - dragStart.current.y
+    setPosition({ x: posStart.current.x + dx, y: posStart.current.y + dy })
+  }, [])
+
+  const handleMouseUp = useCallback(() => { dragging.current = false }, [])
+
+  // Global mouse events
+  useEffect(() => {
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [handleMouseMove, handleMouseUp])
+
+  // Wheel zoom (0.5x ~ 3x)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !src) return
+    const onWheel = (e) => {
+      e.stopPropagation()
+      e.preventDefault()
+      setScale(prev => Math.max(0.5, Math.min(3, prev + (e.deltaY > 0 ? -0.2 : 0.2))))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [src])
+
+  return (
+    <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex items-center justify-center no-drag" onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose() }}>
+      {/* Left arrow */}
+      <button
+        onClick={e => { e.stopPropagation(); onPrev() }}
+        className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+      >
+        <ChevronLeft className="w-6 h-6" />
+      </button>
+      {/* Image with zoom + pan */}
+      <div
+        ref={containerRef}
+        className="max-w-[85vw] max-h-[85vh] flex items-center justify-center"
+        onClick={e => e.stopPropagation()}
+        onMouseDown={handleMouseDown}
+      >
+        {src ? (
+          <img
+            src={src}
+            alt=""
+            className={`max-w-full max-h-full object-contain rounded-lg shadow-2xl select-none ${scale > 1 ? 'cursor-grab' : ''}`}
+            style={{ transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)` }}
+            draggable={false}
+          />
+        ) : (
+          <div className="w-10 h-10 rounded-full border-2 border-primary-500 border-t-transparent animate-spin" />
+        )}
+      </div>
+      {/* Right arrow */}
+      <button
+        onClick={e => { e.stopPropagation(); onNext() }}
+        className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+      >
+        <ChevronRight className="w-6 h-6" />
+      </button>
+      {/* Scale indicator */}
+      {scale !== 1 && (
+        <div className="absolute top-4 left-4 text-xs text-white/60 bg-black/40 px-2 py-1 rounded">
+          {Math.round(scale * 100)}%
+        </div>
+      )}
+      {/* Counter + export */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/70 bg-black/40 px-3 py-1 rounded-full flex items-center gap-3">
+        <span>{index + 1} / {images.length}</span>
+        <button
+          onClick={e => {
+            e.stopPropagation()
+            window.electronAPI?.exportImageFileRaw(images[index])
+          }}
+          className="hover:text-white transition-colors"
+          title="导出图片"
+        >
+          <Download className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {/* Close button */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+      >
+        <X className="w-5 h-5" />
+      </button>
+    </div>
+  )
+}
+
 // ── Version entry display ──
-function VersionEntry({ version, data, charMap, weaponMap, artifactMap, materialMap, wishMap, onEdit, ItemCard, isExpanded, defaultExpanded, onToggleExpand }) {
+function VersionEntry({ version, data, charMap, weaponMap, artifactMap, materialMap, wishMap, outfitMap, gameDataMap, versionImages, randomVersionImage, onEdit, ItemCard, isExpanded, defaultExpanded, onToggleExpand }) {
+  const navigate = useNavigate()
+  const [lightboxIndex, setLightboxIndex] = useState(-1) // -1 = closed, >=0 = open at index
   const additions = data.additions || {}
   const hasAnyContent = Object.values(additions).some(arr => arr.length > 0)
 
-  // Use controlled expand state: explicit isExpanded > local default
   const collapsed = isExpanded !== undefined ? !isExpanded : !defaultExpanded
-
-  // Count items per type for collapsed summary
-  const compactTypes = ['character', 'weapon', 'artifact']
+  const compactTypes = ['character', 'weapon', 'artifact', 'outfit', 'game_data']
   const compactCounts = compactTypes.filter(t => additions[t]?.length > 0).length > 0
 
+  // Lightbox keyboard nav
+  useEffect(() => {
+    if (lightboxIndex < 0 || versionImages.length === 0) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); setLightboxIndex(-1); return }
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+        e.preventDefault()
+        setLightboxIndex(prev => prev > 0 ? prev - 1 : versionImages.length - 1)
+      }
+      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+        e.preventDefault()
+        setLightboxIndex(prev => prev < versionImages.length - 1 ? prev + 1 : 0)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [lightboxIndex, versionImages])
+
   return (
-    <div className="rounded-xl border border-surface-700 bg-surface-900/60 overflow-hidden">
+    <div className="rounded-xl border border-surface-700 bg-surface-900/60 overflow-hidden relative">
+      {/* Version image background (right-to-left opacity gradient) */}
+      {randomVersionImage && <VersionImageBg imageFile={randomVersionImage} />}
       {/* Version header */}
       <div
         onClick={() => onToggleExpand(collapsed)}
-        className="px-5 py-4 border-b border-surface-700 flex items-center gap-3 flex-wrap cursor-pointer hover:bg-surface-800/30 transition-colors"
+        className="px-5 py-4 border-b border-surface-700 flex items-center gap-3 flex-wrap cursor-pointer hover:bg-surface-800/30 transition-colors relative"
+        style={{ zIndex: 1 }}
       >
         <span className="p-1 text-surface-500">
           {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </span>
-        <span className="text-2xl font-bold text-white">{version}</span>
+        <span
+          className={`text-2xl font-bold text-white ${versionImages.length > 0 ? 'cursor-pointer hover:text-primary-400 transition-colors' : ''}`}
+          onClick={e => {
+            if (versionImages.length > 0) {
+              e.stopPropagation()
+              setLightboxIndex(0)
+            }
+          }}
+          title={versionImages.length > 0 ? `查看 ${versionImages.length} 张版本图` : ''}
+        >
+          {version}
+          {versionImages.length > 0 && <span className="text-[11px] text-surface-500 ml-1.5 align-super">({versionImages.length}图)</span>}
+        </span>
         {data.tags.map(t => (
           <span
             key={t.id}
@@ -615,10 +896,10 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
       {!hasAnyContent ? (
         <div className="px-5 py-8 text-center text-surface-500 text-sm">暂无新增内容，点击编辑添加</div>
       ) : (
-        <div className={collapsed ? 'p-4' : 'p-5 space-y-6'}>
+        <div className={collapsed ? 'p-4' : 'p-4 space-y-4'}>
           {/* Non-wish sections: flex-wrap, each section sized by item count */}
           {(() => {
-            const nonWishTypes = Object.keys(SECTION_CONFIG).filter(t => t !== 'wish')
+            const nonWishTypes = ['character', 'weapon', 'artifact', 'outfit', 'material', 'game_data']
             const visibleTypes = collapsed ? nonWishTypes.filter(t => t !== 'material') : nonWishTypes
             const hasAny = visibleTypes.some(t => additions[t]?.length > 0)
             if (!hasAny) return null
@@ -651,12 +932,27 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
                               imageFile = item.simple_art || item.image; name = item.name_zh; rarity = item.rarity; navTo = `/weapons/${item.id}`; break
                             case 'artifact':
                               imageFile = item.flower_image || item.image; name = item.name_zh; rarity = item.max_rarity; navTo = `/artifacts/${item.id}`; break
+                            case 'outfit':
+                              imageFile = item.avatar_image; name = item.name_zh; rarity = null; navTo = `/characters/${item.character_id}#outfit-${item.id}`; break
                             case 'material':
                               imageFile = item.image; name = item.name_zh; rarity = item.rarity; navTo = `/materials/${item.id}`; break
+                            case 'game_data':
+                              // Rendered as a tag below, skip here
+                              return null
                             default: return null
                           }
                           return <ItemCard key={`${type}-${item.id}`} imageFile={imageFile} name={name} rarity={rarity} navTo={navTo} />
                         })}
+                        {/* Game data tags rendered inline */}
+                        {type === 'game_data' && items.map(gd => (
+                          <button
+                            key={`gd-${gd.id}`}
+                            onClick={() => navigate(`/data?detail=${gd.id}`)}
+                            className="px-3 py-1.5 rounded-full text-xs font-medium bg-primary-500/10 text-primary-300 border border-primary-500/20 hover:bg-primary-500/20 transition-colors h-fit self-center"
+                          >
+                            {gd.title_zh}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )
@@ -716,6 +1012,17 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
             )}
           </div>
         </div>
+      )}
+
+      {/* Version image lightbox */}
+      {lightboxIndex >= 0 && versionImages.length > 0 && (
+        <VersionImageLightbox
+          images={versionImages}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(-1)}
+          onPrev={() => setLightboxIndex(prev => prev > 0 ? prev - 1 : versionImages.length - 1)}
+          onNext={() => setLightboxIndex(prev => prev < versionImages.length - 1 ? prev + 1 : 0)}
+        />
       )}
     </div>
   )
@@ -792,9 +1099,12 @@ function WishDisplay({ wish, charMap, weaponMap }) {
 function EditForm({
   formVersion, setFormVersion, formTags, addFormTag, updateFormTag, removeFormTag, moveFormTag,
   formAdditions, toggleFormItem, removeFormItem, moveFormItem,
-  charOptions, weaponOptions, artifactOptions, materialOptions, wishOptions,
-  charMap, weaponMap, artifactMap, materialMap, wishMap, readImage,
+  charOptions, weaponOptions, artifactOptions, materialOptions, wishOptions, outfitOptions, gameDataOptions,
+  charMap, weaponMap, artifactMap, materialMap, wishMap, outfitMap, gameDataMap, readImage,
+  formVersionImages, setFormVersionImages,
 }) {
+  const { importImage } = useDb()
+  const [dragOver, setDragOver] = useState(false)
   const [activeTab, setActiveTab] = useState('character')
   const [searchText, setSearchText] = useState('')
 
@@ -802,7 +1112,9 @@ function EditForm({
     { key: 'character', label: '角色' },
     { key: 'weapon', label: '武器' },
     { key: 'artifact', label: '圣遗物' },
+    { key: 'outfit', label: '时装' },
     { key: 'material', label: '材料' },
+    { key: 'game_data', label: '数据' },
     { key: 'wish', label: '祈愿' },
   ]
 
@@ -810,7 +1122,9 @@ function EditForm({
     character: charOptions,
     weapon: weaponOptions,
     artifact: artifactOptions,
+    outfit: outfitOptions,
     material: materialOptions,
+    game_data: gameDataOptions,
     wish: wishOptions,
   }
 
@@ -818,7 +1132,9 @@ function EditForm({
     character: charMap,
     weapon: weaponMap,
     artifact: artifactMap,
+    outfit: outfitMap,
     material: materialMap,
+    game_data: gameDataMap,
     wish: wishMap,
   }
 
@@ -886,6 +1202,64 @@ function EditForm({
         onChange={setFormVersion}
         placeholder="例如：5.7"
       />
+
+      {/* Version images */}
+      <FormField label="版本图">
+        <div className="space-y-3">
+          {/* Image list */}
+          {formVersionImages.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {formVersionImages.map((file, idx) => (
+                <div key={idx} className="relative">
+                  <ThumbPreview file={file} readImage={readImage} />
+                  <button
+                    onClick={() => setFormVersionImages(prev => prev.filter((_, i) => i !== idx))}
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Import: button + drag-drop zone */}
+          <div
+            className={`flex items-center gap-3 p-3 rounded-lg border-2 border-dashed transition-colors ${
+              dragOver ? 'border-primary-500 bg-primary-500/10' : 'border-surface-600 bg-surface-800/30'
+            }`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={async e => {
+              e.preventDefault()
+              setDragOver(false)
+              const file = e.dataTransfer.files[0]
+              if (file) {
+                const result = await window.electronAPI?.importImageFile(file.path)
+                if (result?.success && result.filename) {
+                  setFormVersionImages(prev => [...prev, result.filename])
+                }
+              }
+            }}
+          >
+            <ImagePlus className="w-5 h-5 text-surface-400 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-xs text-surface-300">{dragOver ? '释放以导入' : '拖放图片到此处，或点击按钮导入'}</p>
+              <p className="text-[10px] text-surface-500 mt-0.5">
+                已添加 {formVersionImages.length} 张。版本图在条目背景显示（随机一张），点击版本号可浏览全部
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                const filename = await importImage()
+                if (filename) setFormVersionImages(prev => [...prev, filename])
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs bg-surface-700 hover:bg-surface-600 text-surface-300 transition-colors flex-shrink-0"
+            >
+              导入图片
+            </button>
+          </div>
+        </div>
+      </FormField>
 
       {/* Tags */}
       <FormField label="版本标签">
