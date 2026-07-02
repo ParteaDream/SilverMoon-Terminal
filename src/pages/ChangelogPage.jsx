@@ -658,27 +658,20 @@ export default function ChangelogPage() {
   )
 }
 
-// ── Version image background (right-to-left opacity gradient) ──
+// ── Version image background (right-to-left opacity gradient, lazy loaded) ──
 function VersionImageBg({ imageFile }) {
-  const { readImage } = useDb()
-  const [src, setSrc] = useState(null)
+  const { ref, src } = useLazyImage(imageFile, 300)
 
-  useEffect(() => {
-    if (!imageFile) return
-    let cancelled = false
-    readImage(imageFile).then(data => { if (!cancelled && data) setSrc(data) })
-    return () => { cancelled = true }
-  }, [imageFile, readImage])
-
-  if (!src) return null
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl" style={{ zIndex: 0 }}>
-      <img
-        src={src}
-        alt=""
-        className="absolute top-0 right-0 h-full w-auto object-cover opacity-40"
-        style={{ maskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)' }}
-      />
+    <div ref={ref} className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl" style={{ zIndex: 0 }}>
+      {src && (
+        <img
+          src={src}
+          alt=""
+          className="absolute top-0 right-0 h-full w-auto object-cover opacity-40"
+          style={{ maskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)' }}
+        />
+      )}
     </div>
   )
 }
@@ -879,7 +872,7 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
         ))}
         {/* Collapsed: show item count summary */}
         {collapsed && compactCounts && (
-          <span className="text-xs text-surface-500 ml-1">
+          <span className="text-xs text-surface-500 ml-1 flex flex-wrap gap-x-2.5">
             {compactTypes.map(t => {
               const Icon = SECTION_CONFIG[t].icon
               return additions[t]?.length > 0 && (

@@ -2147,8 +2147,33 @@ ipcMain.handle('read-image', (_event, filename) => {
   } catch (e) { return { error: e.message }; }
 });
 
+// ── 图片 base64 内容 LRU 缓存（避免重复读盘+编码）──
+const _imageContentCache = new Map();
+const _IMAGE_CACHE_MAX = 200;
+function getCachedImage(fp) {
+  const entry = _imageContentCache.get(fp);
+  if (entry) {
+    // LRU: 移到末尾
+    _imageContentCache.delete(fp);
+    _imageContentCache.set(fp, entry);
+    return entry;
+  }
+  return null;
+}
+function setCachedImage(fp, data) {
+  if (_imageContentCache.size >= _IMAGE_CACHE_MAX) {
+    // 删除最久未使用的（Map 的第一个 key）
+    const oldest = _imageContentCache.keys().next().value;
+    if (oldest !== undefined) _imageContentCache.delete(oldest);
+  }
+  _imageContentCache.set(fp, data);
+}
+
 // 通用图片文件读取（供 read-image 和 read-user-image 复用）
 function readImageFile(fp) {
+  // 命中缓存直接返回
+  const cached = getCachedImage(fp);
+  if (cached) return { success: true, data: cached };
   // 读取文件头检测实际格式（SVG 内容可能以 .webp 等扩展名存储）
   const head = Buffer.alloc(256);
   const fd = fs.openSync(fp, 'r');
@@ -2158,18 +2183,22 @@ function readImageFile(fp) {
   const headStr = head.toString('utf-8', 0, bytesRead).trimStart();
   if (headStr.startsWith('<svg') || headStr.startsWith('<?xml')) {
     const svgText = fs.readFileSync(fp, 'utf-8');
-    return { success: true, data: `data:image/svg+xml;base64,${Buffer.from(svgText).toString('base64')}` };
+    const svgResult = `data:image/svg+xml;base64,${Buffer.from(svgText).toString('base64')}`;
+    setCachedImage(fp, svgResult);
+    return { success: true, data: svgResult };
   }
 
   // 二进制图片
-  const data = fs.readFileSync(fp);
+  const binData = fs.readFileSync(fp);
   const headBytes = head.subarray(0, Math.min(bytesRead, 4));
   let mime = 'image/png';
   if (headBytes[0] === 0xFF && headBytes[1] === 0xD8) mime = 'image/jpeg';
   else if (headBytes[0] === 0x89 && headBytes[1] === 0x50) mime = 'image/png';
   else if (headBytes[0] === 0x52 && headBytes[1] === 0x49) mime = 'image/webp';
   else if (headBytes[0] === 0x47 && headBytes[1] === 0x49) mime = 'image/gif';
-  return { success: true, data: `data:${mime};base64,${data.toString('base64')}` };
+  const result = `data:${mime};base64,${binData.toString('base64')}`;
+  setCachedImage(fp, result);
+  return { success: true, data: result };
 }
 
 // ── 导出图片：用户自选路径保存 ──

@@ -57,11 +57,24 @@ export function DbProvider({ children }) {
     return result
   }, [])
 
+// ── 全局图片请求去重：相同 filename 的并发请求合并为一次 IPC ──
+const _imageRequestMap = new Map()
+
   const readImage = useCallback(async (filename) => {
     if (!filename || !window.electronAPI) return null
-    const result = await window.electronAPI.readImage(filename)
-    if (result.success) return result.data
-    return null
+    // 已有相同 filename 的在途请求，复用其 Promise
+    const pending = _imageRequestMap.get(filename)
+    if (pending) return pending
+    const promise = window.electronAPI.readImage(filename).then(result => {
+      _imageRequestMap.delete(filename)
+      if (result.success) return result.data
+      return null
+    }).catch(e => {
+      _imageRequestMap.delete(filename)
+      return null
+    })
+    _imageRequestMap.set(filename, promise)
+    return promise
   }, [])
 
   const importImage = useCallback(async () => {
