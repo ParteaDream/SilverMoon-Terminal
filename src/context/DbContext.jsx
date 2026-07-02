@@ -57,24 +57,57 @@ export function DbProvider({ children }) {
     return result
   }, [])
 
-// ── 全局图片请求去重：相同 filename 的并发请求合并为一次 IPC ──
-const _imageRequestMap = new Map()
+// ── 全局图片请求去重 + 内存缓存 + 并发控制 ──
+const _imageRequestMap = new Map()     // filename → Promise（在途请求去重）
+const _imageCache = new Map()          // filename → base64 data（持久缓存，上限 500）
+const _IMAGE_CACHE_MAX = 500
+const _MAX_CONCURRENT = 6              // 最大并发 IPC 调用数
+let _concurrentCount = 0
+const _pendingQueue = []               // { filename, resolve, reject }
+
+function processQueue() {
+  while (_concurrentCount < _MAX_CONCURRENT && _pendingQueue.length > 0) {
+    const { filename, resolve, reject } = _pendingQueue.shift()
+    _concurrentCount++
+    window.electronAPI.readImage(filename).then(result => {
+      _concurrentCount--
+      if (result.success) {
+        _imageCache.set(filename, result.data)
+        // LRU: 淘汰最旧的
+        if (_imageCache.size > _IMAGE_CACHE_MAX) {
+          const oldest = _imageCache.keys().next().value
+          if (oldest !== undefined) _imageCache.delete(oldest)
+        }
+        resolve(result.data)
+      } else {
+        resolve(null)
+      }
+      processQueue()
+    }).catch(e => {
+      _concurrentCount--
+      resolve(null)
+      processQueue()
+    })
+  }
+}
 
   const readImage = useCallback(async (filename) => {
     if (!filename || !window.electronAPI) return null
-    // 已有相同 filename 的在途请求，复用其 Promise
+    // 1. 内存缓存命中
+    const cached = _imageCache.get(filename)
+    if (cached) return cached
+    // 2. 已有相同 filename 的在途请求，复用其 Promise
     const pending = _imageRequestMap.get(filename)
     if (pending) return pending
-    const promise = window.electronAPI.readImage(filename).then(result => {
-      _imageRequestMap.delete(filename)
-      if (result.success) return result.data
-      return null
-    }).catch(e => {
-      _imageRequestMap.delete(filename)
-      return null
+    // 3. 新请求：通过并发队列调度
+    const promise = new Promise((resolve, reject) => {
+      _pendingQueue.push({ filename, resolve, reject })
+      processQueue()
     })
     _imageRequestMap.set(filename, promise)
-    return promise
+    return promise.finally(() => {
+      _imageRequestMap.delete(filename)
+    })
   }, [])
 
   const importImage = useCallback(async () => {

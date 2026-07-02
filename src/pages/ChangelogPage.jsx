@@ -512,7 +512,7 @@ export default function ChangelogPage() {
       >
         <div ref={ref} className={`w-14 h-14 rounded-lg border-2 ${rarityBorder} overflow-hidden bg-surface-700 flex-shrink-0 group-hover:border-white/60 transition-all`}>
           {src ? (
-            <img src={src} alt="" className="w-full h-full object-cover" />
+            <img src={src} alt="" className="w-full h-full object-cover animate-fade-in" />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <div className="w-4 h-4 rounded bg-surface-600" />
@@ -664,14 +664,12 @@ function VersionImageBg({ imageFile }) {
 
   return (
     <div ref={ref} className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl" style={{ zIndex: 0 }}>
-      {src && (
-        <img
-          src={src}
-          alt=""
-          className="absolute top-0 right-0 h-full w-auto object-cover opacity-40"
-          style={{ maskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)' }}
-        />
-      )}
+      <img
+        src={src || undefined}
+        alt=""
+        className={`absolute top-0 right-0 h-full w-auto object-cover transition-opacity duration-700 ${src ? 'opacity-40' : 'opacity-0'}`}
+        style={{ maskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)' }}
+      />
     </div>
   )
 }
