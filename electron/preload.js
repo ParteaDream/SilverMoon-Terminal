@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createBackup: (note) => ipcRenderer.invoke('create-backup', note),
   restoreBackup: (filename) => ipcRenderer.invoke('restore-backup', filename),
   deleteBackup: (filename) => ipcRenderer.invoke('delete-backup', filename),
+  listBaselineDbs: () => ipcRenderer.invoke('list-baseline-dbs'),
+  switchBaselineDb: (filename) => ipcRenderer.invoke('switch-baseline-db', filename),
   exportSeed: (version) => ipcRenderer.invoke('export-seed', version),
   crawlCharacter: (characterName, options) => ipcRenderer.invoke('crawl-character', characterName, options),
   crawlWeapon: (weaponName, options) => ipcRenderer.invoke('crawl-weapon', weaponName, options),

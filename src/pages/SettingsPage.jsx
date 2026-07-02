@@ -42,8 +42,11 @@ function formatSize(bytes) {
 }
 
 function GeneralModule() {
-  const { dbPath, selectLocation, getDbPath, updateDatabase, devMode } = useDb()
+  const { dbPath, selectLocation, getDbPath, updateDatabase, devMode, listBaselineDbs, switchBaselineDb } = useDb()
   const [dbInfo, setDbInfo] = useState({ dbDir: null, isPopulated: false })
+  const [baselineDbs, setBaselineDbs] = useState([])
+  const [activeBaseDb, setActiveBaseDb] = useState(null)
+  const [switchingDb, setSwitchingDb] = useState(false)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState(null)
   const [cacheSize, setCacheSize] = useState(null)
@@ -56,7 +59,36 @@ function GeneralModule() {
   const [baiduDialog, setBaiduDialog] = useState(null)   // { packType, label } for Baidu Pan dialog
   const { progress: dlProgress, startDownload, cancelDownload, checkPersisted } = useDownloadProgress()
 
-  useEffect(() => { refreshDbInfo(); loadImagePacks(); checkStaleDownloads() }, [dbPath])
+  useEffect(() => { refreshDbInfo(); loadImagePacks(); checkStaleDownloads(); loadBaselineDbs() }, [dbPath])
+
+  async function loadBaselineDbs() {
+    try {
+      const result = await listBaselineDbs()
+      if (result.success) {
+        setBaselineDbs(result.databases || [])
+        setActiveBaseDb(result.active || null)
+      }
+    } catch (_) {}
+  }
+
+  async function handleSwitchBaselineDb(filename) {
+    if (!filename || filename === activeBaseDb) return
+    setSwitchingDb(true)
+    setMessage(null)
+    try {
+      const result = await switchBaselineDb(filename)
+      if (result.success) {
+        setMessage({ type: 'success', text: `已切换到: ${filename}，即将刷新...` })
+        setTimeout(() => window.location.reload(), 800)
+      } else {
+        setMessage({ type: 'error', text: result.error || '切换失败' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: e.message })
+    } finally {
+      setSwitchingDb(false)
+    }
+  }
 
   // Check for persisted (unfinished) downloads on mount and auto-resume detection
   async function checkStaleDownloads() {
@@ -415,6 +447,45 @@ function GeneralModule() {
             </p>
           </div>
         </button>
+      </div>
+
+      {/* Baseline DB Selector */}
+      <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5">
+        <div className="flex items-center gap-3 mb-3">
+          <Database className="w-5 h-5 text-primary-400 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium">基准数据库</p>
+            <p className="text-xs text-surface-400 mt-0.5">选择当前使用的基准数据库（silvermoon_terminal*.db）</p>
+          </div>
+        </div>
+        {baselineDbs.length === 0 ? (
+          <p className="text-xs text-surface-500">未检测到基准库文件</p>
+        ) : (
+          <div className="space-y-2">
+            {baselineDbs.map(d => (
+              <div
+                key={d.filename}
+                onClick={() => handleSwitchBaselineDb(d.filename)}
+                className={`flex items-center justify-between px-4 py-3 rounded-lg border transition-all ${
+                  d.isActive
+                    ? 'border-primary-500/50 bg-primary-500/10'
+                    : 'border-surface-700 bg-surface-800/40 hover:border-surface-600 cursor-pointer'
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm truncate ${d.isActive ? 'text-primary-300 font-medium' : 'text-surface-200'}`}>
+                    {d.filename}
+                    {d.isActive && <span className="ml-2 text-xs text-primary-400">（当前）</span>}
+                  </p>
+                  <p className="text-xs text-surface-500 mt-0.5">
+                    {d.version === null ? '默认版本' : d.version ? `v${d.version}` : '未知版本'}
+                    {' · '}{formatSize(d.size)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Image Packs */}

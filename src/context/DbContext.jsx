@@ -127,6 +127,16 @@ export function DbProvider({ children }) {
     return await window.electronAPI.deleteBackup(filename)
   }, [])
 
+  const listBaselineDbs = useCallback(async () => {
+    if (!window.electronAPI) return { success: true, databases: [], active: 'silvermoon_terminal.db' }
+    return await window.electronAPI.listBaselineDbs()
+  }, [])
+
+  const switchBaselineDb = useCallback(async (filename) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.switchBaselineDb(filename)
+  }, [])
+
   const crawlCharacter = useCallback(async (characterName, options = {}) => {
     if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
     return await window.electronAPI.crawlCharacter(characterName, options)
@@ -302,6 +312,7 @@ export function DbProvider({ children }) {
       crawlCharacter, crawlWeapon, checkMissingWeapons, crawlArtifact, checkMissingArtifacts, crawlWishes, crawlWishImages, downloadBannerImage, cleanupScrapeWindow, downloadMaterialImage, cleanUnusedImages,
       checkDbIntegrity, repairWebsites,
       toggleDevMode, toggleDualDbMode,
+      listBaselineDbs, switchBaselineDb,
     }}>
       {children}
     </DbContext.Provider>

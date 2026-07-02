@@ -63,7 +63,87 @@ function readSeedVersion() {
 }
 
 // ── 路径工具 ──
-function getDbPath(dir) { return path.join(dir, 'silvermoon_terminal.db'); }
+const BASE_DB_PREFIX = 'silvermoon_terminal';
+const DEFAULT_BASE_DB = 'silvermoon_terminal.db';
+let activeBaseDb = DEFAULT_BASE_DB;
+
+function getDbPath(dir) { return path.join(dir, activeBaseDb); }
+
+// ── 基准库识别 ──
+// 判断文件名是否为可识别的基准库（silvermoon_terminal*.db，排除 user.db 和备份文件）
+function isBaselineDb(filename) {
+  if (!filename || typeof filename !== 'string') return false;
+  if (!filename.startsWith(BASE_DB_PREFIX)) return false;
+  if (!filename.endsWith('.db')) return false;
+  // 排除 user.db（虽然不以 silvermoon_terminal 开头，但保险起见）
+  if (filename === 'user.db') return false;
+  // 排除备份文件（包含 _backup_ 或位于 backups 目录的相对路径）
+  if (filename.includes('_backup_')) return false;
+  return true;
+}
+
+// 从基准库文件名中提取版本号，如 silvermoon_terminal-v6.7.0.db → "6.7.0"
+// silvermoon_terminal.db → null（无版本号，视为默认/最高优先级）
+function parseBaseDbVersion(filename) {
+  // 匹配 silvermoon_terminal-v<version>.db
+  const match = filename.match(/^silvermoon_terminal-v(.+)\.db$/);
+  if (match) return match[1];
+  // 精确匹配 silvermoon_terminal.db — 无版本号
+  if (filename === 'silvermoon_terminal.db') return null;
+  return undefined; // 无法识别
+}
+
+// 比较两个版本号字符串（如 "6.7.0" vs "6.8.0"），返回 >0 / <0 / 0
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const va = pa[i] || 0;
+    const vb = pb[i] || 0;
+    if (va > vb) return 1;
+    if (va < vb) return -1;
+  }
+  return 0;
+}
+
+// 扫描目录下所有可识别的基准库文件
+function listBaselineDbs(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  return entries
+    .filter(e => e.isFile() && isBaselineDb(e.name))
+    .map(e => {
+      const version = parseBaseDbVersion(e.name);
+      return {
+        filename: e.name,
+        path: path.join(dir, e.name),
+        version: version,          // null = 默认无版本, "6.7.0" = 版本号, undefined = 无法识别
+        size: e.isFile() ? fs.statSync(path.join(dir, e.name)).size : 0,
+      };
+    })
+    .sort((a, b) => {
+      // 默认无版本排最前，其余按版本降序
+      if (a.version === null && b.version === null) return 0;
+      if (a.version === null) return -1;
+      if (b.version === null) return 1;
+      if (a.version === undefined && b.version === undefined) return 0;
+      if (a.version === undefined) return 1;
+      if (b.version === undefined) return -1;
+      return -compareVersions(a.version, b.version); // 降序
+    });
+}
+
+// 选择启动时最佳基准库：优先 silvermoon_terminal.db，否则选版本号最新的
+function resolveBestBaselineDb(dir) {
+  const dbs = listBaselineDbs(dir);
+  if (dbs.length === 0) return DEFAULT_BASE_DB; // 没有基准库，返回默认名（待创建）
+  // 优先使用无版本号的 silvermoon_terminal.db
+  const defaultDb = dbs.find(d => d.version === null);
+  if (defaultDb) return defaultDb.filename;
+  // 否则使用版本号最新的（listBaselineDbs 已按版本降序排列，第一个即最新）
+  return dbs[0].filename;
+}
 // ── 图片包识别 ──
 // 优先级: "images-版本号-类型" > "images" > 最大文件夹
 // 类型优先级: Extreme > Medium > Lite
@@ -283,7 +363,7 @@ function loadConfig() {
 function saveConfig(dir) {
   const p = getConfigPath();
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify({ dbDir: dir }, null, 2));
+  fs.writeFileSync(p, JSON.stringify({ dbDir: dir, activeBaseDb }, null, 2));
 }
 
 // ── 用户信息文件（存放在数据库文件夹中，独立于数据库文件）──
@@ -908,6 +988,14 @@ app.whenReady().then(async () => {
   const config = loadConfig();
   if (config && config.dbDir && fs.existsSync(config.dbDir)) {
     dbDir = config.dbDir;
+    // 恢复或选择最佳基准库
+    if (config.activeBaseDb && fs.existsSync(path.join(dbDir, config.activeBaseDb))) {
+      activeBaseDb = config.activeBaseDb;
+    } else {
+      activeBaseDb = resolveBestBaselineDb(dbDir);
+      saveConfig(dbDir);  // 持久化选择
+    }
+    console.log('[main] active baseline db:', activeBaseDb);
     openDb(dbDir);
   }
 
@@ -962,6 +1050,8 @@ ipcMain.handle('select-db-location', async () => {
     }
     const dir = result.filePaths[0];
     dbDir = dir;
+    // 解析最佳基准库（优先 silvermoon_terminal.db，否则最高版本）
+    activeBaseDb = resolveBestBaselineDb(dir);
     saveConfig(dir);
     const dbPath = openDb(dir);
     const imagesDir = getImagesDir(dir);
@@ -988,6 +1078,55 @@ ipcMain.handle('get-db-path', () => {
       dbPath: dbDir ? getDbPath(dbDir) : null,
       isPopulated: populated,
     };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 基准库列表与切换 ──
+ipcMain.handle('list-baseline-dbs', () => {
+  try {
+    if (!dbDir) return { success: true, databases: [], active: activeBaseDb };
+    const dbs = listBaselineDbs(dbDir);
+    return {
+      success: true,
+      databases: dbs.map(d => ({
+        filename: d.filename,
+        version: d.version,
+        size: d.size,
+        isActive: d.filename === activeBaseDb,
+      })),
+      active: activeBaseDb,
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('switch-baseline-db', (_event, filename) => {
+  try {
+    if (!dbDir) throw new Error('数据库路径未设置');
+    if (!filename || typeof filename !== 'string') throw new Error('文件名无效');
+    if (!isBaselineDb(filename)) throw new Error('不是有效的基准库文件');
+    const targetPath = path.join(dbDir, filename);
+    if (!fs.existsSync(targetPath)) throw new Error('基准库文件不存在: ' + filename);
+    // 验证是有效的 SQLite 文件
+    const buf = fs.readFileSync(targetPath);
+    try {
+      const testDb = new SQL.Database(buf);
+      testDb.close();
+    } catch (_) {
+      throw new Error('所选文件不是有效的 SQLite 数据库');
+    }
+    // 关闭当前数据库
+    closeDatabase();
+    // 切换 activeBaseDb
+    activeBaseDb = filename;
+    saveConfig(dbDir);
+    // 重新打开
+    openDb(dbDir);
+    console.log('[main] switched baseline db to:', filename);
+    return { success: true, filename };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -1587,6 +1726,9 @@ function seedDatabase() {
 ipcMain.handle('init-database', () => {
   try {
     if (!dbDir) throw new Error('数据库路径未设置');
+    // 0. 重置为默认基准库名（初始化始终创建 silvermoon_terminal.db）
+    activeBaseDb = DEFAULT_BASE_DB;
+    saveConfig(dbDir);
     // 1. 关闭两个数据库
     closeDatabase(); // 这会同时关闭 user.db
     // 2. 删除两个 db 文件

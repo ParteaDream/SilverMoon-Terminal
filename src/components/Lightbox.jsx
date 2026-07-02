@@ -94,7 +94,7 @@ export default function Lightbox({ filename, label, onClose }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 overflow-hidden"
+      <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 overflow-hidden no-drag"
         onClick={onClose}
         onContextMenu={(e) => { e.preventDefault(); onClose() }}
       >
@@ -126,7 +126,7 @@ export default function Lightbox({ filename, label, onClose }) {
       {/* 关闭按钮 —— 独立于背景层，避免点击区域被遮挡 */}
       <button
         onClick={onClose}
-        className="fixed top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors z-[220]"
+        className="fixed top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors z-[220] no-drag"
         aria-label="关闭"
       >
         <X className="w-5 h-5" />
