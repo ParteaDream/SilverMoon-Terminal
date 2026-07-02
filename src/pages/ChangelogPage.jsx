@@ -4,7 +4,7 @@ import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
-import { Plus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight, ChevronLeft, ImagePlus, Download } from 'lucide-react'
+import { Plus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight, ChevronLeft, ImagePlus, Download, User, Crosshair, Sparkles, Shirt, Package, BarChart3, Star } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormField } from '../components/EditModal'
 import ItemThumb from '../components/ItemThumb'
@@ -16,13 +16,13 @@ const PRESET_COLORS = [
 ]
 
 const SECTION_CONFIG = {
-  character: { label: '角色', icon: '👤' },
-  weapon: { label: '武器', icon: '⚔️' },
-  artifact: { label: '圣遗物', icon: '💠' },
-  outfit: { label: '角色时装', icon: '👗' },
-  material: { label: '重要材料', icon: '📦' },
-  game_data: { label: '游戏数据', icon: '📊' },
-  wish: { label: '祈愿', icon: '✨' },
+  character: { label: '角色', icon: User },
+  weapon: { label: '武器', icon: Crosshair },
+  artifact: { label: '圣遗物', icon: Sparkles },
+  outfit: { label: '角色时装', icon: Shirt },
+  material: { label: '重要材料', icon: Package },
+  game_data: { label: '游戏数据', icon: BarChart3 },
+  wish: { label: '祈愿', icon: Star },
 }
 
 const BANNER_TYPES = {
@@ -880,7 +880,15 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
         {/* Collapsed: show item count summary */}
         {collapsed && compactCounts && (
           <span className="text-xs text-surface-500 ml-1">
-            {compactTypes.map(t => additions[t]?.length > 0 && `${additions[t].length}${SECTION_CONFIG[t].icon}`).filter(Boolean).join(' ')}
+            {compactTypes.map(t => {
+              const Icon = SECTION_CONFIG[t].icon
+              return additions[t]?.length > 0 && (
+                <span key={t} className="inline-flex items-center gap-0.5">
+                  <Icon className="w-3 h-3" />
+                  {additions[t].length}
+                </span>
+              )
+            })}
           </span>
         )}
         <div className="flex-1" />
@@ -916,7 +924,7 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
                     <div key={type} style={{ flex: `0 1 ${minW}px`, minWidth: minW, maxWidth: '100%' }}>
                       {!collapsed && (
                         <div className="flex items-center gap-2 mb-3">
-                          <span className="text-sm">{config.icon}</span>
+                          <config.icon className="w-4 h-4 text-surface-400" />
                           <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">{config.label}</h3>
                           <span className="text-[10px] text-surface-600 ml-1">({items.length})</span>
                           <div className="flex-1 h-px bg-surface-800 ml-2" />
@@ -966,7 +974,7 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
             {additions.wish?.length > 0 && (
               <div className="mt-6">
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-sm">{SECTION_CONFIG.wish.icon}</span>
+                  <Star className="w-4 h-4 text-surface-400" />
                   <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">{SECTION_CONFIG.wish.label}</h3>
                   <span className="text-[10px] text-surface-600 ml-1">({additions.wish.length})</span>
                   <div className="flex-1 h-px bg-surface-800 ml-2" />
@@ -1048,13 +1056,10 @@ function WishDisplay({ wish, charMap, weaponMap }) {
 
   return (
     <div className="rounded-lg border border-surface-700 bg-surface-800/30 overflow-hidden min-w-0">
-      {/* Wish header: type badge + name */}
+      {/* Wish header: type badge */}
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-surface-700/30">
         {typeLabel && (
           <span className="text-[8px] text-surface-500 bg-surface-700/50 px-1.5 py-0.5 rounded flex-shrink-0">{typeLabel}</span>
-        )}
-        {wish.name_zh && (
-          <span className="text-[10px] text-surface-400 font-medium truncate">{wish.name_zh}</span>
         )}
       </div>
       <div className="p-1.5 space-y-1.5">

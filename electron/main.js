@@ -910,6 +910,15 @@ function migrateSchema() {
       }
     }
 
+    // 为 character_outfits 添加 story_zh 列
+    {
+      const outfitCols = dbAll('PRAGMA table_info(character_outfits)', []);
+      if (!outfitCols.some(c => c.name === 'story_zh')) {
+        console.log('[migrate] adding story_zh column to character_outfits');
+        dbRun('ALTER TABLE character_outfits ADD COLUMN story_zh TEXT');
+      }
+    }
+
     // 创建 version_tags 和 version_additions 表（版本新增数据速览）
     dbRun(`CREATE TABLE IF NOT EXISTS version_tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -943,6 +952,10 @@ function migrateSchema() {
               db.run("UPDATE version_meta SET images = ? WHERE version = ?", [JSON.stringify([row[1]]), row[0]])
             }
           }
+        }
+        // Drop obsolete image column if it still exists
+        if (cols.includes('image')) {
+          db.run("ALTER TABLE version_meta DROP COLUMN image")
         }
       }
     } catch (_) {}
@@ -4054,7 +4067,17 @@ ipcMain.handle('export-seed', async (_event, newVersion) => {
       const { columns, values: rows } = dataResult[0];
       if (!rows.length) return null;
 
+      // 过滤掉已废弃的 image 列（version_meta 现已使用 images 列）
+      let exportColumns = columns;
       let filteredRows = rows;
+      if (tableName === 'version_meta') {
+        const imageIdx = columns.indexOf('image');
+        if (imageIdx >= 0) {
+          exportColumns = columns.filter((_, i) => i !== imageIdx);
+          filteredRows = rows.map(row => row.filter((_, i) => i !== imageIdx));
+        }
+      }
+
       // 过滤孤儿引用
       if (tableName === 'wish_banner_items') {
         const bannerResult = db.exec('SELECT id FROM wish_banners');
@@ -4066,7 +4089,7 @@ ipcMain.handle('export-seed', async (_event, newVersion) => {
       }
       if (!filteredRows.length) return null;
 
-      const colNames = columns.map(c => `"${c}"`).join(', ');
+      const colNames = exportColumns.map(c => `"${c}"`).join(', ');
       const lines = filteredRows.map(row => `  (${row.map(v => esc(v)).join(', ')})`);
       return {
         sql: `INSERT INTO "${tableName}" (${colNames}) VALUES\n${lines.join(',\n')};\n\n`,

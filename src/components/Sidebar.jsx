@@ -3,16 +3,16 @@ import { useState, useEffect } from 'react'
 import { notifySidebarToggled } from '../context/SidebarContext'
 import { useNav } from '../context/NavContext'
 import {
-  Users, Swords, Gem, Package, Gift, SwordsIcon, Database, Globe, Settings, Info,
+  Users, Swords, Crown, Package, Sparkle, SwordsIcon, Database, Globe, Settings, Info,
   PanelLeftClose, PanelLeftOpen, ScrollText
 } from 'lucide-react'
 
 const navItems = [
   { to: '/characters', icon: Users, label: '角色' },
   { to: '/weapons', icon: Swords, label: '武器' },
-  { to: '/artifacts', icon: Gem, label: '圣遗物' },
+  { to: '/artifacts', icon: Crown, label: '圣遗物' },
   { to: '/materials', icon: Package, label: '材料' },
-  { to: '/wishes', icon: Gift, label: '祈愿' },
+  { to: '/wishes', icon: Sparkle, label: '祈愿' },
   { to: '/challenges', icon: SwordsIcon, label: '挑战' },
   { to: '/data', icon: Database, label: '数据' },
   { to: '/websites', icon: Globe, label: '站点' },

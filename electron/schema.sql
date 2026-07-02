@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS character_outfits (
   description_zh TEXT,
   image TEXT,                         -- 时装图片文件名
   avatar_image TEXT,                  -- 时装头像文件名（用于替换角色默认头像）
-  is_default INTEGER DEFAULT 0
+  is_default INTEGER DEFAULT 0,
+  story_zh TEXT                        -- 时装故事文本
 );
 
 CREATE TABLE IF NOT EXISTS character_stories (

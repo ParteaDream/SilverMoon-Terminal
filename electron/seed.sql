@@ -37760,15 +37760,15 @@ INSERT INTO "version_additions" ("id", "version", "item_type", "item_id", "sort_
 -- ----------------------------------------------------------------------------
 -- version_meta
 -- ----------------------------------------------------------------------------
-INSERT INTO "version_meta" ("version", "image", "images") VALUES
-  ('6.6', NULL, '["Version_Luna_VII_Wallpaper_1.webp","Version_Luna_VII_Wallpaper_2.webp","Version_Luna_VII_Wallpaper_3.webp"]'),
-  ('6.5', NULL, '["Version_Luna_VI_Wallpaper_1.webp","Version_Luna_VI_Wallpaper_2.webp"]'),
-  ('6.4', NULL, '["Version_Luna_V_Wallpaper_1.webp","Version_Luna_V_Wallpaper_2.webp"]'),
-  ('6.1', NULL, '["Version_Luna_II_Wallpaper_1.webp","Version_Luna_II_Wallpaper_2.webp"]'),
-  ('5.8', NULL, '["Version_5.8_Wallpaper_1.webp","Version_5.8_Wallpaper_2.webp"]'),
-  ('6.0', NULL, '["Version_Luna_I_Wallpaper_1.webp","Version_Luna_I_Wallpaper_2.webp","Version_Luna_I_Wallpaper_3.webp","Version_Luna_I_Wallpaper_4.webp"]'),
-  ('6.2', NULL, '["Version_Luna_III_Wallpaper_1.webp","Version_Luna_III_Wallpaper_2.webp"]'),
-  ('6.3', NULL, '["Version_Luna_IV_Wallpaper_1.webp","Version_Luna_IV_Wallpaper_2.webp","Version_Luna_IV_Wallpaper_3.webp"]');
+INSERT INTO "version_meta" ("version", "images") VALUES
+  ('6.6', '["Version_Luna_VII_Wallpaper_1.webp","Version_Luna_VII_Wallpaper_2.webp","Version_Luna_VII_Wallpaper_3.webp"]'),
+  ('6.5', '["Version_Luna_VI_Wallpaper_1.webp","Version_Luna_VI_Wallpaper_2.webp"]'),
+  ('6.4', '["Version_Luna_V_Wallpaper_1.webp","Version_Luna_V_Wallpaper_2.webp"]'),
+  ('6.1', '["Version_Luna_II_Wallpaper_1.webp","Version_Luna_II_Wallpaper_2.webp"]'),
+  ('5.8', '["Version_5.8_Wallpaper_1.webp","Version_5.8_Wallpaper_2.webp"]'),
+  ('6.0', '["Version_Luna_I_Wallpaper_1.webp","Version_Luna_I_Wallpaper_2.webp","Version_Luna_I_Wallpaper_3.webp","Version_Luna_I_Wallpaper_4.webp"]'),
+  ('6.2', '["Version_Luna_III_Wallpaper_1.webp","Version_Luna_III_Wallpaper_2.webp"]'),
+  ('6.3', '["Version_Luna_IV_Wallpaper_1.webp","Version_Luna_IV_Wallpaper_2.webp","Version_Luna_IV_Wallpaper_3.webp"]');
 
 -- ----------------------------------------------------------------------------
 -- version_tags

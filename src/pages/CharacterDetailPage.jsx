@@ -109,6 +109,7 @@ function CharacterDetailContent() {
   const [saving, setSaving] = useState(false)
   const [activeOutfitId, setActiveOutfitId] = useState(null)  // 当前激活的时装 ID
   const [outfitDragOver, setOutfitDragOver] = useState({})   // { [outfitId]: true } — 时装卡片的拖放高亮
+  const [storyPreview, setStoryPreview] = useState(null)       // 时装故事预览
   const [statLevel, setStatLevel] = useDetailState('statLevel', 90) // 属性查看等级: 80/90/95/100
   const [travelerElement, setTravelerElement] = useDetailState('travelerElement', null) // 旅行者当前选中的元素
   useDetailScroll('character', id)  // 保存/恢复详情页滚动位置
@@ -439,11 +440,11 @@ function CharacterDetailContent() {
     setSaving(true)
     try {
       if (editOutfit.id) {
-        await query('UPDATE character_outfits SET name_zh=?, description_zh=?, image=?, avatar_image=? WHERE id=?',
-          [editOutfit.name_zh, editOutfit.description_zh || null, editOutfit.image || null, editOutfit.avatar_image || null, editOutfit.id])
+        await query('UPDATE character_outfits SET name_zh=?, description_zh=?, story_zh=?, image=?, avatar_image=? WHERE id=?',
+          [editOutfit.name_zh, editOutfit.description_zh || null, editOutfit.story_zh || null, editOutfit.image || null, editOutfit.avatar_image || null, editOutfit.id])
       } else {
-        await query('INSERT INTO character_outfits (character_id, name_zh, description_zh, image, avatar_image, is_default) VALUES (?,?,?,?,?,?)',
-          [character.id, editOutfit.name_zh, editOutfit.description_zh || null, editOutfit.image || null, editOutfit.avatar_image || null, outfits.length === 0 ? 1 : 0])
+        await query('INSERT INTO character_outfits (character_id, name_zh, description_zh, story_zh, image, avatar_image, is_default) VALUES (?,?,?,?,?,?,?)',
+          [character.id, editOutfit.name_zh, editOutfit.description_zh || null, editOutfit.story_zh || null, editOutfit.image || null, editOutfit.avatar_image || null, outfits.length === 0 ? 1 : 0])
       }
       setEditOutfit(null)
       await loadAll()
@@ -933,7 +934,7 @@ function CharacterDetailContent() {
           <SectionCard
             icon={<Shirt className="w-4 h-4" />}
             title="时装"
-            onAdd={() => setEditOutfit({ name_zh: '', description_zh: '', image: null })}
+            onAdd={() => setEditOutfit({ name_zh: '', description_zh: '', story_zh: '', image: null })}
             count={outfits.length}
           >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1037,9 +1038,19 @@ function CharacterDetailContent() {
                     }}
                   >
                     <p className="text-xs font-medium pointer-events-none">{o.name_zh}</p>
-                    <p className={`text-[10px] mt-0.5 pointer-events-none ${isSelected ? 'text-primary-300' : 'text-surface-500'}`}>
-                      <ColoredText text={o.description_zh || '无描述'} />
-                    </p>
+                    <div className="flex items-start gap-2 mt-0.5">
+                      <p className={`text-[10px] flex-1 min-w-0 pointer-events-none ${isSelected ? 'text-primary-300' : 'text-surface-500'}`}>
+                        <ColoredText text={o.description_zh || '无描述'} />
+                      </p>
+                      {o.story_zh && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setStoryPreview(o) }}
+                          className="flex-shrink-0 px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 text-[10px] transition-colors flex items-center gap-0.5"
+                        >
+                          <BookOpen className="w-3 h-3" />故事
+                        </button>
+                      )}
+                    </div>
                     {/* 导入头像按钮（非默认时装且无头像时显示） */}
                     {!o.is_default && !o.avatar_image && (
                       <button
@@ -1312,9 +1323,33 @@ function CharacterDetailContent() {
         <EditModal isOpen={!!editOutfit} onClose={() => setEditOutfit(null)} onSave={handleSaveOutfit} saving={saving} title={editOutfit.id ? '编辑时装' : '添加时装'}>
           <FormInput label="名称" value={editOutfit.name_zh} onChange={v => setEditOutfit({ ...editOutfit, name_zh: v })} />
           <FormInput label="描述" value={editOutfit.description_zh} onChange={v => setEditOutfit({ ...editOutfit, description_zh: v })} multiline />
+          <FormInput label="故事" value={editOutfit.story_zh} onChange={v => setEditOutfit({ ...editOutfit, story_zh: v })} multiline />
           <ImagePicker label="时装图片" currentImage={editOutfit.image} onSelect={v => setEditOutfit({ ...editOutfit, image: v })} onRemove={() => setEditOutfit({ ...editOutfit, image: null })} />
           <ImagePicker label="头像图片" currentImage={editOutfit.avatar_image} onSelect={v => setEditOutfit({ ...editOutfit, avatar_image: v })} onRemove={() => setEditOutfit({ ...editOutfit, avatar_image: null })} />
         </EditModal>
+      )}
+
+      {/* Outfit story preview */}
+      {storyPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setStoryPreview(null)}>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative z-10 bg-surface-900 border border-surface-700 rounded-xl w-full max-w-2xl max-h-[85vh] overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-surface-700">
+              <h2 className="text-base font-semibold">{storyPreview.name_zh} - 故事</h2>
+              <button onClick={() => setStoryPreview(null)} className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-surface-700 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 overflow-y-auto max-h-[calc(85vh-8rem)] whitespace-pre-wrap text-sm text-surface-200 leading-relaxed">
+              <ColoredText text={storyPreview.story_zh} />
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-surface-700 bg-surface-900/50">
+              <button onClick={() => setStoryPreview(null)} className="px-4 py-2 rounded-lg text-sm text-surface-400 hover:text-white hover:bg-surface-700 transition-colors">
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Dish edit */}
