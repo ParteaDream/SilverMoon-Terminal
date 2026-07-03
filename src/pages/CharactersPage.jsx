@@ -212,7 +212,21 @@ export default function CharactersPage() {
       setWeaponTypes(wtypes.data || [])
       setRegions(regs.data || [])
 
-      // 从 element_colors settings 加载元素图标
+      // 收集卡片立绘用于预加载
+      const cardArts = [], charsData2 = chars.data || []
+      for (const c of charsData2) {
+        if (c._displayCardArt) cardArts.push(c._displayCardArt)
+        else if (c.splash_art) cardArts.push(c.splash_art)
+      }
+      // 预热首屏 30 张（去重），其余延时加载
+      const warmBatch = [...new Set(cardArts)].slice(0, 30)
+      for (const fn of warmBatch) readImage(fn)
+      setTimeout(() => {
+        const rest = [...new Set(cardArts)]
+        for (const fn of rest) {
+          if (!warmBatch.includes(fn)) readImage(fn)
+        }
+      }, 3000)
       try {
         const raw = settingsRes.data?.[0]?.value
         if (raw) {
