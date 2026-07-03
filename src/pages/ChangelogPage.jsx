@@ -211,14 +211,27 @@ export default function ChangelogPage() {
       images = images.filter(Boolean)
       if (images.length > 0) {
         viMap[v.version] = images
-        rvi[v.version] = images[Math.floor(Math.random() * images.length)]
+        // 保持已有随机选择不变，避免每次数据加载重新选取导致 useLazyImage 重复加载
+        if (!randomVersionImages.current[v.version]) {
+          rvi[v.version] = images[Math.floor(Math.random() * images.length)]
+        } else {
+          rvi[v.version] = randomVersionImages.current[v.version]
+        }
       }
     }
     setVersionImages(viMap)
     randomVersionImages.current = rvi
-    // 预热版本图到 DbContext 缓存，后续 useLazyImage 可同步命中
+    // 预热版本图 — 可见图立即加载，其余延时加载避免阻塞渲染
     const allVersionImages = [...new Set(Object.values(viMap).flat())]
-    for (const fn of allVersionImages) readImage(fn)
+    const selectedSet = new Set(Object.values(rvi).filter(Boolean))
+    // 可见图立即预热
+    for (const fn of selectedSet) readImage(fn)
+    // 其余图延时预热，不干扰首屏
+    setTimeout(() => {
+      for (const fn of allVersionImages) {
+        if (!selectedSet.has(fn)) readImage(fn)
+      }
+    }, 2000)
     // Read outfit selections from user.json
     let outfitSelections = {}
     try {
@@ -322,14 +335,25 @@ export default function ChangelogPage() {
       images = images.filter(Boolean)
       if (images.length > 0) {
         viMap[m.version] = images
-        rvi[m.version] = images[Math.floor(Math.random() * images.length)]
+        // 保持已有随机选择不变
+        if (!randomVersionImages.current[m.version]) {
+          rvi[m.version] = images[Math.floor(Math.random() * images.length)]
+        } else {
+          rvi[m.version] = randomVersionImages.current[m.version]
+        }
       }
     }
     setVersionImages(viMap)
     randomVersionImages.current = rvi
-    // 预热版本图（loadAll 已预热过，此处确保 kv 数据加载路径也预热）
+    // 预热版本图 — 可见图立即加载，其余延时加载
     const allVersionImages = [...new Set(Object.values(viMap).flat())]
-    for (const fn of allVersionImages) readImage(fn)
+    const selectedSet = new Set(Object.values(rvi).filter(Boolean))
+    for (const fn of selectedSet) readImage(fn)
+    setTimeout(() => {
+      for (const fn of allVersionImages) {
+        if (!selectedSet.has(fn)) readImage(fn)
+      }
+    }, 2000)
 
     const verMap = {}
     for (const t of tagsData) {
@@ -505,32 +529,6 @@ export default function ChangelogPage() {
     }))
   }
 
-  // ── Item image component ──
-  function ItemCard({ imageFile, name, rarity, navTo }) {
-    const { ref, src } = useLazyImage(imageFile, '200px')
-    const rarityBorder = rarity === 5 ? 'border-amber-400/60' : rarity === 4 ? 'border-purple-400/60' : 'border-surface-600'
-
-    return (
-      <button
-        onClick={() => navTo && navigate(navTo)}
-        className="flex flex-col items-center gap-1.5 group cursor-pointer"
-        title={name}
-      >
-        <div ref={ref} className={`w-14 h-14 rounded-lg border-2 ${rarityBorder} overflow-hidden bg-surface-700 flex-shrink-0 group-hover:border-white/60 transition-all`}>
-          {src ? (
-            <img src={src} alt="" className="w-full h-full object-cover animate-fade-in" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <div className="w-4 h-4 rounded bg-surface-600" />
-            </div>
-          )}
-        </div>
-        <span className="text-[10px] leading-tight text-center truncate max-w-[72px] text-surface-300 group-hover:text-white transition-colors">
-          {name}
-        </span>
-      </button>
-    )
-  }
 
   // ── Render ──
   if (!loaded) {
@@ -598,7 +596,6 @@ export default function ChangelogPage() {
               versionImages={versionImages[version] || []}
               randomVersionImage={randomVersionImages.current[version] || null}
               onEdit={() => openEdit(version)}
-              ItemCard={ItemCard}
               isExpanded={isExpanded}
               defaultExpanded={version === latestVersion}
               onToggleExpand={(currentlyCollapsed) => {
@@ -661,6 +658,34 @@ export default function ChangelogPage() {
         />
       </EditModal>
     </div>
+  )
+}
+
+// ── Item card（定义在组件外部，避免每次渲染重新创建函数引用导致 useLazyImage 卸载重装）──
+function ItemCard({ imageFile, name, rarity, navTo }) {
+  const navigate = useNavigate()
+  const { ref, src } = useLazyImage(imageFile, '200px')
+  const rarityBorder = rarity === 5 ? 'border-amber-400/60' : rarity === 4 ? 'border-purple-400/60' : 'border-surface-600'
+
+  return (
+    <button
+      onClick={() => navTo && navigate(navTo)}
+      className="flex flex-col items-center gap-1.5 group cursor-pointer"
+      title={name}
+    >
+      <div ref={ref} className={`w-14 h-14 rounded-lg border-2 ${rarityBorder} overflow-hidden bg-surface-700 flex-shrink-0 group-hover:border-white/60 transition-all`}>
+        {src ? (
+          <img src={src} alt="" className="w-full h-full object-cover animate-fade-in" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="w-4 h-4 rounded bg-surface-600" />
+          </div>
+        )}
+      </div>
+      <span className="text-[10px] leading-tight text-center truncate max-w-[72px] text-surface-300 group-hover:text-white transition-colors">
+        {name}
+      </span>
+    </button>
   )
 }
 
@@ -857,7 +882,7 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
 }
 
 // ── Version entry display ──
-function VersionEntry({ version, data, charMap, weaponMap, artifactMap, materialMap, wishMap, outfitMap, gameDataMap, versionImages, randomVersionImage, onEdit, ItemCard, isExpanded, defaultExpanded, onToggleExpand }) {
+function VersionEntry({ version, data, charMap, weaponMap, artifactMap, materialMap, wishMap, outfitMap, gameDataMap, versionImages, randomVersionImage, onEdit, isExpanded, defaultExpanded, onToggleExpand }) {
   const navigate = useNavigate()
   const [lightboxIndex, setLightboxIndex] = useState(-1) // -1 = closed, >=0 = open at index
   const additions = data.additions || {}

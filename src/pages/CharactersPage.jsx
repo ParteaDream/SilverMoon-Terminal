@@ -79,17 +79,13 @@ export default function CharactersPage() {
   useEffect(() => {
     const isBack = consumeBackToList()
     if (isBack) {
-      // 同步预设 scrollY 消除置顶闪烁
-      const cached = loadPageStateSync('characters')
-      if (cached?.scrollY > 0) {
-        const m = document.querySelector('main')
-        if (m) m.scrollTop = cached.scrollY
-      }
-      loadData()
-      restoringScroll.current = true
-      setEntering(true)
-      setTimeout(() => setEntering(false), 150)
-      restorePage('characters').then(saved => {
+      (async () => {
+        restoringScroll.current = true
+        setEntering(true)
+        // 数据加载 + DOM 提交后再恢复状态和滚轮
+        await loadData()
+        await new Promise(r => requestAnimationFrame(r))
+        const saved = await restorePage('characters')
         if (saved) {
           if (saved.viewMode) setViewMode(saved.viewMode)
           if (saved.search) setSearch(saved.search)
@@ -98,62 +94,52 @@ export default function CharactersPage() {
             Object.entries(saved.filters).forEach(([k, v]) => setFilter(k, v))
           }
           if (saved.selectedElements?.length) setSelectedElements(new Set(saved.selectedElements))
-          // 等待 React 处理筛选/排序状态后再恢复滚动位置
-          requestAnimationFrame(() => {
+          // 等一帧让筛选/排序 DOM 稳定，然后执行滚轮恢复并立即显示页面
+          await new Promise(r => requestAnimationFrame(r))
           const main = document.querySelector('main')
-          // 先尝试 scrollToItem（精确计算 scrollY）
           const scrollToId = sessionStorage.getItem('_nav_scroll_to_id')
           if (scrollToId) {
             sessionStorage.removeItem('_nav_scroll_to_id')
             const el = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
-            const m = document.querySelector('main')
-            if (el && m) {
+            if (el && main) {
               const elRect = el.getBoundingClientRect()
-              const mRect = m.getBoundingClientRect()
-              const elTopInMain = elRect.top - mRect.top + m.scrollTop
-              const targetY = elTopInMain - (m.clientHeight / 2) + (elRect.height / 2)
-              m.scrollTo(0, Math.max(0, Math.round(targetY)))
+              const mRect = main.getBoundingClientRect()
+              const elTopInMain = elRect.top - mRect.top + main.scrollTop
+              const targetY = elTopInMain - (main.clientHeight / 2) + (elRect.height / 2)
+              main.scrollTo(0, Math.max(0, Math.round(targetY)))
+              setEntering(false) // 立即显示
               setTimeout(() => { restoringScroll.current = false }, 300)
-              setTimeout(() => m.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
+              setTimeout(() => main.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
               return
             }
-            // 元素不在 DOM（可能被筛选隐藏）：后台重试，同时走 scrollY 回退
-            const retryScrollToItem = (n) => {
-              const el2 = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
-              const m2 = document.querySelector('main')
-              if (el2 && m2) {
-                const er = el2.getBoundingClientRect()
-                const mr = m2.getBoundingClientRect()
-                const et = er.top - mr.top + m2.scrollTop
-                const ty = et - (m2.clientHeight / 2) + (er.height / 2)
-                m2.scrollTo(0, Math.max(0, Math.round(ty)))
-                setTimeout(() => { restoringScroll.current = false }, 300)
-                setTimeout(() => m2.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
-              } else if (n > 0) {
-                setTimeout(() => retryScrollToItem(n - 1), 200)
-              }
-            }
-            setTimeout(() => retryScrollToItem(15), 200)
-            // 不 return — 走下方 scrollY 回退作为近似定位
           }
-          // 否则恢复保存的 scrollY
           if (saved.scrollY != null && saved.scrollY > 0 && main) {
             const targetY = Number(saved.scrollY)
             const tryScroll = (n) => {
+              if (!main) { restoringScroll.current = false; return }
               if (main.scrollHeight > targetY) {
                 main.scrollTo(0, targetY)
+                setEntering(false) // 立即显示
                 setTimeout(() => { restoringScroll.current = false }, 300)
                 setTimeout(() => main.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
-              } else if (n > 0) { setTimeout(() => tryScroll(n - 1), 200) }
-              else { restoringScroll.current = false }
+              } else if (n > 0) {
+                setTimeout(() => tryScroll(n - 1), 50) // 快节奏重试
+              } else {
+                setEntering(false)
+                restoringScroll.current = false
+              }
             }
-            tryScroll(10)
+            tryScroll(40) // 40×50ms = 2s
+          } else {
+            setEntering(false)
+            restoringScroll.current = false
           }
-          }) // end requestAnimationFrame
+        } else {
+          setEntering(false)
+          restoringScroll.current = false
         }
-      })
+      })()
     } else {
-      // 从侧边栏进入：使用全局默认视图模式，重置滚动位置
       const main = document.querySelector('main')
       if (main) main.scrollTo(0, 0)
       try {
@@ -726,7 +712,7 @@ function CardImage({ filename, className }) {
   return (
     <div ref={ref} className={className || 'w-full h-full'}>
       {src ? (
-        <img src={src} alt="" className="w-full h-full object-cover" draggable onDragStart={handleDrag} />
+        <img src={src} alt="" className="w-full h-full object-cover animate-fade-in" draggable onDragStart={handleDrag} />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-surface-800/50 text-surface-600 text-[10px]">加载中...</div>
       )}

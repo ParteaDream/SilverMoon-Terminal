@@ -1,18 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 
-// ── 全局懒加载版本号：排序/筛选变化时 bump，触发所有 useLazyImage 重新检查视口 ──
+// ── 全局懒加载版本号 ──
 let _globalRevision = 0
 const _revisionListeners = new Set()
 
-/** 通知所有活动的 useLazyImage 重新检查视口 */
 export function bumpLazyRevision() {
   _globalRevision++
   for (const fn of _revisionListeners) fn(_globalRevision)
 }
 
-// ── 共享 MutationObserver：监听 main 内子节点变化（排序/筛选导致 DOM 重排）──
-//    防抖 300ms，避免频繁微小变更触发大量重检查
+// ── MutationObserver（DOM 重排时 bump revision）──
 let _observerStarted = false
 let _observerTimer = null
 
@@ -34,35 +32,92 @@ function startMutationObserver() {
 
 let _globalStarted = false
 
-/** 启动全局懒加载增强，在第一个 useLazyImage 挂载时自动调用 */
 function ensureGlobalStarted() {
   if (_globalStarted) return
   _globalStarted = true
   startMutationObserver()
 }
 
+// ── 共享 IntersectionObserver（异步预加载）──
+let _globalObserver = null
+const _elementLoaders = new Map()   // Element → () => void
+
+function getSharedObserver() {
+  if (!_globalObserver) {
+    _globalObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        const loader = _elementLoaders.get(entry.target)
+        if (loader) {
+          _globalObserver.unobserve(entry.target)
+          _elementLoaders.delete(entry.target)
+          _pendingElements.delete(entry.target)
+          loader()
+        }
+      }
+    }, { rootMargin: '800px' })
+  }
+  return _globalObserver
+}
+
+// ── 同步滚动回退（单 rAF-throttled listener，确保快速滚动不丢帧）──
+const _pendingElements = new Map()  // Element → () => void
+let _scrollCheckActive = false
+let _scrollTicking = false
+
+function ensureScrollCheck() {
+  if (_scrollCheckActive) return
+  _scrollCheckActive = true
+  const main = document.querySelector('main')
+  const target = main || window
+  target.addEventListener('scroll', () => {
+    if (_scrollTicking) return
+    _scrollTicking = true
+    requestAnimationFrame(() => {
+      _scrollTicking = false
+      const margin = 800
+      const ih = window.innerHeight
+      for (const [el, loader] of _pendingElements) {
+        try {
+          const rect = el.getBoundingClientRect()
+          if (rect.bottom > -margin && rect.top < ih + margin) {
+            _pendingElements.delete(el)
+            _elementLoaders.delete(el)
+            if (_globalObserver) _globalObserver.unobserve(el)
+            loader()
+          }
+        } catch (_) {
+          // 元素可能已从 DOM 移除
+          _pendingElements.delete(el)
+        }
+      }
+    })
+  }, { passive: true })
+}
+
 /**
- * 懒加载图片 — 元素有任何部分进入视口即加载
- * 使用 scroll 事件检测（避免 Electron 中 IntersectionObserver 不可靠）
+ * 懒加载图片 — IntersectionObserver + 同步滚动回退混合方案
+ * - Observer 在空闲时检测，管理所有实例
+ * - 单 rAF-throttled scroll listener 作为同步回退，确保快速滚动不丢帧
+ * - rootMargin 800px 提供充足预加载缓冲
  *
  * @param {string} filename 图片文件名
- * @param {number|string} rootMargin 视口检测外扩像素
+ * @param {number|string} _rootMargin 兼容旧参数，现由全局统一管理
  */
-export function useLazyImage(filename, rootMargin = 100) {
+export function useLazyImage(filename, _rootMargin) {
   const [src, setSrc] = useState(null)
   const { readImage } = useDb()
   const ref = useRef(null)
   const loaded = useRef(false)
   const [revision, setRevision] = useState(0)
 
-  // 订阅全局懒加载版本号，首次挂载时启动 MutationObserver
   useEffect(() => {
     _revisionListeners.add(setRevision)
     ensureGlobalStarted()
+    ensureScrollCheck()
     return () => { _revisionListeners.delete(setRevision) }
   }, [])
 
-  // 跟踪上一个 filename，区分「文件名变化」和「仅 revision 变化」
   const prevFilenameRef = useRef(null)
 
   useEffect(() => {
@@ -70,9 +125,7 @@ export function useLazyImage(filename, rootMargin = 100) {
     const el = ref.current
     if (!el) return
 
-    const margin = typeof rootMargin === 'number' ? rootMargin : parseInt(rootMargin) || 100
-
-    // 仅当 filename 真正变化时才重置加载状态；仅 revision 变化时不重置（避免闪图）
+    // 仅 filename 变化时重置
     if (filename !== prevFilenameRef.current) {
       prevFilenameRef.current = filename
       loaded.current = false
@@ -88,41 +141,30 @@ export function useLazyImage(filename, rootMargin = 100) {
       })
     }
 
-    function isInView() {
+    if (loaded.current) return
+
+    // 同步检查：元素已在视口或预加载范围内 → 立即加载
+    const margin = Math.max(800, typeof _rootMargin === 'number' ? _rootMargin : parseInt(_rootMargin || '800') || 800)
+    try {
       const rect = el.getBoundingClientRect()
-      return rect.bottom > -margin && rect.top < window.innerHeight + margin
-    }
-
-    // Already visible → load immediately
-    if (isInView()) {
-      doLoad()
-      return
-    }
-
-    // Listen to scroll on main element
-    const main = document.querySelector('main')
-    const scrollTarget = main || window
-
-    function onScroll() {
-      if (isInView()) {
-        if (scrollTarget === window) {
-          window.removeEventListener('scroll', onScroll)
-        } else {
-          main.removeEventListener('scroll', onScroll)
-        }
+      if (rect.bottom > -margin && rect.top < window.innerHeight + margin) {
         doLoad()
+        return
       }
-    }
+    } catch (_) {}
 
-    scrollTarget.addEventListener('scroll', onScroll, { passive: true })
+    // 注册到 IntersectionObserver + 同步回退集合
+    const observer = getSharedObserver()
+    _elementLoaders.set(el, doLoad)
+    _pendingElements.set(el, doLoad)
+    observer.observe(el)
+
     return () => {
-      if (scrollTarget === window) {
-        window.removeEventListener('scroll', onScroll)
-      } else if (main) {
-        main.removeEventListener('scroll', onScroll)
-      }
+      _elementLoaders.delete(el)
+      _pendingElements.delete(el)
+      observer.unobserve(el)
     }
-  }, [filename, readImage, rootMargin, revision])
+  }, [filename, readImage, revision])
 
   return { ref, src }
 }
