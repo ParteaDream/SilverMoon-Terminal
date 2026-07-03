@@ -178,20 +178,6 @@ export default function WebsitesPage() {
   // 搜索变化时通知懒加载图片重新检查视口
   useEffect(() => { bumpLazyRevision() }, [search])
 
-  // ── Icon preview component ──
-  function IconCell({ filename }) {
-    const [src, setSrc] = useState(null)
-    useEffect(() => {
-      if (!filename) return
-      readImage(filename).then(data => { if (data) setSrc(data) })
-    }, [filename])
-    if (!src) return <div className="w-8 h-8 rounded bg-surface-700 flex-shrink-0" />
-    return <img src={src} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />
-  }
-
-  // ── Gallery card （定义在组件外部，避免每次渲染重新创建导致 useLazyImage 重载）──
-  // 实际定义在文件末尾
-
   // ── 状态持久化 ──
   useEffect(() => {
     const isBack = consumeBackToList()
@@ -419,6 +405,18 @@ function WebsiteDetailImage({ filename }) {
   }, [filename])
   if (!src) return <div className="w-full h-48 rounded-lg bg-surface-800 animate-pulse" />
   return <img src={src} alt="" className="w-full rounded-lg object-contain border border-surface-700" style={{ maxHeight: '400px' }} draggable onDragStart={handleDrag} />
+}
+
+// ── Icon preview component（定义在组件外部，避免每次渲染重新创建函数引用导致所有图标卸载重载）──
+function IconCell({ filename }) {
+  const { readImage } = useDb()
+  const [src, setSrc] = useState(null)
+  useEffect(() => {
+    if (!filename) return
+    readImage(filename).then(data => { if (data) setSrc(data) })
+  }, [filename, readImage])
+  if (!src) return <div className="w-8 h-8 rounded bg-surface-700 flex-shrink-0" />
+  return <img src={src} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />
 }
 
 // 独立组件，不在 WebsitesPage 内部定义，避免每次渲染重新创建函数引用

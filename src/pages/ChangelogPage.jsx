@@ -666,11 +666,9 @@ export default function ChangelogPage() {
 
 // ── Version image background (right-to-left opacity gradient, lazy loaded) ──
 // ── Version image background (right-to-left opacity gradient, lazy loaded) ──
-//    三阶段避免闪烁：① idle：opacity-0 + 无 src（完全不可见）
-//    ② opaque：opacity-40 + 仍无 src（CSS transition 0→0.4 已开始，但无图片）
-//    ③ revealed：opacity-40 + src + animate-gradient-reveal（图片加载时元素已处于
-//       ~0.4 不透明度，mask 动画从全黑→梯度，从右向左渐变出现）
-//    永久 maskImage inline style 保持最终的右端微露/左端全显梯度
+//    直接在 opacity:0.4 下加载图片，永久 gradient mask 已就位
+//    图片从不以全亮状态出现，避免了忽亮忽暗的闪烁
+//    永久 maskImage inline style 保持右端微露/左端全显梯度
 function VersionImageBg({ imageFile }) {
   const { ref: containerRef, src } = useLazyImage(imageFile, 300)
   const imgRef = useRef(null)
@@ -683,7 +681,6 @@ function VersionImageBg({ imageFile }) {
     if (!src) {
       img.style.opacity = '0'
       img.removeAttribute('src')
-      img.classList.remove('animate-gradient-reveal')
       prevSrcRef.current = null
       return
     }
@@ -691,31 +688,12 @@ function VersionImageBg({ imageFile }) {
     if (src === prevSrcRef.current) return
     prevSrcRef.current = src
 
-    // Step 1: 设 opacity=0.4（inline style 优先级高于 className）
+    // 直接在 opacity:0.4 下加载图片（永久 gradient mask 已就位）
+    // 图片从不出现在全亮状态，避免了忽亮忽暗的闪烁
     img.style.opacity = '0.4'
+    img.src = src
 
-    // Step 2: 等 3 帧，确保浏览器已在此透明度下完成绘制
-    let cancelled = false
-    const raf1 = requestAnimationFrame(() => {
-      if (cancelled) return
-      const raf2 = requestAnimationFrame(() => {
-        if (cancelled) return
-        const raf3 = requestAnimationFrame(() => {
-          if (cancelled) return
-          // Step 3: 此时元素已在 ~0.4 不透明度。先启动 mask 动画
-          img.classList.add('animate-gradient-reveal')
-
-          // Step 4: 再等一帧让动画 0% keyframe（全黑 mask）生效
-          requestAnimationFrame(() => {
-            if (cancelled) return
-            // Step 5: 设 src — 动画已开始，image 加载时被全黑 mask 隐藏
-            img.src = src
-          })
-        })
-      })
-    })
-
-    return () => { cancelled = true }
+    return () => {}
   }, [src])
 
   return (

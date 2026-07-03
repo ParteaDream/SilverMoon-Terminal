@@ -1554,6 +1554,7 @@ function VersionInfoModule() {
   const [versionTag, setVersionTag] = useState('')      // '' | 'beta' | 自定义
   const [customTag, setCustomTag] = useState('')
   const [tagMode, setTagMode] = useState('preset')      // 'preset' | 'custom'
+  const [tagLoaded, setTagLoaded] = useState(false)      // 是否已从配置加载完毕
 
   useEffect(() => {
     loadVersionInfo()
@@ -1611,6 +1612,8 @@ function VersionInfoModule() {
         }
       }
     } catch (_) {}
+    // 标记加载完成（无论成功与否），避免初始空状态高亮"无"
+    setTagLoaded(true)
   }
 
   // 保存版本标签
@@ -1638,9 +1641,9 @@ function VersionInfoModule() {
           <span className="ml-auto text-lg font-bold text-primary-400">{displayVersion}</span>
         </div>
 
-        {/* 版本标签选择 — 仅开发者模式可见 */}
+        {/* 版本标签选择 — 仅开发者模式可见，置于软件版本下方 */}
         {devMode && (
-          <div className="border-t border-surface-700 pt-3 space-y-2">
+          <div className="-mt-1 space-y-2 ml-8">
             <p className="text-[10px] font-medium text-amber-400 uppercase tracking-wider">版本标签（开发者）</p>
             <div className="flex items-center gap-2">
               {[
@@ -1651,7 +1654,7 @@ function VersionInfoModule() {
                   key={opt.value}
                   onClick={() => { setTagMode('preset'); saveVersionTag(opt.value) }}
                   className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                    tagMode === 'preset' && versionTag === opt.value
+                    tagLoaded && tagMode === 'preset' && versionTag === opt.value
                       ? 'bg-amber-600 text-white'
                       : 'bg-surface-800 border border-surface-600 text-surface-300 hover:bg-surface-700'
                   }`}
