@@ -465,6 +465,7 @@ export default function GameDataPage() {
           onDelete={handleDelete}
           onAdd={openAdd}
           onRowClick={handleRowClick}
+          activeId={activeDetailId}
           selectable={multiSelect}
           selectedIds={selected}
           onToggleSelect={toggleSelect}

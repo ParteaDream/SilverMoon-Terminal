@@ -286,6 +286,7 @@ export default function WebsitesPage() {
           onDelete={handleDelete}
           onAdd={openAdd}
           onRowClick={handleRowClick}
+          activeId={activeDetailId}
           onRowReorder={handleReorder}
           selectable={multiSelect}
           selectedIds={selected}
@@ -340,7 +341,7 @@ export default function WebsitesPage() {
                 onDragStart={e => { e.dataTransfer.setData('text/plain', String(w.id)); e.dataTransfer.effectAllowed = 'move'; }}
                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                 onDrop={e => { e.preventDefault(); const fromId = parseInt(e.dataTransfer.getData('text/plain'), 10); handleReorder(fromId, w.id, filtered); }}
-              ><GalleryCard website={w} onRowClick={handleRowClick} onEdit={openEdit} multiSelect={multiSelect} /></div>
+              ><GalleryCard website={w} onRowClick={handleRowClick} onEdit={openEdit} multiSelect={multiSelect} activeDetailId={activeDetailId} /></div>
             ))}
             {filtered.length === 0 && (
               <div className="col-span-full py-16 text-center text-surface-500 text-sm">暂无站点数据</div>
@@ -422,12 +423,13 @@ function WebsiteDetailImage({ filename }) {
 
 // 独立组件，不在 WebsitesPage 内部定义，避免每次渲染重新创建函数引用
 // 导致 useLazyImage 卸载重装 → 所有图片重新加载
-function GalleryCard({ website, onRowClick, onEdit, multiSelect }) {
+function GalleryCard({ website, onRowClick, onEdit, multiSelect, activeDetailId }) {
   const { ref, src } = useLazyImage(website.image, '300px')
   const handleDrag = useImageDrag(website.image)
+  const isActive = activeDetailId != null && website.id === activeDetailId
   return (
     <div
-      className="rounded-xl bg-surface-800/50 border border-surface-700 hover:border-surface-600 transition-colors overflow-hidden group cursor-pointer"
+      className={`rounded-xl border transition-colors overflow-hidden group cursor-pointer ${isActive ? 'bg-primary-500/10 border-primary-500/40 ring-2 ring-primary-500/30' : 'bg-surface-800/50 border-surface-700 hover:border-surface-600'}`}
       onClick={() => onRowClick(website)}
       onDoubleClick={() => { if (!multiSelect) onEdit(website) }}
     >

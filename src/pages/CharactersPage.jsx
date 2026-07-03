@@ -8,6 +8,7 @@ import DataTable, { useSortFilter, SortBar, FilterBar } from '../components/Data
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
 import { Plus, LayoutList, LayoutGrid, Sword, MapPin, Trash2, ArrowUpDown } from 'lucide-react'
+import { ELEM_ID_TO_NAME, ELEM_ID_TO_SETTINGS_INDEX } from '../utils/colorMarkup'
 
 const ELEMENT_COLORS = {
   1: 'text-red-400', 2: 'text-blue-400', 3: 'text-cyan-400',
@@ -29,13 +30,26 @@ const ELEMENT_NAMES = {
 }
 const RARITY_STARS = { 4: '★★★★', 5: '★★★★★' }
 
+/** 元素图标组件：优先使用 settings 中配置的图标图片，回退到彩色文字 */
+function ElementIcon({ elId, className = 'w-4 h-4', elemIcons }) {
+  const settingsIdx = ELEM_ID_TO_SETTINGS_INDEX[elId]
+  const name = ELEMENT_NAMES[elId] || ''
+  const iconSrc = elemIcons?.[settingsIdx]
+  if (iconSrc) {
+    return <img src={iconSrc} alt={name} className={`${className} object-contain`} title={name} />
+  }
+  // 回退：带颜色的字符
+  return <span className={`${className} inline-flex items-center justify-center rounded text-[10px] font-bold ${ELEMENT_COLORS[elId] || 'text-surface-400'} bg-surface-800`} title={name}>{name}</span>
+}
+
 export default function CharactersPage() {
-  const { query } = useDb()
+  const { query, readImage } = useDb()
   const { savePage, restorePage, push, consumeBackToList } = useNav()
   const [characters, setCharacters] = useState([])
   const [elements, setElements] = useState([])
   const [weaponTypes, setWeaponTypes] = useState([])
   const [regions, setRegions] = useState([])
+  const [elemIcons, setElemIcons] = useState([]) // 7个元素图标(base64)，索引对应 settings 顺序
 
   // ── 同步初始化：仅 viewMode 从缓存恢复 ──
   const initViewMode = loadPageStateSync('characters')?.state?.viewMode
@@ -53,7 +67,13 @@ export default function CharactersPage() {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState(new Set())
+  const [selectedElements, setSelectedElements] = useState(new Set())
   const restoringScroll = useRef(false)
+  // 返回列表时短暂透明，掩盖滚动跳转闪烁；侧边栏进入不受影响
+  const [entering, setEntering] = useState(() => {
+    if (sessionStorage.getItem('_nav_backToList')) return true
+    return false
+  })
 
   // 挂载时加载数据，恢复视图模式和滚动位置
   useEffect(() => {
@@ -67,6 +87,8 @@ export default function CharactersPage() {
       }
       loadData()
       restoringScroll.current = true
+      setEntering(true)
+      setTimeout(() => setEntering(false), 150)
       restorePage('characters').then(saved => {
         if (saved) {
           if (saved.viewMode) setViewMode(saved.viewMode)
@@ -75,6 +97,7 @@ export default function CharactersPage() {
           if (saved.filters) {
             Object.entries(saved.filters).forEach(([k, v]) => setFilter(k, v))
           }
+          if (saved.selectedElements?.length) setSelectedElements(new Set(saved.selectedElements))
           // 等待 React 处理筛选/排序状态后再恢复滚动位置
           requestAnimationFrame(() => {
           const main = document.querySelector('main')
@@ -165,12 +188,13 @@ export default function CharactersPage() {
 
   async function loadData() {
     try {
-      const [chars, elems, wtypes, regs, fits] = await Promise.all([
+      const [chars, elems, wtypes, regs, fits, settingsRes] = await Promise.all([
         query('SELECT * FROM characters ORDER BY id'),
         query('SELECT * FROM elements'),
         query('SELECT * FROM weapon_types'),
         query('SELECT * FROM regions ORDER BY sort_order, id'),
         query('SELECT id, character_id, avatar_image FROM character_outfits WHERE avatar_image IS NOT NULL AND avatar_image != \'\''),
+        query("SELECT value FROM settings WHERE key = 'element_colors'"),
       ])
       // 构建 char_id → active outfit avatar 映射
       const outfitAvatarMap = {}
@@ -201,6 +225,25 @@ export default function CharactersPage() {
       setElements(elems.data || [])
       setWeaponTypes(wtypes.data || [])
       setRegions(regs.data || [])
+
+      // 从 element_colors settings 加载元素图标
+      try {
+        const raw = settingsRes.data?.[0]?.value
+        if (raw) {
+          const arr = JSON.parse(raw)
+          const icons = []
+          const loaded = await Promise.all(arr.slice(0, 7).map(async (item) => {
+            if (item.icon) {
+              try {
+                const res = await readImage(item.icon)
+                return res || null
+              } catch (_) { return null }
+            }
+            return null
+          }))
+          setElemIcons(loaded)
+        }
+      } catch (_) {}
     } catch (e) {
       console.error('Failed to load characters:', e)
     }
@@ -307,9 +350,13 @@ export default function CharactersPage() {
     window.dispatchEvent(new CustomEvent('devtoolbar-selection', { detail: selectedData }))
   }, [selected, characters])
 
-  const filtered = characters.filter(c =>
-    !search || c.name_zh.includes(search) || (c.name_en || '').toLowerCase().includes(search.toLowerCase())
-  )
+  // 元素筛选和搜索
+  const filtered = characters.filter(c => {
+    // 元素多选筛选
+    if (selectedElements.size > 0 && !selectedElements.has(c.element_id)) return false
+    // 搜索
+    return !search || c.name_zh.includes(search) || (c.name_en || '').toLowerCase().includes(search.toLowerCase())
+  })
 
   const columns = [
     {
@@ -339,15 +386,11 @@ export default function CharactersPage() {
       minWidth: '220px',
     },
     {
-      key: 'element_id', label: '元素',
+      key: 'element_id', label: '',
       render: row => (
-        <span className={ELEMENT_COLORS[row.element_id] || ''}>
-          {ELEMENT_NAMES[row.element_id] || row.element_id}
-        </span>
+        <ElementIcon elId={row.element_id} className="w-5 h-5" elemIcons={elemIcons} />
       ),
-      width: '80px',
-      filterType: 'select', filterValue: v => ELEMENT_NAMES[v] || v,
-      filterOptions: () => elements.map(e => ({ value: e.id, label: e.name_zh })),
+      width: '40px',
     },
     {
       key: 'weapon_type_id', label: '武器',
@@ -395,11 +438,20 @@ export default function CharactersPage() {
   useEffect(() => { bumpLazyRevision() }, [sortKeys, filters])
 
   // 用 ref 保持最新状态，避免 useLayoutEffect 频繁重建
-  const stateRef = useRef({ viewMode, search, sortKeys, filters })
-  stateRef.current = { viewMode, search, sortKeys, filters }
+  const stateRef = useRef({ viewMode, search, sortKeys, filters, selectedElements: [] })
+  stateRef.current = { viewMode, search, sortKeys, filters, selectedElements: [...selectedElements] }
+
+  // ── 元素图标按钮 ──
+  function toggleElement(elId) {
+    setSelectedElements(prev => {
+      const next = new Set(prev)
+      if (next.has(elId)) next.delete(elId); else next.add(elId)
+      return next
+    })
+  }
 
   return (
-    <div className="p-6">
+    <div className={`p-6 ${entering ? 'opacity-0' : 'opacity-100'} transition-opacity duration-100`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
@@ -471,6 +523,35 @@ export default function CharactersPage() {
         </div>
       </div>
 
+      {/* Element filter icons: 7种元素图标多选筛选 */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
+        {[1, 2, 3, 4, 5, 6, 7].map(elId => {
+          const active = selectedElements.has(elId)
+          return (
+            <button
+              key={elId}
+              onClick={() => toggleElement(elId)}
+              title={`筛选${ELEMENT_NAMES[elId]}元素${active ? '（已选择）' : ''}`}
+              className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 select-none ${
+                active
+                  ? `bg-surface-700 ${ELEMENT_COLORS[elId]} border-current/40 shadow-sm scale-110 ring-1 ring-current/30`
+                  : 'text-surface-500 border-surface-700 hover:text-surface-300 hover:border-surface-600'
+              }`}
+            >
+              <ElementIcon elId={elId} className="w-[22px] h-[22px]" elemIcons={elemIcons} />
+            </button>
+          )
+        })}
+        {selectedElements.size > 0 && (
+          <button
+            onClick={() => setSelectedElements(new Set())}
+            className="ml-1 text-[11px] text-surface-500 hover:text-red-400 transition-colors px-1.5 py-1 rounded"
+          >
+            清除
+          </button>
+        )}
+      </div>
+
       {/* Filter bar (shared) */}
       {showFilters && filterableCols.length > 0 && (
         <FilterBar {...{ filterableCols, filters, setFilter, clearFilters, filterOptions, activeFilterCount }} />
@@ -517,7 +598,6 @@ export default function CharactersPage() {
       {viewMode === 'gallery' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3 animate-fade-in">
           {processed.map(char => {
-            const el = ELEMENT_NAMES[char.element_id]
             const wt = weaponTypes.find(w => w.id === char.weapon_type_id)
             const reg = regions.find(r => r.id === char.region_id)
             return (
@@ -553,8 +633,8 @@ export default function CharactersPage() {
                   </div>
                   {/* Element badge */}
                   <div className="absolute top-2 right-2">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full bg-surface-950/60 backdrop-blur-sm ${ELEMENT_COLORS[char.element_id] || ''}`}>
-                      {el}
+                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface-950/60 backdrop-blur-sm">
+                      <ElementIcon elId={char.element_id} className="w-3.5 h-3.5" elemIcons={elemIcons} />
                     </span>
                   </div>
                   {/* Edit/Delete on hover */}

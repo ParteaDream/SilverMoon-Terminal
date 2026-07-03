@@ -32,6 +32,10 @@ export default function ArtifactsPage() {
   const [form, setForm] = useState({})
   const [selected, setSelected] = useState(new Set())
   const restoringScroll = useRef(false)
+  const [entering, setEntering] = useState(() => {
+    if (sessionStorage.getItem('_nav_backToList')) return true
+    return false
+  })
   // 用 ref 保持最新状态
   const stateRef = useRef({ viewMode, search, sortKeys: [], filters: {} })
   stateRef.current = { viewMode, search }
@@ -47,6 +51,8 @@ export default function ArtifactsPage() {
       }
       loadData()
       restoringScroll.current = true
+      setEntering(true)
+      setTimeout(() => setEntering(false), 150)
       restorePage('artifacts').then(saved => {
         if (saved) {
           if (saved.viewMode) setViewMode(saved.viewMode)
@@ -229,7 +235,7 @@ export default function ArtifactsPage() {
   stateRef.current = { viewMode, search, sortKeys, filters }
 
   return (
-    <div className="p-6">
+    <div className={`p-6 ${entering ? 'opacity-0' : 'opacity-100'} transition-opacity duration-100`}>
       <div className="flex items-center justify-between mb-4">
         <div><h1 className="text-lg font-semibold tracking-tight">圣遗物</h1><p className="text-xs text-surface-500 mt-0.5">{processed.length} 条记录</p></div>
         <div className="flex items-center gap-2">

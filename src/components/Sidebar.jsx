@@ -21,7 +21,7 @@ const navItems = [
 
 export default function Sidebar() {
   const [appIcon, setAppIcon] = useState('./UI_Talent_U_Columbina_02.webp')
-  const [collapsed, setCollapsed] = useState(false) // always start expanded
+  const [collapsed, setCollapsed] = useState(false)
   const [appVersion, setAppVersion] = useState('1.0')
   const { push } = useNav()
   const location = useLocation()
@@ -38,18 +38,14 @@ export default function Sidebar() {
     setCollapsed(prev => {
       const next = !prev
       localStorage.setItem('sidebar_collapsed', next ? '1' : '0')
-      setTimeout(() => notifySidebarToggled(), 50)
+      setTimeout(() => notifySidebarToggled(), next ? 200 : 50)
       return next
     })
   }
 
   useEffect(() => {
-    // Check localStorage first, then DB for custom icon
     const stored = localStorage.getItem('app_icon')
-    if (stored) {
-      loadCustomIcon(stored)
-      return
-    }
+    if (stored) { loadCustomIcon(stored); return }
     if (window.electronAPI) {
       window.electronAPI.dbQuery("SELECT value FROM settings WHERE key = 'app_icon'")
         .then(res => {
@@ -62,8 +58,7 @@ export default function Sidebar() {
               }
             } catch (_) {}
           }
-        })
-        .catch(() => {})
+        }).catch(() => {})
     }
   }, [])
 
@@ -74,7 +69,6 @@ export default function Sidebar() {
     } catch (_) {}
   }
 
-  // Listen for icon changes from settings
   useEffect(() => {
     const handler = () => {
       const stored = localStorage.getItem('app_icon')
@@ -87,29 +81,20 @@ export default function Sidebar() {
 
   return (
     <aside className={`${collapsed ? 'w-14' : 'w-56'} flex-shrink-0 border-r border-surface-800 bg-surface-900/80 backdrop-blur-xl flex flex-col transition-all duration-200 drag-region`}>
-      {/* Header / drag region */}
+      {/* Header */}
       <div className={`h-12 flex items-center border-b border-surface-800 flex-shrink-0 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
-        {!collapsed && (
-          <div className="flex items-center gap-2 no-drag">
-            <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden app-icon-bg">
-              {appIcon ? (
-                <img src={appIcon} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <Database className="w-3.5 h-3.5 text-white" />
-              )}
-            </div>
-            <span className="text-sm font-semibold tracking-tight">银月终端</span>
-          </div>
-        )}
-        {collapsed && (
-          <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden no-drag app-icon-bg">
+        <div className="flex items-center gap-2 no-drag min-w-0">
+          <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden shrink-0 app-icon-bg">
             {appIcon ? (
               <img src={appIcon} alt="" className="w-full h-full object-cover" />
             ) : (
               <Database className="w-3.5 h-3.5 text-white" />
             )}
           </div>
-        )}
+          {!collapsed && (
+            <span className="overflow-hidden whitespace-nowrap animate-sidebar-text text-sm font-semibold tracking-tight">银月终端</span>
+          )}
+        </div>
       </div>
 
       {/* Navigation */}
@@ -122,7 +107,7 @@ export default function Sidebar() {
             onClick={() => push(item.to)}
             title={collapsed ? item.label : undefined}
             className={`flex items-center rounded-lg text-sm font-medium w-full
-               transition-all duration-200 no-drag
+               transition-all duration-200 no-drag min-w-0
                ${collapsed
                  ? 'justify-center px-0 py-2.5'
                  : 'gap-3 px-3 py-2.5'
@@ -134,17 +119,17 @@ export default function Sidebar() {
             }
           >
             <item.icon className="w-4 h-4 flex-shrink-0" />
-            {!collapsed && <span>{item.label}</span>}
+            {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text">{item.label}</span>}
           </button>
         )})}
       </nav>
 
-      {/* Changelog button — fixed at bottom, above collapse */}
+      {/* Changelog */}
       <div className={`flex-shrink-0 ${collapsed ? 'px-2' : 'px-3'} pb-1`}>
         <button
           onClick={() => push('/changelog')}
           title={collapsed ? 'Changelog' : undefined}
-          className={`flex items-center rounded-lg w-full no-drag transition-all duration-200
+          className={`flex items-center rounded-lg w-full no-drag transition-all duration-200 min-w-0
             ${collapsed
               ? 'justify-center px-0 py-3'
               : 'gap-3 px-3 py-3.5'
@@ -155,8 +140,8 @@ export default function Sidebar() {
             }`
         }
         >
-          <ScrollText className={`flex-shrink-0 ${collapsed ? 'w-5 h-5' : 'w-5 h-5'}`} />
-          {!collapsed && <span className="text-lg font-bold italic tracking-wide">Changelog</span>}
+          <ScrollText className="flex-shrink-0 w-5 h-5" />
+          {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text text-lg font-bold italic tracking-wide">Changelog</span>}
         </button>
       </div>
 
@@ -164,11 +149,11 @@ export default function Sidebar() {
       <div className="p-2 border-t border-surface-800 flex-shrink-0">
         <button
           onClick={toggleCollapsed}
-          className={`w-full flex items-center rounded-lg text-xs text-surface-500 hover:text-surface-300 hover:bg-surface-800/50 transition-colors no-drag ${collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-2'}`}
+          className={`w-full flex items-center rounded-lg text-xs text-surface-500 hover:text-surface-300 hover:bg-surface-800/50 transition-colors no-drag min-w-0 ${collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-2'}`}
           title={collapsed ? '展开侧栏' : '收起侧栏'}
         >
           {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-          {!collapsed && <span>收起侧栏</span>}
+          {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text">收起侧栏</span>}
         </button>
       </div>
 
@@ -177,10 +162,10 @@ export default function Sidebar() {
         <button
           onClick={() => push('/settings?module=version')}
           title="版本信息"
-          className={`flex items-center text-xs text-surface-500 hover:text-primary-400 transition-colors no-drag ${collapsed ? 'w-full justify-center' : 'gap-2 px-2'}`}
+          className={`flex items-center text-xs text-surface-500 hover:text-primary-400 transition-colors no-drag min-w-0 ${collapsed ? 'w-full justify-center' : 'gap-2 px-2'}`}
         >
           <Info className="w-3.5 h-3.5 flex-shrink-0" />
-          {!collapsed && <span>SilverMoon Terminal v{appVersion}</span>}
+          {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text">SilverMoon Terminal v{appVersion}</span>}
         </button>
       </div>
     </aside>

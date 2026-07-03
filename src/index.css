@@ -365,6 +365,30 @@ button:hover:not(:disabled) {
 .animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
 .animate-scale-in { animation: scaleIn 0.2s ease-out; }
 
+/* 版本图背景渐变展开：从纯黑全部隐藏 → 右端微露/左端全显 */
+@keyframes gradientReveal {
+  0% {
+    -webkit-mask-image: linear-gradient(to left, black 0%, black 100%);
+    mask-image: linear-gradient(to left, black 0%, black 100%);
+  }
+  100% {
+    -webkit-mask-image: linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+    mask-image: linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+  }
+}
+.animate-gradient-reveal {
+  animation: gradientReveal 0.7s ease-out forwards;
+}
+
+/* 侧栏文字延迟淡入：等宽度过渡完成后再显示文字，避免展开过程换行抖动 */
+@keyframes sidebarTextFadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+.animate-sidebar-text {
+  animation: sidebarTextFadeIn 0.15s ease-out 0.15s both;
+}
+
 /* 图片淡入：针对通过 readImage 动态加载的 base64 图片 */
 img[src^="data:image/"] {
   animation: fadeIn 0.3s ease-out;

@@ -1546,14 +1546,19 @@ function ColorPresetsModule() {
 
 // ── Version Info Module ─────────────────────────────────────────────
 function VersionInfoModule() {
+  const { devMode } = useDb()
   const [appVersion, setAppVersion] = useState('1.0')
   const [dataVersion, setDataVersion] = useState('6.7.0')
   const [autoCheck, setAutoCheck] = useState(false)
   const [checkResult, setCheckResult] = useState('')
+  const [versionTag, setVersionTag] = useState('')      // '' | 'beta' | 自定义
+  const [customTag, setCustomTag] = useState('')
+  const [tagMode, setTagMode] = useState('preset')      // 'preset' | 'custom'
 
   useEffect(() => {
     loadVersionInfo()
     loadUpdateSettings()
+    loadVersionTag()
   }, [])
 
   async function loadUpdateSettings() {
@@ -1586,6 +1591,41 @@ function VersionInfoModule() {
     } catch (_) {}
   }
 
+  // 加载持久化的版本标签
+  async function loadVersionTag() {
+    try {
+      if (window.electronAPI?.getUserConfig) {
+        const r = await window.electronAPI.getUserConfig()
+        if (r?.success && r.config) {
+          const saved = r.config.appVersionTag
+          if (saved) {
+            if (saved === 'beta') {
+              setVersionTag('beta')
+              setTagMode('preset')
+            } else {
+              setVersionTag(saved)
+              setCustomTag(saved)
+              setTagMode('custom')
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 保存版本标签
+  async function saveVersionTag(tag) {
+    setVersionTag(tag)
+    try {
+      if (window.electronAPI?.setUserConfig) {
+        await window.electronAPI.setUserConfig('appVersionTag', tag)
+      }
+    } catch (_) {}
+  }
+
+  // 合成显示的版本号
+  const displayVersion = versionTag ? `v${appVersion}-${versionTag}` : `v${appVersion}`
+
   return (
     <div className="space-y-6">
       <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-3">
@@ -1595,8 +1635,63 @@ function VersionInfoModule() {
             <p className="text-sm font-medium">软件版本</p>
             <p className="text-xs text-surface-400 mt-0.5">当前运行的 SilverMoon Terminal 版本</p>
           </div>
-          <span className="ml-auto text-lg font-bold text-primary-400">v{appVersion}</span>
+          <span className="ml-auto text-lg font-bold text-primary-400">{displayVersion}</span>
         </div>
+
+        {/* 版本标签选择 — 仅开发者模式可见 */}
+        {devMode && (
+          <div className="border-t border-surface-700 pt-3 space-y-2">
+            <p className="text-[10px] font-medium text-amber-400 uppercase tracking-wider">版本标签（开发者）</p>
+            <div className="flex items-center gap-2">
+              {[
+                { value: '', label: '无' },
+                { value: 'beta', label: 'beta (测试版)' },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => { setTagMode('preset'); saveVersionTag(opt.value) }}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                    tagMode === 'preset' && versionTag === opt.value
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-surface-800 border border-surface-600 text-surface-300 hover:bg-surface-700'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+              <button
+                onClick={() => { setTagMode('custom'); if (customTag) saveVersionTag(customTag) }}
+                className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                  tagMode === 'custom'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-surface-800 border border-surface-600 text-surface-300 hover:bg-surface-700'
+                }`}
+              >
+                自定义
+              </button>
+            </div>
+            {tagMode === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={customTag}
+                  onChange={e => setCustomTag(e.target.value)}
+                  onBlur={() => { if (customTag.trim()) saveVersionTag(customTag.trim()) }}
+                  onKeyDown={e => { if (e.key === 'Enter' && customTag.trim()) saveVersionTag(customTag.trim()) }}
+                  className="flex-1 px-2 py-1.5 bg-surface-800 border border-surface-600 rounded-lg text-xs text-surface-200 outline-none focus:border-amber-500"
+                  placeholder="输入自定义标签"
+                />
+                <button
+                  onClick={() => { if (customTag.trim()) saveVersionTag(customTag.trim()) }}
+                  className="px-3 py-1.5 rounded-lg text-xs bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+                >
+                  应用
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-3">
           <Database className="w-5 h-5 text-primary-400 flex-shrink-0" />
           <div>
@@ -1681,6 +1776,7 @@ function AdvancedModule() {
   const [loading, setLoading] = useState(false)
   const [seedVersionModal, setSeedVersionModal] = useState(false)
   const [seedVersionInput, setSeedVersionInput] = useState('')
+  const [seedVersionTag, setSeedVersionTag] = useState('')            // '' | 'pre' | 'origin' | 'extra'
   const [isComposing, setIsComposing] = useState(false)
   const seedInputRef = useRef(null)
 
@@ -1741,13 +1837,15 @@ function AdvancedModule() {
   }
 
   async function doExportSeed() {
-    const v = seedVersionInput.trim()
-    if (!v) return
+    const base = seedVersionInput.trim()
+    if (!base) return
+    // 根据标签合成完整版本号：7.0.1-pre 或 7.0.1
+    const fullVersion = seedVersionTag ? `${base}-${seedVersionTag}` : base
     setSeedVersionModal(false)
     setLoading(true)
     setMessage(null)
     try {
-      const result = await window.electronAPI?.exportSeed(v)
+      const result = await window.electronAPI?.exportSeed(fullVersion)
       if (result?.success) {
         setMessage({ type: 'success', text: result.output || '种子数据已更新' })
       } else {
@@ -1960,10 +2058,48 @@ function AdvancedModule() {
               onChange={e => { if (!isComposing) setSeedVersionInput(e.target.value) }}
               onCompositionStart={() => setIsComposing(true)}
               onCompositionEnd={e => { setIsComposing(false); setSeedVersionInput(e.target.value) }}
+              onBlur={() => setIsComposing(false)}  /* 修复：切换输入法等导致 isComposing 卡住 */
               onKeyDown={e => { if (e.key === 'Enter') doExportSeed() }}
               spellCheck={false}
-              className="w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-lg text-sm text-surface-200 outline-none focus:border-primary-500 mb-4"
+              className="w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-lg text-sm text-surface-200 outline-none focus:border-primary-500 mb-3"
+              placeholder="例如: 7.0.1"
             />
+
+            {/* 版本标签选择 */}
+            <p className="text-xs text-surface-400 mb-2">版本标签（可选）</p>
+            <div className="flex gap-2 mb-3">
+              {[
+                { value: '', label: '无' },
+                { value: 'pre', label: 'pre (预发布)' },
+                { value: 'origin', label: 'origin (标准)' },
+                { value: 'extra', label: 'extra (扩展)' },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setSeedVersionTag(opt.value)}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                    seedVersionTag === opt.value
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-surface-800 border border-surface-600 text-surface-300 hover:bg-surface-700'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {/* 版本预览 */}
+            <div className="px-3 py-2 bg-surface-800/60 rounded-lg mb-4">
+              <span className="text-[10px] text-surface-500">预览：</span>
+              <span className="text-sm font-mono text-primary-400 ml-1">
+                {seedVersionInput.trim()
+                  ? seedVersionTag
+                    ? `${seedVersionInput.trim()}-${seedVersionTag}`
+                    : seedVersionInput.trim()
+                  : '—'}
+              </span>
+            </div>
+
             <div className="flex justify-end gap-2">
               <button onClick={() => setSeedVersionModal(false)}
                 className="px-4 py-1.5 rounded-lg text-xs bg-surface-700 hover:bg-surface-600 text-surface-300 transition-colors">取消</button>

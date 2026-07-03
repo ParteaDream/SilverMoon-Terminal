@@ -45,6 +45,10 @@ export default function WeaponsPage() {
   const [selected, setSelected] = useState(new Set())
   const [saving, setSaving] = useState(false)
   const restoringScroll = useRef(false)
+  const [entering, setEntering] = useState(() => {
+    if (sessionStorage.getItem('_nav_backToList')) return true
+    return false
+  })
 
   useEffect(() => {
     const isBack = consumeBackToList()
@@ -57,6 +61,8 @@ export default function WeaponsPage() {
       }
       loadData()
       restoringScroll.current = true
+      setEntering(true)
+      setTimeout(() => setEntering(false), 150)
       restorePage('weapons').then(saved => {
         if (saved) {
           if (saved.viewMode) setViewMode(saved.viewMode)
@@ -282,7 +288,7 @@ export default function WeaponsPage() {
   stateRef.current = { viewMode, search, sortKeys, filters }
 
   return (
-    <div className="p-6">
+    <div className={`p-6 ${entering ? 'opacity-0' : 'opacity-100'} transition-opacity duration-100`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
@@ -411,13 +417,13 @@ function WeaponThumb({ filename, large }) {
   if (large) {
     return (
       <div ref={ref} className="w-full h-full flex items-center justify-center overflow-hidden">
-        {src ? <img src={src} alt="" className="w-full h-full object-contain scale-125" /> : <Sword className="w-10 h-10 text-surface-500" />}
+        {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <Sword className="w-10 h-10 text-surface-500" />}
       </div>
     )
   }
   return (
     <div ref={ref} className="w-12 h-12 rounded-lg overflow-hidden shrink-0 bg-surface-700 flex items-center justify-center">
-      {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <Sword className="w-6 h-6 text-surface-500" />}
+      {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <Sword className="w-6 h-6 text-surface-500" />}
     </div>
   )
 }

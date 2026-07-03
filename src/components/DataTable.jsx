@@ -238,7 +238,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
   filterableCols: extFilterableCols, filterOptions: extFilterOptions,
   processed: extProcessed, activeFilterCount: extActiveFilterCount,
   selectable, selectedIds, onToggleSelect, onToggleSelectAll, onBulkDelete,
-  onRowClick, onRowReorder, itemIdKey,
+  onRowClick, onRowReorder, itemIdKey, activeId,
 }) {
   // Use external state if provided (for sync with gallery view), else internal
   const internal = useSortFilter(data, columns)
@@ -338,7 +338,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
                 )}
                 {columns.map(col => (
                   <th key={col.key}
-                    className="text-left px-4 py-3 text-xs font-medium text-surface-400 uppercase tracking-wider select-none group"
+                    className="text-left px-4 py-3 text-xs font-medium text-surface-400 uppercase tracking-wider select-none group whitespace-nowrap"
                     style={{ ...(col.width ? { width: col.width } : {}), ...(col.minWidth ? { minWidth: col.minWidth } : {}) }}
                   >
                     {col.key !== 'expand' && col.label ? (
@@ -354,7 +354,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
                   </th>
                 ))}
                 {(onEdit || onDelete) && (
-                  <th className="text-right px-4 py-3 text-xs font-medium text-surface-400 uppercase tracking-wider w-24">操作</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-surface-400 uppercase tracking-wider whitespace-nowrap w-24">操作</th>
                 )}
               </tr>
             </thead>
@@ -362,7 +362,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
               {processed.map((row, i) => (
                 <tr key={`${row.id || i}--s${sortKeys.map(s => s.key + s.dir).join(',')}|f${Object.entries(filters).flat().join(',')}`}
                   data-item-id={itemIdKey ? row[itemIdKey] : undefined}
-                  className={`border-b border-surface-800/50 last:border-b-0 hover:bg-surface-800/30 transition-colors ${onRowClick ? 'cursor-pointer' : ''} ${onRowReorder ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                  className={`border-b border-surface-800/50 last:border-b-0 transition-colors ${onRowClick ? 'cursor-pointer' : ''} ${onRowReorder ? 'cursor-grab active:cursor-grabbing' : ''} ${activeId != null && (itemIdKey ? row[itemIdKey] : row.id) === activeId ? 'bg-primary-500/10 ring-1 ring-inset ring-primary-500/30' : 'hover:bg-surface-800/30'}`}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   draggable={!!onRowReorder}
                   onDragStart={onRowReorder ? (e) => { e.dataTransfer.setData('text/plain', String(row.id)); e.dataTransfer.effectAllowed = 'move'; } : undefined}
