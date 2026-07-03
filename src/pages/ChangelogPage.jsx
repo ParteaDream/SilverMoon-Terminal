@@ -688,12 +688,27 @@ function VersionImageBg({ imageFile }) {
     if (src === prevSrcRef.current) return
     prevSrcRef.current = src
 
-    // 直接在 opacity:0.4 下加载图片（永久 gradient mask 已就位）
-    // 图片从不出现在全亮状态，避免了忽亮忽暗的闪烁
-    img.style.opacity = '0.4'
+    // 彻底消除闪烁：先设 src（图片仍处于 opacity 0），解码完成后设 opacity 0.4
+    // 图片从不以任何中间透明度出现
     img.src = src
 
-    return () => {}
+    if (img.complete && img.naturalWidth > 0) {
+      // 图片已完全解码，直接显示
+      img.style.opacity = '0.4'
+    } else {
+      // 图片尚未解码完成，保持隐藏，加载完成后显示
+      img.style.opacity = '0'
+      const onLoad = () => {
+        img.removeEventListener('load', onLoad)
+        img.style.opacity = '0.4'
+      }
+      img.addEventListener('load', onLoad)
+      // 若设 src 后 complete 变为 true（如 base64），说明加载已完成但自然尺寸未就绪
+      if (img.complete) {
+        img.removeEventListener('load', onLoad)
+        img.style.opacity = '0.4'
+      }
+    }
   }, [src])
 
   return (

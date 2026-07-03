@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
+import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import DataTable from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput } from '../components/EditModal'
@@ -200,6 +201,7 @@ export default function GameDataPage() {
   const { query, devMode } = useDb()
   const { restorePage, savePage, consumeBackToList } = useNav()
   const restoringScroll = useRef(false)
+  const listScrollRef = useRef(null)  // 左侧数据列表滚动容器
   const [data, setData] = useState([])
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -345,37 +347,49 @@ export default function GameDataPage() {
     _preview: stripFormatting((item.content || '').slice(0, 200)),
   }))
 
-  // ── 状态持久化（参考武器板块）──
+  // ── 状态持久化：保存滚轮位置和打开条目状态 ──
   useEffect(() => {
-    const isBack = consumeBackToList()
-    if (isBack) {
-      loadData()
+    (async () => {
       restoringScroll.current = true
-      restorePage('gamedata').then(saved => {
-        if (saved?.scrollY != null && saved.scrollY > 0) {
-          const targetY = Number(saved.scrollY)
-          const tryScroll = (attempt) => {
-            const main = document.querySelector('main')
-            if (!main) return
-            if (main.scrollHeight > targetY) {
-              main.scrollTo(0, targetY)
-              setTimeout(() => { restoringScroll.current = false }, 300)
-              setTimeout(() => {
-                if (main) main.dispatchEvent(new Event('scroll', { bubbles: true }))
-              }, 150)
-            } else if (attempt > 0) {
-              setTimeout(() => tryScroll(attempt - 1), 200)
-            }
+      // 先等数据加载完成，DataTable 渲染后再恢复滚轮位置
+      await loadData()
+      const saved = await restorePage('gamedata')
+      if (!saved) { restoringScroll.current = false; return }
+      // 恢复打开的条目
+      if (saved.activeDetailId != null) {
+        setActiveDetailId(saved.activeDetailId)
+      }
+      // 恢复滚轮位置（等待一帧让 DOM 布局完成）
+      if (saved.scrollY != null && saved.scrollY > 0) {
+        const targetY = Number(saved.scrollY)
+        requestAnimationFrame(() => {
+          const el = listScrollRef.current
+          if (!el) { restoringScroll.current = false; return }
+          if (el.scrollHeight > targetY) {
+            el.scrollTo(0, targetY)
+            setTimeout(() => {
+              restoringScroll.current = false
+              if (el) el.dispatchEvent(new Event('scroll', { bubbles: true }))
+            }, 300)
+          } else {
+            restoringScroll.current = false
           }
-          setTimeout(() => tryScroll(10), 100)
-        }
-      })
-    } else {
-      const main = document.querySelector('main')
-      if (main) main.scrollTo(0, 0)
-      loadData()
-    }
+        })
+      } else {
+        const el = listScrollRef.current
+        if (el) el.scrollTo(0, 0)
+        restoringScroll.current = false
+      }
+    })()
   }, [])
+
+  // 数据加载完成后，若保存的条目不存在则关闭详情
+  useEffect(() => {
+    if (activeDetailId != null && data.length > 0) {
+      const exists = data.some(d => d.id === activeDetailId)
+      if (!exists) setActiveDetailId(null)
+    }
+  }, [data, activeDetailId])
 
   // Handle ?detail=ID query param for direct navigation
   useEffect(() => {
@@ -388,26 +402,38 @@ export default function GameDataPage() {
     }
   }, [data, searchParams])
 
+  // 保存滚动位置：直接读取左侧列表的 scrollTop
   useLayoutEffect(() => {
-    const main = document.querySelector('main')
-    if (!main) return
+    const el = listScrollRef.current
+    if (!el) return
     let timer = null
     const onScroll = () => {
       clearTimeout(timer)
       if (restoringScroll.current) return
-      timer = setTimeout(() => savePage('gamedata'), 200)
+      if (!listScrollRef.current) return
+      timer = setTimeout(() => {
+        savePageStateSync('gamedata', listScrollRef.current.scrollTop, { activeDetailId })
+      }, 200)
     }
-    main.addEventListener('scroll', onScroll, { passive: true })
+    el.addEventListener('scroll', onScroll, { passive: true })
     return () => {
-      main.removeEventListener('scroll', onScroll)
+      el.removeEventListener('scroll', onScroll)
       clearTimeout(timer)
     }
-  }, [savePage])
+  }, [savePageStateSync, activeDetailId])
+
+  // activeDetailId 变化时立即触发保存（不限滚动事件）
+  useEffect(() => {
+    const el = listScrollRef.current
+    if (data.length === 0) return
+    const scrollY = el ? el.scrollTop : 0
+    savePageStateSync('gamedata', scrollY, { activeDetailId })
+  }, [activeDetailId, data, savePageStateSync])
 
   return (
-    <div className="p-6 flex gap-4 h-full">
+    <div className="p-6 flex gap-4 h-[calc(100vh-60px)] min-h-0">
       {/* ═══ 左侧：表格区 ═══ */}
-      <div className={`${activeDetailId ? 'flex-1 min-w-[340px]' : 'flex-1'} overflow-auto`}>
+      <div ref={listScrollRef} className={`${activeDetailId ? 'w-[420px] flex-shrink-0' : 'flex-1'} overflow-auto`}>
         {/* 多选开关 */}
         <div className="flex items-center gap-3 mb-3">
           <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -494,7 +520,7 @@ export default function GameDataPage() {
         const activeDetail = data.find(d => d.id === activeDetailId)
         if (!activeDetail) return null
         return (
-        <div className="w-[50vw] max-w-[720px] min-w-[420px] overflow-y-auto bg-surface-900 rounded-xl border border-surface-700 flex-shrink-0 animate-slide-up">
+        <div className="flex-1 min-w-[420px] overflow-y-auto bg-surface-900 rounded-xl border border-surface-700 flex-shrink-0 animate-slide-up">
           {/* 关闭按钮 */}
           <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 bg-surface-900/95 backdrop-blur-sm border-b border-surface-700 rounded-t-xl">
             <div className="flex items-center gap-2">
