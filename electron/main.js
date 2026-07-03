@@ -93,16 +93,32 @@ function parseBaseDbVersion(filename) {
   return undefined; // 无法识别
 }
 
-// 比较两个版本号字符串（如 "6.7.0" vs "6.8.0"），返回 >0 / <0 / 0
+// 比较两个版本号字符串（如 "6.7.0" vs "6.8.0"），支持带标签的版本号（如 "7.0.1-pre"）
+// 返回 >0 / <0 / 0
 function compareVersions(a, b) {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  const len = Math.max(pa.length, pb.length);
+  // 分割版本基数和标签，如 "7.0.1-pre" → { base: "7.0.1", tag: "pre" }
+  function parse(v) {
+    const idx = v.indexOf('-');
+    if (idx >= 0) return { base: v.slice(0, idx), tag: v.slice(idx + 1) };
+    return { base: v, tag: null };
+  }
+  const pa = parse(a);
+  const pb = parse(b);
+  const paParts = pa.base.split('.').map(Number);
+  const pbParts = pb.base.split('.').map(Number);
+  const len = Math.max(paParts.length, pbParts.length);
   for (let i = 0; i < len; i++) {
-    const va = pa[i] || 0;
-    const vb = pb[i] || 0;
+    const va = paParts[i] || 0;
+    const vb = pbParts[i] || 0;
     if (va > vb) return 1;
     if (va < vb) return -1;
+  }
+  // 基数相同：有标签的排前面（pre-release 先于正式版），标签按字母序
+  if (pa.tag !== null && pb.tag === null) return -1;
+  if (pa.tag === null && pb.tag !== null) return 1;
+  if (pa.tag !== null && pb.tag !== null) {
+    if (pa.tag < pb.tag) return -1;
+    if (pa.tag > pb.tag) return 1;
   }
   return 0;
 }
