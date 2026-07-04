@@ -2,23 +2,6 @@ import { createContext, useContext, useState, useCallback } from 'react'
 
 const TerminalContext = createContext(null)
 
-/** 应用程序注册表（与 TerminalPage 共享） */
-export const APPS = [
-  { id: 'traincalc', name: '养成计算器', icon: null, placeholder: true },
-  { id: 'betamemo', name: 'Beta备忘录', icon: null, placeholder: true },
-]
-
-export const SYS_TOOLS = [
-  { id: 'resources', name: '资源', icon: null, system: true },
-  { id: 'customize', name: '自定义', icon: null, system: true },
-]
-
-// 图标组件在 TerminalPage 中定义，这里留 null 占位，实际使用时替换
-export function injectAppIcons(icons) {
-  APPS.forEach((a, i) => { if (icons[i]) a.icon = icons[i] })
-  SYS_TOOLS.forEach((t, i) => { if (icons[i + APPS.length]) t.icon = icons[i + APPS.length] })
-}
-
 export function TerminalProvider({ children }) {
   const [runningApps, setRunningApps] = useState([])
   const [nextZ, setNextZ] = useState(100)
@@ -29,13 +12,24 @@ export function TerminalProvider({ children }) {
     ))
   }, [])
 
+  // 提升窗口到最前
+  const bringToFront = useCallback((appId) => {
+    setNextZ(z => {
+      const nz = z + 1
+      setRunningApps(prev => prev.map(a =>
+        a.id === appId ? { ...a, state: { ...a.state, zIndex: nz } } : a
+      ))
+      return nz
+    })
+  }, [])
+
+  // 启动应用（桌面双击/单击用）
   const launchApp = useCallback((app) => {
-    let launched = false
+    let isNew = true
     setRunningApps(prev => {
       const existing = prev.find(a => a.id === app.id)
       if (existing) {
-        launched = true
-        // 如果已运行且隐藏，重新显示
+        isNew = false
         if (existing.state?.hidden) {
           return prev.map(a => a.id === app.id
             ? { ...a, state: { ...a.state, hidden: false } }
@@ -44,7 +38,7 @@ export function TerminalProvider({ children }) {
         }
         return prev
       }
-      launched = true
+      const z = 100 + prev.length + 1
       const newApp = {
         ...app,
         state: {
@@ -54,29 +48,68 @@ export function TerminalProvider({ children }) {
           height: 420,
           hidden: false,
           fullscreen: false,
-          zIndex: 100 + prev.length + 1,
+          zIndex: z,
         }
       }
-      setNextZ(100 + prev.length + 2)
       return [...prev, newApp]
     })
-    if (!launched) return
     // 提升 z-index
     setNextZ(z => {
       const nz = z + 1
-      updateAppState(app.id, { zIndex: nz })
+      setRunningApps(prev => prev.map(a =>
+        a.id === app.id ? { ...a, state: { ...a.state, zIndex: nz } } : a
+      ))
       return nz
     })
-  }, [updateAppState])
+  }, [])
+
+  // 启动或显示（不隐藏）- 用于跨板块和 dock 点击
+  const launchOrShow = useCallback((app) => {
+    let isNew = true
+    setRunningApps(prev => {
+      const existing = prev.find(a => a.id === app.id)
+      if (existing) {
+        isNew = false
+        return prev.map(a => a.id === app.id
+          ? { ...a, state: { ...a.state, hidden: false } }
+          : a
+        )
+      }
+      const z = 100 + prev.length + 1
+      const newApp = {
+        ...app,
+        state: {
+          left: 80 + prev.length * 30,
+          top: 60 + prev.length * 30,
+          width: 600,
+          height: 420,
+          hidden: false,
+          fullscreen: false,
+          zIndex: z,
+        }
+      }
+      return [...prev, newApp]
+    })
+    setNextZ(z => {
+      const nz = z + 1
+      setRunningApps(prev => prev.map(a =>
+        a.id === app.id ? { ...a, state: { ...a.state, zIndex: nz } } : a
+      ))
+      return nz
+    })
+  }, [])
 
   const closeApp = useCallback((appId) => {
     setRunningApps(prev => prev.filter(a => a.id !== appId))
   }, [])
 
+  // toggle：系统工具切换显示/隐藏，用户应用切换显示/隐藏
   const toggleApp = useCallback((app) => {
+    let isNew = true
     setRunningApps(prev => {
       const existing = prev.find(a => a.id === app.id)
       if (existing) {
+        isNew = false
         if (existing.state?.hidden) {
           return prev.map(a => a.id === app.id
             ? { ...a, state: { ...a.state, hidden: false } }
@@ -89,7 +122,7 @@ export function TerminalProvider({ children }) {
           )
         }
       }
-      // 未在运行 → 启动新应用
+      const z = 100 + prev.length + 1
       const newApp = {
         ...app,
         state: {
@@ -99,19 +132,19 @@ export function TerminalProvider({ children }) {
           height: 420,
           hidden: false,
           fullscreen: false,
-          zIndex: 100 + prev.length + 1,
+          zIndex: z,
         }
       }
-      setNextZ(100 + prev.length + 2)
       return [...prev, newApp]
     })
-    // 如果是重新显示，提升 z-index
     setNextZ(z => {
       const nz = z + 1
-      updateAppState(app.id, { zIndex: nz })
+      setRunningApps(prev => prev.map(a =>
+        a.id === app.id ? { ...a, state: { ...a.state, zIndex: nz } } : a
+      ))
       return nz
     })
-  }, [updateAppState])
+  }, [])
 
   const hasRunningNonSystem = runningApps.some(a => !a.system)
 
@@ -122,6 +155,8 @@ export function TerminalProvider({ children }) {
       closeApp,
       updateAppState,
       toggleApp,
+      launchOrShow,
+      bringToFront,
       hasRunningNonSystem,
     }}>
       {children}

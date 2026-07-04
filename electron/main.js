@@ -2277,16 +2277,13 @@ ipcMain.handle('import-user-image', async () => {
     const userImagesDir = getUserImagesDir(dbDir);
     const dest = path.join(userImagesDir, originalName);
 
-    // 去重：如果已有同名文件，加时间戳
-    let finalName = originalName;
+    // 去重：如果已有同名文件，直接使用已有文件
     if (fs.existsSync(dest)) {
-      const ext = path.extname(originalName);
-      const base = path.basename(originalName, ext);
-      finalName = `${base}_${Date.now()}${ext}`;
+      return { success: true, filename: originalName };
     }
 
-    fs.copyFileSync(src, path.join(userImagesDir, finalName));
-    return { success: true, filename: finalName };
+    fs.copyFileSync(src, dest);
+    return { success: true, filename: originalName };
   } catch (e) { return { error: e.message }; }
 });
 
@@ -2305,6 +2302,24 @@ ipcMain.handle('delete-user-image', (_event, filename) => {
     const fp = path.join(getUserImagesDir(dbDir), filename);
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
     return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 列出数据库文件夹的文件 ──
+ipcMain.handle('list-db-files', async () => {
+  try {
+    if (!dbDir) throw new Error('数据库路径未设置');
+    const files = fs.readdirSync(dbDir).map(name => {
+      const fp = path.join(dbDir, name);
+      const stat = fs.statSync(fp);
+      return {
+        name,
+        size: stat.size,
+        isDirectory: stat.isDirectory(),
+        mtime: stat.mtime.toISOString(),
+      };
+    });
+    return { success: true, files };
   } catch (e) { return { error: e.message }; }
 });
 
@@ -4529,6 +4544,32 @@ ipcMain.handle('set-update-auto-check', (_event, enabled) => {
 
 ipcMain.handle('open-external', (_event, url) => {
   shell.openExternal(url);
+});
+
+// ── 在访达中打开文件夹 ──
+ipcMain.handle('open-folder', (_event, folderPath) => {
+  try {
+    shell.openPath(folderPath);
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 列出指定目录的文件 ──
+ipcMain.handle('list-directory', (_event, dirPath) => {
+  try {
+    if (!dirPath || !fs.existsSync(dirPath)) return { error: '路径不存在' };
+    const files = fs.readdirSync(dirPath).map(name => {
+      const fp = path.join(dirPath, name);
+      const stat = fs.statSync(fp);
+      return {
+        name,
+        size: stat.size,
+        isDirectory: stat.isDirectory(),
+        mtime: stat.mtime.toISOString(),
+      };
+    });
+    return { success: true, files };
+  } catch (e) { return { error: e.message }; }
 });
 
 // ── 应用图标替换 ──

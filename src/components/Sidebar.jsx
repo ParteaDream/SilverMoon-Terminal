@@ -16,7 +16,6 @@ const navItems = [
   { to: '/challenges', icon: Skull, label: '挑战' },
   { to: '/data', icon: Database, label: '数据' },
   { to: '/websites', icon: Globe, label: '站点' },
-  { to: '/terminal', icon: Terminal, label: '终端' },
   { to: '/settings', icon: Settings, label: '设置' },
 ]
 
@@ -124,6 +123,27 @@ export default function Sidebar() {
           </button>
         )})}
       </nav>
+
+      {/* Terminal */}
+      <div className={`flex-shrink-0 ${collapsed ? 'px-2' : 'px-3'} pb-1`}>
+        <button
+          onClick={() => push('/terminal')}
+          title={collapsed ? '终端' : undefined}
+          className={`flex items-center rounded-lg w-full no-drag transition-all duration-200 min-w-0
+            ${collapsed
+              ? 'justify-center px-0 py-3'
+              : 'gap-3 px-3 py-3.5'
+            }
+            ${location.pathname.startsWith('/terminal')
+              ? 'bg-primary-500/10 text-primary-400 shadow-sm'
+              : 'text-surface-400 hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:ring-2 hover:ring-[rgb(var(--color-1))] hover:shadow-lg'
+            }`
+          }
+        >
+          <Terminal className="flex-shrink-0 w-5 h-5" />
+          {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text text-lg font-bold italic tracking-wide">终端</span>}
+        </button>
+      </div>
 
       {/* Changelog */}
       <div className={`flex-shrink-0 ${collapsed ? 'px-2' : 'px-3'} pb-1`}>

@@ -22,7 +22,8 @@ import WebsitesPage from './pages/WebsitesPage'
 import TerminalPage from './pages/TerminalPage'
 import SettingsPage from './pages/SettingsPage'
 import ChangelogPage from './pages/ChangelogPage'
-import { TerminalProvider } from './context/TerminalContext'
+import { TerminalProvider, useTerminal } from './context/TerminalContext'
+import { TerminalWindow } from './pages/TerminalPage'
 import TerminalDock from './components/TerminalDock'
 
 // macOS hiddenInset titlebar: reserve 38px for traffic light buttons
@@ -68,7 +69,7 @@ export default function App() {
     <div className="h-full flex overflow-hidden">
       <Sidebar />
       <main className={`flex-1 overflow-y-auto overflow-x-hidden relative ${devMode ? 'pb-10' : ''}`} onScroll={handleScroll}>
-        <div key={location.key} className="animate-slide-up">
+        <div key={location.key} className="animate-slide-up h-full">
         <Routes>
           <Route path="/" element={<Navigate to="/characters" replace />} />
           <Route path="/characters" element={<CharactersPage />} />
@@ -154,9 +155,26 @@ export default function App() {
         {isWin && <WinControls />}
       </div>
       {content}
+      <GlobalWindows />
     </div>
     </TerminalProvider>
   )
+}
+
+function GlobalWindows() {
+  const { runningApps, closeApp, updateAppState, bringToFront } = useTerminal()
+  return runningApps.map(app => (
+    <TerminalWindow
+      key={app.id}
+      app={app}
+      state={app.state}
+      zIndex={app.state?.zIndex}
+      onClose={() => closeApp(app.id)}
+      onHide={() => updateAppState(app.id, { hidden: true })}
+      onUpdateState={(partial) => updateAppState(app.id, partial)}
+      onFocus={() => bringToFront(app.id)}
+    />
+  ))
 }
 
 function WinControls() {
