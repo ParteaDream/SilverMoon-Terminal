@@ -19,8 +19,11 @@ import WishesPage from './pages/WishesPage'
 import ChallengesPage from './pages/ChallengesPage'
 import GameDataPage from './pages/GameDataPage'
 import WebsitesPage from './pages/WebsitesPage'
+import TerminalPage from './pages/TerminalPage'
 import SettingsPage from './pages/SettingsPage'
 import ChangelogPage from './pages/ChangelogPage'
+import { TerminalProvider } from './context/TerminalContext'
+import TerminalDock from './components/TerminalDock'
 
 // macOS hiddenInset titlebar: reserve 38px for traffic light buttons
 const TITLEBAR_HEIGHT = 38
@@ -80,6 +83,7 @@ export default function App() {
           <Route path="/challenges" element={<ChallengesPage />} />
           <Route path="/data" element={<GameDataPage />} />
           <Route path="/websites" element={<WebsitesPage />} />
+          <Route path="/terminal" element={<TerminalPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/changelog" element={<ChangelogPage />} />
         </Routes>
@@ -129,13 +133,15 @@ export default function App() {
       </main>
       <DevToolbar />
       <UpdateToast />
+      <TerminalDock />
     </div>
   )
 
 
   return (
-    <div className="bg-surface-950" style={wrapperStyle}>
-      {/* 顶部拖拽条 */}
+    <TerminalProvider>
+      <div className="bg-surface-950" style={wrapperStyle}>
+        {/* 顶部拖拽条 */}
       <div
         className="drag-region"
         style={{
@@ -149,6 +155,7 @@ export default function App() {
       </div>
       {content}
     </div>
+    </TerminalProvider>
   )
 }
 

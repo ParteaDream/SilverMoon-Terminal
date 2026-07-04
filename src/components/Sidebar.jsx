@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { notifySidebarToggled } from '../context/SidebarContext'
 import { useNav } from '../context/NavContext'
 import {
-  Users, Swords, Crown, Package, Sparkle, Skull, Database, Globe, Settings, Info,
+  Users, Swords, Crown, Package, Sparkle, Skull, Database, Globe, Terminal, Settings, Info,
   PanelLeftClose, PanelLeftOpen, ScrollText
 } from 'lucide-react'
 
@@ -16,6 +16,7 @@ const navItems = [
   { to: '/challenges', icon: Skull, label: '挑战' },
   { to: '/data', icon: Database, label: '数据' },
   { to: '/websites', icon: Globe, label: '站点' },
+  { to: '/terminal', icon: Terminal, label: '终端' },
   { to: '/settings', icon: Settings, label: '设置' },
 ]
 
