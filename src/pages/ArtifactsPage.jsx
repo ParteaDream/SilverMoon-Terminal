@@ -272,13 +272,13 @@ export default function ArtifactsPage() {
           selectable selectedIds={selected} onToggleSelect={toggleSelect} onToggleSelectAll={toggleSelectAll}
           onRowClick={row => navigateToDetail(row.id)} itemIdKey="id" />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3">
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-2">
           {processed.map(a => (
             <div key={a.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')} data-item-id={a.id} onClick={() => navigateToDetail(a.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
               <div className="aspect-[3/4] bg-surface-700 flex items-center justify-center">
                 {(a.flower_image || a.image || a.circlet_image) ? <ArtThumb filename={a.flower_image || a.image || a.circlet_image} large /> : <Gem className="w-10 h-10 text-surface-500" />}
               </div>
-              <div className="p-3">
+              <div className="p-2">
                 <p className="text-xs font-semibold text-white truncate">{a.name_zh}</p>
                 <p className={`text-[10px] ${RARITY_COLOR[a.max_rarity] || 'text-amber-400'}`}>{'★'.repeat(a.max_rarity || 5)}</p>
               </div>

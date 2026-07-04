@@ -365,7 +365,7 @@ export default function WeaponsPage() {
                 {gradient && (
                   <div className={`absolute inset-0 bg-gradient-to-b ${gradient} pointer-events-none`} />
                 )}
-                <div className="relative aspect-[3/4] bg-surface-700/50 flex items-center justify-center p-4">
+                <div className="relative aspect-[3/4] bg-surface-700/50 flex items-center justify-center p-2">
                   {w.image ? <WeaponThumb filename={w.image} large /> : <Sword className="w-10 h-10 text-surface-500" />}
                 </div>
                 <div className="relative p-3">

@@ -316,13 +316,13 @@ export default function MaterialsPage() {
           onRowClick={row => navigateToDetail(row.id)} itemIdKey="id"
         />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3">
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-2">
           {processed.map(m => (
             <div key={m.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')} data-item-id={m.id} onClick={() => navigateToDetail(m.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
               <div className="aspect-[3/4] bg-surface-700 flex items-center justify-center">
                 {m.image ? <MatThumb filename={m.image} large /> : <Package className="w-10 h-10 text-surface-500" />}
               </div>
-              <div className="p-3">
+              <div className="p-2">
                 <p className="text-xs font-semibold text-white truncate">{m.name_zh}</p>
                 <p className={`text-[10px] ${RARITY_COLOR[m.rarity] || 'text-surface-400'}`}>{RARITY_STARS[m.rarity]}{' '}{MATERIAL_TYPES[m.type] || m.type}</p>
               </div>
