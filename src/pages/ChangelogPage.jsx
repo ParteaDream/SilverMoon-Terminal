@@ -4,7 +4,7 @@ import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
-import { Plus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight, ChevronLeft, ImagePlus, Download, User, Crosshair, Sparkles, Shirt, Package, BarChart3, Star } from 'lucide-react'
+import { Plus, Minus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight, ChevronLeft, ImagePlus, Download, User, Crosshair, Sparkles, Shirt, Package, BarChart3, Star } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormField } from '../components/EditModal'
 import ItemThumb from '../components/ItemThumb'
@@ -850,12 +850,30 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
       >
         <ChevronRight className="w-6 h-6" />
       </button>
-      {/* Scale indicator */}
-      {scale !== 1 && (
-        <div className="absolute top-4 left-4 text-xs text-white/60 bg-black/40 px-2 py-1 rounded">
+      {/* 缩放控制 */}
+      <div className="absolute top-4 left-4 flex items-center gap-1 bg-black/50 px-1.5 py-1 rounded-lg z-10">
+        <button
+          onClick={e => { e.stopPropagation(); setScale(prev => Math.max(0.5, +(prev - 0.2).toFixed(1))) }}
+          className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
+          aria-label="缩小"
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); setScale(1); setPosition({ x: 0, y: 0 }) }}
+          className="px-1.5 py-0.5 rounded text-[10px] text-surface-400 hover:text-white hover:bg-white/10 transition-colors font-mono"
+          aria-label="重置缩放"
+        >
           {Math.round(scale * 100)}%
-        </div>
-      )}
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); setScale(prev => Math.min(3, +(prev + 0.2).toFixed(1))) }}
+          className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
+          aria-label="放大"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
       {/* Counter + export */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/70 bg-black/40 px-3 py-1 rounded-full flex items-center gap-3">
         <span>{index + 1} / {images.length}</span>
@@ -972,7 +990,8 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
       {!hasAnyContent ? (
         <div className="px-5 py-8 text-center text-surface-500 text-sm">暂无新增内容，点击编辑添加</div>
       ) : (
-        <div className={collapsed ? 'p-4' : 'p-4 space-y-4'}>
+        <div className="relative z-10">
+          <div className={collapsed ? 'p-4' : 'p-4 space-y-4'}>
           {/* Non-wish sections: flex-wrap, each section sized by item count */}
           {(() => {
             const nonWishTypes = ['character', 'weapon', 'artifact', 'outfit', 'material', 'game_data']
@@ -1087,6 +1106,7 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
               </div>
             )}
           </div>
+        </div>
         </div>
       )}
 

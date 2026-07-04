@@ -316,7 +316,7 @@ export default function MaterialsPage() {
           onRowClick={row => navigateToDetail(row.id)} itemIdKey="id"
         />
       ) : (
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-2">
+        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9 2xl:grid-cols-12 gap-1.5">
           {processed.map(m => (
             <div key={m.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')} data-item-id={m.id} onClick={() => navigateToDetail(m.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
               <div className="aspect-[3/4] bg-surface-700 flex items-center justify-center">

@@ -1843,14 +1843,14 @@ function SkillTableDisplay({ data, talentType }) {
   )
 }
 
-function darkenHex(hex, factor) {
+function hexToRgba(hex, opacity) {
   if (!hex) return null
   const clean = hex.replace('#', '')
   const num = parseInt(clean, 16)
-  const r = Math.round(((num >> 16) & 255) * factor)
-  const g = Math.round(((num >> 8) & 255) * factor)
-  const b = Math.round((num & 255) * factor)
-  return `rgb(${r},${g},${b})`
+  const r = (num >> 16) & 255
+  const g = (num >> 8) & 255
+  const b = num & 255
+  return `rgba(${r},${g},${b},${opacity})`
 }
 
 function ImageTile({ label, filename, large, onClick, elementColor, namecardBg, showNamecardToggle, namecardToggleOn, onToggleNamecard }) {
@@ -1862,8 +1862,7 @@ function ImageTile({ label, filename, large, onClick, elementColor, namecardBg, 
     bgClass = ''
   } else if (elementColor) {
     bgClass = ''
-    const darkColor = darkenHex(elementColor, 0.65)
-    bgStyle = { background: `linear-gradient(to top, ${darkColor}, ${elementColor}cc)` }
+    bgStyle = { background: `linear-gradient(to top, ${hexToRgba(elementColor, 0.35)}, ${hexToRgba(elementColor, 0)})` }
   }
 
   return (

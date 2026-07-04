@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { X } from 'lucide-react'
+import { X, Plus, Minus } from 'lucide-react'
 import { useDb } from '../context/DbContext'
 import { useImageDrag } from '../hooks/useImageDrag'
 import { stripFormatting } from '../utils/colorMarkup'
@@ -118,8 +118,29 @@ export default function Lightbox({ filename, label, onClose }) {
         </div>
 
         {cleanLabel && <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-surface-300 pointer-events-none">{cleanLabel}</p>}
-        <div className="absolute bottom-4 right-4 text-xs text-surface-500 bg-black/40 px-2 py-1 rounded">
-          {Math.round(scale * 100)}%
+        {/* 缩放控制 */}
+        <div className="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 px-1.5 py-1 rounded-lg">
+          <button
+            onClick={e => { e.stopPropagation(); setScale(prev => Math.max(0.5, +(prev - 0.2).toFixed(1))) }}
+            className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="缩小"
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); setScale(1); setPosition({ x: 0, y: 0 }) }}
+            className="px-1.5 py-0.5 rounded text-[10px] text-surface-400 hover:text-white hover:bg-white/10 transition-colors font-mono"
+            aria-label="重置缩放"
+          >
+            {Math.round(scale * 100)}%
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); setScale(prev => Math.min(3, +(prev + 0.2).toFixed(1))) }}
+            className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="放大"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
