@@ -4558,17 +4558,36 @@ ipcMain.handle('open-folder', (_event, folderPath) => {
 ipcMain.handle('list-directory', (_event, dirPath) => {
   try {
     if (!dirPath || !fs.existsSync(dirPath)) return { error: '路径不存在' };
-    const files = fs.readdirSync(dirPath).map(name => {
-      const fp = path.join(dirPath, name);
-      const stat = fs.statSync(fp);
-      return {
-        name,
-        size: stat.size,
-        isDirectory: stat.isDirectory(),
-        mtime: stat.mtime.toISOString(),
-      };
-    });
+    const names = fs.readdirSync(dirPath);
+    const files = [];
+    for (const name of names) {
+      try {
+        const fp = path.join(dirPath, name);
+        const stat = fs.statSync(fp);
+        files.push({ name, size: stat.size, isDirectory: stat.isDirectory(), mtime: stat.mtime.toISOString() });
+      } catch (_) { /* skip protected files (e.g. System Volume Information on Windows) */ }
+    }
     return { success: true, files };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 用系统默认应用打开文件 ──
+ipcMain.handle('open-file', (_event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { error: '文件不存在' };
+    shell.openPath(filePath);
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 读取文件预览（图片缩略图）──
+ipcMain.handle('read-file-preview', (_event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { error: '文件不存在' };
+    const ext = path.extname(filePath).toLowerCase();
+    const imgExts = ['.jpg','.jpeg','.png','.webp','.gif','.svg','.bmp'];
+    if (!imgExts.includes(ext)) return { success: true, data: null };
+    return readImageFile(filePath);
   } catch (e) { return { error: e.message }; }
 });
 

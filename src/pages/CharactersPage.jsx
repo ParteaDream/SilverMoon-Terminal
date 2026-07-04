@@ -1,6 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
+import { useTerminal } from '../context/TerminalContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
 import { useImageDrag } from '../hooks/useImageDrag'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
@@ -54,7 +56,10 @@ function ElementIcon({ elId, className = 'w-4 h-4', elemIcons }) {
 export default function CharactersPage() {
   const { query, readImage } = useDb()
   const { savePage, restorePage, push, consumeBackToList } = useNav()
+  const { launchTrainCalc } = useTerminal()
+  const location = useLocation()
   const [characters, setCharacters] = useState([])
+  const [contextMenu, setContextMenu] = useState(null)
   const [elements, setElements] = useState([])
   const [weaponTypes, setWeaponTypes] = useState([])
   const [regions, setRegions] = useState([])
@@ -599,6 +604,7 @@ export default function CharactersPage() {
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
           onRowClick={row => navigateToDetail(row.id)}
+          onRowContextMenu={(e, row) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, char: row }) }}
           itemIdKey="id"
         />
       )}
@@ -614,6 +620,7 @@ export default function CharactersPage() {
                 key={char.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
                 data-item-id={char.id}
                 onClick={() => navigateToDetail(char.id)}
+                onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, char }) }}
                 className={`group relative rounded-xl overflow-hidden border cursor-pointer
                   bg-gradient-to-b ${ELEMENT_BG[char.element_id] || 'from-surface-800 to-surface-900'}
                   ${ELEMENT_BORDER[char.element_id] || 'border-surface-700'}
@@ -724,6 +731,30 @@ export default function CharactersPage() {
           <ImagePicker label="名片" currentImage={form.namecard_art} onSelect={v => setForm({ ...form, namecard_art: v })} onRemove={() => setForm({ ...form, namecard_art: null })} />
         </div>
       </EditModal>
+
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <div className="fixed z-[300] w-40 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in"
+          style={{ left: Math.min(contextMenu.x, window.innerWidth - 170), top: Math.min(contextMenu.y, window.innerHeight - 130) }}
+          onClick={e => e.stopPropagation()}>
+          <button onClick={() => { launchTrainCalc(contextMenu.char.id, location.pathname); setContextMenu(null) }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-surface-200 hover:bg-white/10 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg>
+            养成计算
+          </button>
+          <button onClick={() => { openEdit(contextMenu.char); setContextMenu(null) }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-surface-300 hover:bg-white/10 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            编辑
+          </button>
+          <button onClick={() => { if (window.confirm(`确认删除角色「${contextMenu.char.name_zh}」？此操作不可撤销。`)) handleDelete(contextMenu.char); setContextMenu(null) }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+            删除
+          </button>
+        </div>
+      )}
+      {contextMenu && <div className="fixed inset-0 z-[299]" onClick={() => setContextMenu(null)} />}
     </div>
   )
 }

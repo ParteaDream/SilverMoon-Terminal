@@ -1,5 +1,5 @@
 -- ============================================================================
--- 银月终端数据库 - 种子数据（导出于 2026-07-04）
+-- 银月终端数据库 - 种子数据（导出于 2026-07-05）
 -- 数据版本: 7.0.1-extra
 -- 来源: /Users/stargomia/Files/GenshinWikiData/silvermoon_terminal.db
 -- 不含 image_cache 表数据
@@ -4822,6 +4822,7 @@ INSERT INTO "game_data" ("id", "category", "title_zh", "content", "tags", "image
 -- materials
 -- ----------------------------------------------------------------------------
 INSERT INTO "materials" ("id", "name_zh", "name_en", "type", "rarity", "description_zh", "source", "usage", "image", "sort_order") VALUES
+  (202, '摩拉', 'Mora', 'common', 3, '通行大陆的钱。世界通用的共同语言，谁人都能理解的贵金属。', NULL, NULL, 'UI_ItemIcon_202.webp', 0),
   (100021, '钩钩果', 'Wolfhook', 'local_specialty', 1, '带着勾刺的莓果，会挂在狼的毛皮上来迁徙。看见它时，仿佛能听见狼的凄嚎在林间回荡…', '推荐：奔狼领采集', NULL, 'UI_ItemIcon_100021.png', 0),
   (100022, '落落莓', 'Valberry', 'local_specialty', 1, '饱满透亮的莓果，在口中绽放出清甜的花香。在过去，守望风暴的人仅有的慰藉便是落落莓的甜蜜与对城市安宁的希望。', '推荐：望风山地采集；尘歌壶种植', NULL, 'UI_ItemIcon_100022.png', 0),
   (100023, '塞西莉亚花', 'Cecilia', 'local_specialty', 1, '名字与外形同等美丽的花朵，只生长在清冷而风急的高处，如同浪子一样真心难以触碰。', '推荐：摘星崖采集；尘歌壶种植', NULL, 'UI_ItemIcon_100023.png', 0),
@@ -4886,6 +4887,12 @@ INSERT INTO "materials" ("id", "name_zh", "name_en", "type", "rarity", "descript
   (101272, '空羽蛾', 'Etherwing Moth', 'local_specialty', 1, '闪耀着神圣金色光辉的奇异生命，如飞蛾般游曳在同样奇异的隙间。', '推荐：风息山、空之神殿采集；推荐：风车镇、柱殿中央区采集', NULL, 'UI_ItemIcon_101272.webp', 0),
   (101275, '霜仙花', 'Frostfairy Flower', 'local_specialty', 1, '不管风雪多么严苛亦会绽放的圣洁花朵，总是散发着微弱的令人向往的光芒。', '推荐：至冬采集', NULL, 'UI_ItemIcon_101275.webp', 0),
   (101276, '植绒草', 'Flockingweed', '至冬区域特产', 1, '一度被怀疑是植物与动物结合后的奇妙植株，但后来被证明只不过是单纯长着类似动物绒毛的植物罢了。', '推荐：至冬采集', NULL, 'UI_ItemIcon_101276.png', 0),
+  (104001, '流浪者的经验', 'Wanderer''s Advice', 'common', 2, '角色经验素材，含有1000点经验值。
+如果不在大陆七国生活，这些经验还是很必要的。', NULL, NULL, 'UI_ItemIcon_104001.webp', 0),
+  (104002, '冒险家的经验', 'Adventurer''s Experience', 'common', 3, '角色经验素材，含有5000点经验值。
+如果踏上了前人未至的秘境，这些经验还是很重要的。', NULL, NULL, 'UI_ItemIcon_104002.webp', 0),
+  (104003, '大英雄的经验', 'Hero''s Wit', 'common', 4, '角色经验素材，含有20000点经验值。
+如果向往着天空岛而在大陆开始巡礼，这些经验可称得上弥足珍贵。', NULL, NULL, 'UI_ItemIcon_104003.webp', 0),
   (104101, '璀璨原钻碎屑', 'Brilliant Diamond Sliver', 'character_ascension', 2, '角色突破素材。
 「欢迎来到世界。」', '冒险等阶奖励', NULL, 'UI_ItemIcon_104101.webp', 0),
   (104102, '璀璨原钻断片', 'Brilliant Diamond Fragment', 'character_ascension', 3, '[color=#e2e8f0]角色突破素材。[/color]

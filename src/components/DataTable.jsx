@@ -238,7 +238,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
   filterableCols: extFilterableCols, filterOptions: extFilterOptions,
   processed: extProcessed, activeFilterCount: extActiveFilterCount,
   selectable, selectedIds, onToggleSelect, onToggleSelectAll, onBulkDelete,
-  onRowClick, onRowReorder, itemIdKey, activeId,
+  onRowClick, onRowContextMenu, onRowReorder, itemIdKey, activeId,
 }) {
   // Use external state if provided (for sync with gallery view), else internal
   const internal = useSortFilter(data, columns)
@@ -364,6 +364,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
                   data-item-id={itemIdKey ? row[itemIdKey] : undefined}
                   className={`border-b border-surface-800/50 last:border-b-0 transition-colors ${onRowClick ? 'cursor-pointer' : ''} ${onRowReorder ? 'cursor-grab active:cursor-grabbing' : ''} ${activeId != null && (itemIdKey ? row[itemIdKey] : row.id) === activeId ? 'bg-primary-500/10 ring-1 ring-inset ring-primary-500/30' : 'hover:bg-surface-800/30'}`}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onContextMenu={onRowContextMenu ? (e) => { e.preventDefault(); onRowContextMenu(e, row) } : undefined}
                   draggable={!!onRowReorder}
                   onDragStart={onRowReorder ? (e) => { e.dataTransfer.setData('text/plain', String(row.id)); e.dataTransfer.effectAllowed = 'move'; } : undefined}
                   onDragOver={onRowReorder ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}

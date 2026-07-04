@@ -8,7 +8,7 @@ import {
 
 /** 应用程序注册表 — 终端板块的权威定义 */
 export const APPS = [
-  { id: 'traincalc', name: '养成计算器', icon: Calculator, placeholder: true, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
+  { id: 'traincalc', name: '养成计算器', icon: Calculator, placeholder: false, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
   { id: 'betamemo', name: 'Beta备忘录', icon: FileText, placeholder: true, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
 ]
 
@@ -21,7 +21,7 @@ export const SYS_TOOLS = [
  * 底部 Dock 菜单栏
  */
 export default function TerminalDock({ visible }) {
-  const { runningApps, toggleApp, closeApp, hasRunningNonSystem } = useTerminal()
+  const { runningApps, toggleApp, closeApp, hasRunningNonSystem, summonApp } = useTerminal()
   const { devMode } = useDb()
   const location = useLocation()
   const [hovered, setHovered] = useState(null)
@@ -71,7 +71,11 @@ export default function TerminalDock({ visible }) {
 
   function handleClick(app) {
     setContextMenu(null)
-    toggleApp(app)
+    if (app.system) {
+      toggleApp(app)
+      return
+    }
+    summonApp(app, location.pathname)
   }
 
   function handleContextMenu(e, app) {
@@ -83,7 +87,7 @@ export default function TerminalDock({ visible }) {
 
   function handleOpenApp(app) {
     setContextMenu(null)
-    toggleApp(app)
+    summonApp(app, location.pathname)
   }
 
   function handleCloseApp(app) {

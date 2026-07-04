@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listDbFiles: () => ipcRenderer.invoke('list-db-files'),
   listDirectory: (dirPath) => ipcRenderer.invoke('list-directory', dirPath),
   openFolder: (folderPath) => ipcRenderer.invoke('open-folder', folderPath),
+  openFile: (filePath) => ipcRenderer.invoke('open-file', filePath),
+  readFilePreview: (filePath) => ipcRenderer.invoke('read-file-preview', filePath),
   exportImageFile: (data, defaultName) => ipcRenderer.invoke('export-image-file', { data, defaultName }),
   exportImageFileRaw: (filename) => ipcRenderer.invoke('export-image-file-raw', filename),
   backupDatabase: () => ipcRenderer.invoke('backup-database'),

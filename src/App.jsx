@@ -163,7 +163,12 @@ export default function App() {
 
 function GlobalWindows() {
   const { runningApps, closeApp, updateAppState, bringToFront } = useTerminal()
-  return runningApps.map(app => (
+  const location = useLocation()
+  const visibleApps = runningApps.filter(app => {
+    const page = app.state?.showOnPage || '/terminal'
+    return page === '*' || page === location.pathname
+  })
+  return visibleApps.map(app => (
     <TerminalWindow
       key={app.id}
       app={app}

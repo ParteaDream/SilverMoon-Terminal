@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
+import { useTerminal } from '../context/TerminalContext'
 import { PageMemoryProvider } from '../context/PageMemoryContext'
 import useDetailState from '../hooks/useDetailState'
 import { useImageDrag } from '../hooks/useImageDrag'
@@ -74,6 +75,7 @@ function CharacterDetailContent() {
   const location = useLocation()
   const { query, importImage } = useDb()
   const { backToList, consumeBackToList } = useNav()
+  const { launchTrainCalc } = useTerminal()
   const [character, setCharacter] = useState(null)
   const [elements, setElements] = useState([])
   const [weaponTypes, setWeaponTypes] = useState([])
@@ -860,7 +862,12 @@ function CharacterDetailContent() {
 
         {/* 培养素材 */}
         {effectiveVisible.materials && (
-          <SectionCard icon={<FlaskConical className="w-4 h-4" />} title="培养素材">
+          <SectionCard icon={<FlaskConical className="w-4 h-4" />} title="培养素材" extra={
+            <button onClick={() => launchTrainCalc(parseInt(id), location.pathname)}
+              className="px-2.5 py-1 rounded-lg text-xs bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 border border-primary-500/20 transition-colors">
+              养成计算
+            </button>
+          }>
             <div className="space-y-4">
               {/* 角色培养素材 */}
               <div>
@@ -1459,7 +1466,7 @@ function CharacterDetailContent() {
 
 // ── Sub-components ──
 
-function SectionCard({ icon, title, children, onAdd, onEdit, count, defaultCollapsed }) {
+function SectionCard({ icon, title, children, onAdd, onEdit, count, defaultCollapsed, extra }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed || false)
 
   return (
@@ -1475,6 +1482,7 @@ function SectionCard({ icon, title, children, onAdd, onEdit, count, defaultColla
           {count != null && <span className="text-[11px] text-surface-500">({count})</span>}
         </div>
         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          {extra}
           {onEdit && (
             <button onClick={onEdit} className="p-1.5 rounded-md text-surface-400 hover:text-primary-400 hover:bg-surface-700 transition-colors">
               <Edit3 className="w-3.5 h-3.5" />
