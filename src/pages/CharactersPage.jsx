@@ -25,6 +25,15 @@ const ELEMENT_BORDER = {
   4: 'border-purple-500/30', 5: 'border-green-500/30', 6: 'border-sky-500/30',
   7: 'border-yellow-500/30',
 }
+const ELEMENT_OVERLAY = {
+  1: 'from-red-500/15 to-transparent',
+  2: 'from-blue-500/15 to-transparent',
+  3: 'from-cyan-500/15 to-transparent',
+  4: 'from-purple-500/15 to-transparent',
+  5: 'from-green-500/15 to-transparent',
+  6: 'from-sky-500/15 to-transparent',
+  7: 'from-yellow-500/15 to-transparent',
+}
 const ELEMENT_NAMES = {
   1: '火', 2: '水', 3: '风', 4: '雷', 5: '草', 6: '冰', 7: '岩'
 }
@@ -608,7 +617,7 @@ export default function CharactersPage() {
                 className={`group relative rounded-xl overflow-hidden border cursor-pointer
                   bg-gradient-to-b ${ELEMENT_BG[char.element_id] || 'from-surface-800 to-surface-900'}
                   ${ELEMENT_BORDER[char.element_id] || 'border-surface-700'}
-                  hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200`}
+                  hover:border-primary-500/50 hover:scale-[1.05] transition-all duration-200`}
               >
                 {/* Card image */}
                 <div className="aspect-[3/4] bg-surface-800 flex items-end justify-center overflow-hidden relative">
@@ -621,8 +630,12 @@ export default function CharactersPage() {
                       {char.name_zh[0]}
                     </span>
                   )}
-                  {/* Top gradient overlay */}
-                  <div className={`absolute top-0 left-0 right-0 h-12 bg-gradient-to-b ${ELEMENT_BG[char.element_id] || 'from-surface-900/70 to-transparent'}`} />
+                  {/* Top gradient overlay — 元素色渐变覆盖，向下渐隐 */}
+                  <div className={`absolute top-0 left-0 right-0 h-3/4 bg-gradient-to-b ${ELEMENT_OVERLAY[char.element_id] || 'from-surface-900/50 to-transparent'}`} />
+                  {/* 顶部细框线 — 强化上缘框效果 */}
+                  <div className={`absolute top-0 left-0 right-0 h-[2px] ${ELEMENT_BORDER[char.element_id] ? ELEMENT_BORDER[char.element_id].replace('border-', 'bg-').replace('/30', '/40') : 'bg-surface-600/50'}`} />
+                  {/* 顶部玻璃质感高光条 */}
+                  <div className="absolute top-0 left-0 right-0 h-[2px] bg-white/20" />
                   {/* Rarity badge */}
                   <div className="absolute top-2 left-2">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${

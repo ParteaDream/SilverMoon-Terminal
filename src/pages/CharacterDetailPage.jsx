@@ -13,6 +13,7 @@ import {
 import EditModal, { FormInput, FormSelect, SearchSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
+import { ELEM_ID_TO_SETTINGS_INDEX } from '../utils/colorMarkup'
 
 const ELEMENT_COLORS = {
   1: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20', glow: 'shadow-red-500/10' },
@@ -106,6 +107,8 @@ function CharacterDetailContent() {
   const [form, setForm] = useState({})
   const [dish, setDish] = useState({ name_zh: '', description_zh: '', effect: '', image: null })
   const [gallery, setGallery] = useState([])   // 自定义图库 [{label, filename}]
+  const [elementColors, setElementColors] = useState(null)  // 元素颜色配置
+  const [useNamecardBg, setUseNamecardBg] = useState(false) // 立绘使用名片背景
   const [saving, setSaving] = useState(false)
   const [activeOutfitId, setActiveOutfitId] = useState(null)  // 当前激活的时装 ID
   const [outfitDragOver, setOutfitDragOver] = useState({})   // { [outfitId]: true } — 时装卡片的拖放高亮
@@ -125,7 +128,7 @@ function CharacterDetailContent() {
 
   async function loadAll() {
     try {
-      const [chars, elems, wtypes, regs, tals, cons, fits, mats] = await Promise.all([
+      const [chars, elems, wtypes, regs, tals, cons, fits, mats, ecolors] = await Promise.all([
         query('SELECT * FROM characters WHERE id = ?', [id]),
         query('SELECT * FROM elements'),
         query('SELECT * FROM weapon_types'),
@@ -134,6 +137,7 @@ function CharacterDetailContent() {
         query('SELECT * FROM character_constellations WHERE character_id = ? ORDER BY level', [id]),
         query('SELECT * FROM character_outfits WHERE character_id = ?', [id]),
         query('SELECT * FROM materials ORDER BY type, rarity DESC, name_zh'),
+        query("SELECT value FROM settings WHERE key = 'element_colors'"),
       ])
       let strs = { data: [] }
       try {
@@ -194,6 +198,15 @@ function CharacterDetailContent() {
         } else {
           setGallery([])
         }
+      }
+      // 加载元素颜色设置
+      if (ecolors?.data?.length > 0) {
+        try {
+          const stored = JSON.parse(ecolors.data[0].value)
+          if (Array.isArray(stored) && stored.length === 7) {
+            setElementColors(stored)
+          }
+        } catch (_) {}
       }
       setElements(elems.data || [])
       setWeaponTypes(wtypes.data || [])
@@ -1159,7 +1172,24 @@ function CharacterDetailContent() {
               onDragLeave={handleGalleryDragLeave}
               onDrop={handleGalleryDrop}
             >
-              {character.splash_art && <ImageTile label="立绘" filename={character.splash_art} large onClick={() => setLightbox({ filename: character.splash_art, label: '立绘' })} />}
+              {character.splash_art && (() => {
+                const elemColor = elementColors && character.element_id
+                  ? elementColors[ELEM_ID_TO_SETTINGS_INDEX[character.element_id]]?.color
+                  : null
+                return (
+                  <ImageTile
+                    label="立绘"
+                    filename={character.splash_art}
+                    large
+                    onClick={() => setLightbox({ filename: character.splash_art, label: '立绘' })}
+                    elementColor={elemColor}
+                    namecardBg={useNamecardBg ? character.namecard_art : null}
+                    showNamecardToggle
+                    namecardToggleOn={useNamecardBg}
+                    onToggleNamecard={() => setUseNamecardBg(p => !p)}
+                  />
+                )
+              })()}
               {character.namecard_art && <ImageTile label="名片" filename={character.namecard_art} large onClick={() => setLightbox({ filename: character.namecard_art, label: '名片' })} />}
               {character.card_art && <ImageTile label="头像" filename={character.card_art} onClick={() => setLightbox({ filename: character.card_art, label: '头像' })} />}
               {/* 时装头像 */}
@@ -1813,17 +1843,58 @@ function SkillTableDisplay({ data, talentType }) {
   )
 }
 
-function ImageTile({ label, filename, large, onClick }) {
+function darkenHex(hex, factor) {
+  if (!hex) return null
+  const clean = hex.replace('#', '')
+  const num = parseInt(clean, 16)
+  const r = Math.round(((num >> 16) & 255) * factor)
+  const g = Math.round(((num >> 8) & 255) * factor)
+  const b = Math.round((num & 255) * factor)
+  return `rgb(${r},${g},${b})`
+}
+
+function ImageTile({ label, filename, large, onClick, elementColor, namecardBg, showNamecardToggle, namecardToggleOn, onToggleNamecard }) {
+  const useNamecard = namecardToggleOn && namecardBg
+
+  let bgStyle = {}
+  let bgClass = 'bg-surface-700'
+  if (useNamecard) {
+    bgClass = ''
+  } else if (elementColor) {
+    bgClass = ''
+    const darkColor = darkenHex(elementColor, 0.65)
+    bgStyle = { background: `linear-gradient(to top, ${darkColor}, ${elementColor}cc)` }
+  }
+
   return (
     <div
       className={`rounded-xl bg-surface-800/50 border border-surface-700 overflow-hidden ${large ? 'col-span-2 md:col-span-4' : ''} ${onClick ? 'cursor-pointer hover:border-primary-500/50 transition-colors' : ''}`}
       onClick={onClick}
     >
-      <div className={`bg-surface-700 flex items-center justify-center overflow-hidden ${large ? 'min-h-[300px] max-h-[70vh]' : 'aspect-square'}`}>
-        <SplashImage filename={filename} className={`${large ? 'max-w-full max-h-[70vh] object-contain' : 'w-full h-full object-cover'}`} />
+      <div className={`relative flex items-center justify-center overflow-hidden ${bgClass} ${large ? 'min-h-[300px] max-h-[70vh]' : 'aspect-square'}`}
+        style={bgStyle}
+      >
+        {useNamecard && <BannerBg filename={namecardBg} />}
+        <SplashImage filename={filename} className={`relative z-10 ${large ? 'max-w-full max-h-[70vh] object-contain' : 'w-full h-full object-cover'}`} />
       </div>
       <div className="p-2">
-        <p className="text-[10px] text-surface-400 text-center truncate">{label}</p>
+        <div className="flex items-center justify-center gap-2">
+          <p className="text-[10px] text-surface-400 truncate">{label}</p>
+          {showNamecardToggle && (
+            <label className="relative inline-flex items-center cursor-pointer flex-shrink-0" onClick={e => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                checked={namecardToggleOn}
+                onChange={onToggleNamecard}
+                className="sr-only peer"
+              />
+              <div className="w-8 h-4 bg-surface-600 peer-checked:bg-primary-500 rounded-full transition-colors
+                after:content-[''] after:absolute after:top-0.5 after:left-0.5
+                after:bg-white after:rounded-full after:h-3 after:w-3
+                after:transition-transform peer-checked:after:translate-x-[14px]" />
+            </label>
+          )}
+        </div>
       </div>
     </div>
   )
