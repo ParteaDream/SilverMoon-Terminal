@@ -851,7 +851,7 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
         <ChevronRight className="w-6 h-6" />
       </button>
       {/* 缩放控制 */}
-      <div className="absolute top-4 left-4 flex items-center gap-1 bg-black/50 px-1.5 py-1 rounded-lg z-10">
+      <div className="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 px-1.5 py-1 rounded-lg z-10">
         <button
           onClick={e => { e.stopPropagation(); setScale(prev => Math.max(0.5, +(prev - 0.2).toFixed(1))) }}
           className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 import { Search, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
 
@@ -14,13 +14,13 @@ const HERO = 104003
 // 角色等级 各区间材料（不含角色专属材料）
 const LEVEL_COSTS = [
   { from: 1, to: 20, mora: 24035, wanderer: 1, hero: 6, gems: null, boss: null, commons: null, specialty: null },
-  { from: 20, to: 30, mora: 62585, wanderer: 3, adventurer: 2, hero: 10, gems: [0, 3, 0, 0], boss: null, commons: [3, 0, 0], specialty: 3 },
+  { from: 20, to: 30, mora: 62585, wanderer: 3, adventurer: 2, hero: 10, gems: [1, 0, 0, 0], boss: null, commons: [3, 0, 0], specialty: 3 },
   { from: 30, to: 40, mora: 73080, wanderer: 1, adventurer: 1, hero: 18, gems: null, boss: null, commons: null, specialty: null },
-  { from: 40, to: 50, mora: 155820, wanderer: 5, adventurer: 3, hero: 28, gems: null, boss: 2, commons: [15, 0, 0], specialty: 10 },
-  { from: 50, to: 60, mora: 251000, wanderer: 5, adventurer: 2, hero: 42, gems: [0, 0, 6, 0], boss: 4, commons: [0, 12, 0], specialty: 20 },
-  { from: 60, to: 70, mora: 319185, wanderer: 1, adventurer: 3, hero: 59, gems: [0, 0, 0, 3], boss: 8, commons: [0, 18, 0], specialty: 30 },
-  { from: 70, to: 80, mora: 422375, wanderer: 2, adventurer: 2, hero: 80, gems: [0, 0, 0, 6], boss: 12, commons: [0, 0, 12], specialty: 45 },
-  { from: 80, to: 90, mora: 804625, wanderer: 4, hero: 171, gems: [0, 0, 0, 0, 6], boss: 20, commons: [0, 0, 24], specialty: 60 },
+  { from: 40, to: 50, mora: 155820, wanderer: 5, adventurer: 3, hero: 28, gems: [0, 3, 0, 0], boss: 2, commons: [15, 0, 0], specialty: 10 },
+  { from: 50, to: 60, mora: 251000, wanderer: 5, adventurer: 2, hero: 42, gems: [0, 6, 0, 0], boss: 4, commons: [0, 12, 0], specialty: 20 },
+  { from: 60, to: 70, mora: 319185, wanderer: 1, adventurer: 3, hero: 59, gems: [0, 0, 3, 0], boss: 8, commons: [0, 18, 0], specialty: 30 },
+  { from: 70, to: 80, mora: 422375, wanderer: 2, adventurer: 2, hero: 80, gems: [0, 0, 6, 0], boss: 12, commons: [0, 0, 12], specialty: 45 },
+  { from: 80, to: 90, mora: 804625, wanderer: 4, hero: 171, gems: [0, 0, 0, 6], boss: 20, commons: [0, 0, 24], specialty: 60 },
 ]
 
 // 技能等级 各区间材料（不含角色专属材料）
@@ -33,7 +33,7 @@ const TALENT_COSTS = [
   { from: 6, to: 7, mora: 120000, books: [0, 0, 4], commons: [0, 0, 4], weekly: 1 },
   { from: 7, to: 8, mora: 260000, books: [0, 0, 6], commons: [0, 0, 6], weekly: 1 },
   { from: 8, to: 9, mora: 450000, books: [0, 0, 12], commons: [0, 0, 9], weekly: 2 },
-  { from: 9, to: 10, mora: 700000, books: [0, 0, 16], commons: [0, 0, 12], weekly: 2 },
+  { from: 9, to: 10, mora: 700000, books: [0, 0, 16], commons: [0, 0, 12], weekly: 2, crown: 1 },
 ]
 
 const LEVEL_NODES = [1, 20, 30, 40, 50, 60, 70, 80, 90]
@@ -42,33 +42,69 @@ const TALENT_NODES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 // ═══════════════════════════════════════
 // 双端范围滑块
 // ═══════════════════════════════════════
-function DualRangeSlider({ nodes, values, onChange, labels }) {
+function DualRangeSlider({ nodes, values, onChange }) {
   const [min, max] = values
   const nodeCount = nodes.length
+  const trackRef = useRef(null)
+  const dragging = useRef(null) // 'min' | 'max' | null
 
-  function handleMinChange(e) {
-    const v = parseInt(e.target.value)
-    if (v <= max) onChange([v, max])
+  function getValueFromClientX(clientX) {
+    if (!trackRef.current) return 0
+    const rect = trackRef.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    return Math.round(ratio * (nodeCount - 1))
   }
-  function handleMaxChange(e) {
-    const v = parseInt(e.target.value)
-    if (v >= min) onChange([min, v])
-  }
+
+  const handleKnobStart = useCallback((which, e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragging.current = which
+    const handleMove = (ev) => {
+      const v = getValueFromClientX(ev.clientX)
+      if (which === 'min') { if (v <= max) onChange([v, max]) }
+      else { if (v >= min) onChange([min, v]) }
+    }
+    const handleUp = () => { dragging.current = null; window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp) }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+  }, [min, max, onChange])
+
+  const minPct = (min / (nodeCount - 1)) * 100
+  const maxPct = (max / (nodeCount - 1)) * 100
 
   return (
-    <div className="relative pt-2 pb-1">
+    <div className="relative pt-2 pb-3">
       <div className="flex justify-between text-[10px] text-surface-500 mb-1 px-1">
         {nodes.map((n, i) => (
           <span key={i} className={i === min || i === max ? 'text-white font-medium' : ''}>{n}</span>
         ))}
       </div>
-      <div className="relative h-2 bg-surface-700 rounded-full">
+      <div ref={trackRef} className="relative h-2 bg-surface-700 rounded-full cursor-pointer"
+        onMouseDown={(e) => {
+          if (e.button !== 0) return
+          const v = getValueFromClientX(e.clientX)
+          if (v <= max) onChange([v, max])
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          const v = getValueFromClientX(e.clientX)
+          if (v >= min) onChange([min, v])
+        }}>
+        {/* 选中范围 */}
         <div className="absolute h-full rounded-full bg-primary-500/50"
-          style={{ left: `${(min / (nodeCount - 1)) * 100}%`, right: `${(1 - max / (nodeCount - 1)) * 100}%` }} />
-        <input type="range" min={0} max={nodeCount - 1} value={min} onChange={handleMinChange}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-        <input type="range" min={0} max={nodeCount - 1} value={max} onChange={handleMaxChange}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+          style={{ left: `${minPct}%`, width: `${maxPct - minPct}%` }} />
+        {/* 左端点滑块 */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-lg bg-primary-400 border-2 border-white/30 shadow-md cursor-grab active:cursor-grabbing hover:scale-110 transition-transform"
+          style={{ left: `calc(${minPct}% - 8px)`, zIndex: 10 }}
+          onMouseDown={(e) => handleKnobStart('min', e)}
+        />
+        {/* 右端点滑块 */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-lg bg-primary-400 border-2 border-white/30 shadow-md cursor-grab active:cursor-grabbing hover:scale-110 transition-transform"
+          style={{ left: `calc(${maxPct}% - 8px)`, zIndex: 10 }}
+          onMouseDown={(e) => handleKnobStart('max', e)}
+        />
       </div>
     </div>
   )
@@ -124,7 +160,7 @@ export default function TrainCalc({ initialData }) {
         query(`SELECT ctm.*, m.name_zh, m.type, m.rarity, m.image
                FROM character_talent_materials ctm JOIN materials m ON ctm.material_id = m.id
                WHERE ctm.character_id = ?`, [charId]),
-        query(`SELECT id AS material_id, name_zh, rarity, image FROM materials WHERE id IN (202,104001,104002,104003)`),
+        query(`SELECT id AS material_id, name_zh, rarity, image FROM materials WHERE id IN (202,104001,104002,104003,104319)`),
       ])
       const ascMats = ascRes?.data || []
       const talMats = talRes?.data || []
@@ -139,9 +175,9 @@ export default function TrainCalc({ initialData }) {
       }
       // 天赋材料按 material_type 分类
       for (const m of talMats) {
-        if (m.material_type === 'book') result.talentBooks.push(m)
-        else if (m.material_type === 'weekly_boss') result.weeklyBoss = m
-        else if (m.material_type === 'common') result.talentCommons.push(m)
+        if (m.type === '天赋书') result.talentBooks.push(m)
+        else if (m.type === '周本掉落') result.weeklyBoss = m
+        else result.talentCommons.push(m)
       }
       result.talentBooks.sort((a, b) => a.rarity - b.rarity)
       result.talentCommons.sort((a, b) => a.rarity - b.rarity)
@@ -185,7 +221,7 @@ export default function TrainCalc({ initialData }) {
             </div>
           </div>
           <div className="flex-1 overflow-auto p-3">
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(58px, 1fr))' }}>
               {filteredChars.map(c => (
                 <button key={c.id} onClick={() => setSelectedChar(c)}
                   className="flex flex-col items-center gap-1 p-2 rounded-xl hover:bg-white/5 transition-colors">
@@ -229,15 +265,15 @@ export default function TrainCalc({ initialData }) {
             {totals && totals.length > 0 && (
               <div className="pt-3 border-t border-white/10">
                 <p className="text-xs text-surface-500 mb-2">所需材料总计</p>
-                <div className="space-y-1.5">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                   {totals.map((m, i) => (
                     <div key={i} onClick={() => openMaterial(m.id)}
-                      className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors">
-                      <div className="w-7 h-7 rounded-lg bg-surface-800/50 flex items-center justify-center overflow-hidden shrink-0">
+                      className="flex items-center gap-1.5 px-1.5 py-0.5 rounded hover:bg-white/5 cursor-pointer transition-colors">
+                      <div className="w-5 h-5 rounded bg-surface-800/50 flex items-center justify-center overflow-hidden shrink-0">
                         {materialImages[m.id] ? <img src={materialImages[m.id]} alt="" className="w-full h-full object-cover" /> : null}
                       </div>
-                      <span className="text-xs text-surface-200 flex-1 truncate">{m.name}</span>
-                      <span className="text-xs text-primary-400 font-mono font-medium">{m.count.toLocaleString()}</span>
+                      <span className="text-[11px] text-surface-200 flex-1 truncate">{m.name}</span>
+                      <span className="text-[11px] text-primary-400 font-mono font-medium shrink-0">{m.count.toLocaleString()}</span>
                     </div>
                   ))}
                 </div>
@@ -334,6 +370,7 @@ function computeTotals(mats, levelRange, normalRange, skillRange, burstRange) {
         })
       }
       if (cost.weekly && mats.weeklyBoss) add(mats.weeklyBoss.material_id, mats.weeklyBoss.name_zh, cost.weekly)
+      if (cost.crown) add(104319, '智识之冕', cost.crown)
     }
   }
   addTalent(normalRange)

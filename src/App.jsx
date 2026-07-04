@@ -164,22 +164,24 @@ export default function App() {
 function GlobalWindows() {
   const { runningApps, closeApp, updateAppState, bringToFront } = useTerminal()
   const location = useLocation()
-  const visibleApps = runningApps.filter(app => {
+  return runningApps.map(app => {
     const page = app.state?.showOnPage || '/terminal'
-    return page === '*' || page === location.pathname
+    const pageVisible = page === '*' || page === location.pathname
+    if (!pageVisible && app.state?.hidden) return null
+    return (
+      <TerminalWindow
+        key={app.id}
+        app={app}
+        state={app.state}
+        zIndex={app.state?.zIndex}
+        pageVisible={pageVisible}
+        onClose={() => closeApp(app.id)}
+        onHide={() => updateAppState(app.id, { hidden: true })}
+        onUpdateState={(partial) => updateAppState(app.id, partial)}
+        onFocus={() => bringToFront(app.id)}
+      />
+    )
   })
-  return visibleApps.map(app => (
-    <TerminalWindow
-      key={app.id}
-      app={app}
-      state={app.state}
-      zIndex={app.state?.zIndex}
-      onClose={() => closeApp(app.id)}
-      onHide={() => updateAppState(app.id, { hidden: true })}
-      onUpdateState={(partial) => updateAppState(app.id, partial)}
-      onFocus={() => bringToFront(app.id)}
-    />
-  ))
 }
 
 function WinControls() {

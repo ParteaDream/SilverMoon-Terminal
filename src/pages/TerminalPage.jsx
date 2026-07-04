@@ -10,13 +10,12 @@ import {
   File, FileText, Image, Database, Code, Search
 } from 'lucide-react'
 
-const GRID_COLS = 6
 const GRID_CELL = 110
 
 // ═══════════════════════════════════════════════
 // 桌面图标组件（自由拖拽 + 松手对齐网格）
 // ═══════════════════════════════════════════════
-function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occupiedCells }) {
+function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occupiedCells, gridCols }) {
   const [dragging, setDragging] = useState(false)
   const [dragPos, setDragPos] = useState(null)
   const iconRef = useRef(null)
@@ -59,7 +58,7 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
       const centerY = dragPos?.y ?? dragStartPos.current.y
       const x = centerX - gridRect.left - dragOffset.current.x + GRID_CELL / 2
       const y = centerY - gridRect.top - dragOffset.current.y + GRID_CELL / 2
-      let col = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(x / GRID_CELL)))
+      let col = Math.max(0, Math.min(gridCols - 1, Math.floor(x / GRID_CELL)))
       let row = Math.max(0, Math.floor(y / GRID_CELL))
       // 避免重叠：如果目标格已被占用，寻找最近空格
       const occ = occupiedCells?.() || {}
@@ -68,7 +67,7 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
         // 寻找曼哈顿距离最近的空格
         let bestCol = col, bestRow = row, bestDist = Infinity
         for (let r = 0; r < 20; r++) {
-          for (let c = 0; c < GRID_COLS; c++) {
+          for (let c = 0; c < gridCols; c++) {
             if (!occ[`${c},${r}`] || occ[`${c},${r}`] === app.id) {
               const dist = Math.abs(c - col) + Math.abs(r - row)
               if (dist < bestDist) { bestDist = dist; bestCol = c; bestRow = r }
@@ -152,7 +151,7 @@ function TrafficLights({ onClose, onHide, onFullscreen, isFullscreen }) {
 // ═══════════════════════════════════════════════
 // 应用窗口组件
 // ═══════════════════════════════════════════════
-export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onFocus, zIndex }) {
+export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onFocus, zIndex, pageVisible }) {
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
   const windowRef = useRef(null)
@@ -217,11 +216,12 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
 
   if (hidden) return null
   const AppIcon = app.icon
+  const isPageVisible = pageVisible !== false // 默认可见
 
   return (
     <div ref={windowRef}
       className="no-drag animate-scale-in"
-      style={fullscreen ? fullscreenStyle : { position: 'fixed', left, top, width, height, zIndex }}
+      style={{ ...((fullscreen ? fullscreenStyle : { position: 'fixed', left, top, width, height, zIndex })), display: isPageVisible ? undefined : 'none' }}
       onMouseDown={handleWindowClick}
     >
       <div className={`h-full flex flex-col overflow-hidden border border-white/10 shadow-2xl bg-surface-900/90 backdrop-blur-xl transition-all duration-150 ${fullscreen ? 'rounded-none border-0' : 'rounded-xl'}`}>
@@ -527,7 +527,75 @@ export default function TerminalPage() {
   const [wallpaper, setWallpaper] = useState(null)
   const [desktopIcons, setDesktopIcons] = useState({})
   const [settled, setSettled] = useState(false)
+  const [gridCols, setGridCols] = useState(6)
   const desktopRef = useRef(null)
+
+  // 动态列数
+  useEffect(() => {
+    const el = desktopRef.current
+    if (!el) return
+    const update = () => {
+      const cols = Math.max(1, Math.floor(el.clientWidth / GRID_CELL))
+      setGridCols(prev => {
+        if (prev === cols) return prev
+        if (cols < prev) {
+          setDesktopIcons(p => {
+            const occ = {}
+            for (const [id, pos] of Object.entries(p)) {
+              if (pos.col < cols) occ[`${pos.col},${pos.row}`] = id
+            }
+            const next = { ...p }
+            // 超出范围的图标：按行分组，同行左→右排序
+            const overflow = []
+            for (const [id, pos] of Object.entries(next)) {
+              if (pos.col >= cols) overflow.push({ id, row: pos.row, col: pos.col })
+            }
+            overflow.sort((a, b) => a.row - b.row || a.col - b.col)
+            for (const item of overflow) {
+              const maxCol = cols - 1
+              let found = false
+              // 1) 同行向左找最近的空格
+              for (let c = Math.min(item.col, maxCol); c >= 0 && !found; c--) {
+                if (!occ[`${c},${item.row}`]) {
+                  next[item.id] = { col: c, row: item.row }
+                  occ[`${c},${item.row}`] = item.id
+                  found = true
+                }
+              }
+              // 2) 同行向右找
+              for (let c = Math.min(item.col, maxCol) + 1; c <= maxCol && !found; c++) {
+                if (!occ[`${c},${item.row}`]) {
+                  next[item.id] = { col: c, row: item.row }
+                  occ[`${c},${item.row}`] = item.id
+                  found = true
+                }
+              }
+              // 3) 同行满 → 最近空格
+              if (!found) {
+                let bc = 0, br = 0, bd = Infinity
+                for (let r = 0; r < 30; r++) {
+                  for (let c = 0; c < cols; c++) {
+                    if (!occ[`${c},${r}`]) {
+                      const d = Math.abs(c - item.col) + Math.abs(r - item.row)
+                      if (d < bd) { bd = d; bc = c; br = r }
+                    }
+                  }
+                }
+                next[item.id] = { col: bc, row: br }
+                occ[`${bc},${br}`] = item.id
+              }
+            }
+            return next
+          })
+        }
+        return cols
+      })
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => { loadConfig() }, [])
 
@@ -565,7 +633,7 @@ export default function TerminalPage() {
   }
 
   function getIconPosition(app, index) {
-    return desktopIcons[app.id] || { col: index % GRID_COLS, row: Math.floor(index / GRID_COLS) }
+    return desktopIcons[app.id] || { col: index % gridCols, row: Math.floor(index / gridCols) }
   }
 
   // 当前已占用的格子
@@ -577,8 +645,8 @@ export default function TerminalPage() {
     // 兜底默认位置
     APPS.forEach((app, i) => {
       if (!desktopIcons[app.id]) {
-        const defCol = i % GRID_COLS
-        const defRow = Math.floor(i / GRID_COLS)
+        const defCol = i % gridCols
+        const defRow = Math.floor(i / gridCols)
         occ[`${defCol},${defRow}`] = app.id
       }
     })
@@ -594,7 +662,7 @@ export default function TerminalPage() {
           {APPS.map((app, i) => (
             <DesktopIcon key={app.id} app={app} position={getIconPosition(app, i)}
               onClick={launchApp} onDragEnd={handleIconDragEnd}
-              gridRef={desktopRef} settled={settled} occupiedCells={getOccupiedCells} />
+              gridRef={desktopRef} settled={settled} occupiedCells={getOccupiedCells} gridCols={gridCols} />
           ))}
         </div>
       </div>

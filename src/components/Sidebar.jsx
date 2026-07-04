@@ -21,7 +21,9 @@ const navItems = [
 
 export default function Sidebar() {
   const [appIcon, setAppIcon] = useState('./UI_Talent_U_Columbina_02.webp')
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    return localStorage.getItem('sidebar_collapsed') === '1'
+  })
   const [appVersion, setAppVersion] = useState('1.0')
   const { push } = useNav()
   const location = useLocation()
@@ -141,7 +143,7 @@ export default function Sidebar() {
           }
         >
           <Terminal className="flex-shrink-0 w-5 h-5" />
-          {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text text-lg font-bold italic tracking-wide">终端</span>}
+          {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text text-lg font-bold italic tracking-wide pr-1">终端</span>}
         </button>
       </div>
 
@@ -162,7 +164,7 @@ export default function Sidebar() {
         }
         >
           <ScrollText className="flex-shrink-0 w-5 h-5" />
-          {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text text-lg font-bold italic tracking-wide">Changelog</span>}
+          {!collapsed && <span className="overflow-hidden whitespace-nowrap animate-sidebar-text text-lg font-bold italic tracking-wide pr-1">Changelog</span>}
         </button>
       </div>
 

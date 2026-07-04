@@ -456,7 +456,7 @@ export default function DevToolbar() {
   const [backupListOpen, setBackupListOpen] = useState(false)
   const [backupCreateOpen, setBackupCreateOpen] = useState(false)
   const [crawlerOpen, setCrawlerOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false) // always start expanded
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === '1')
 
   useEffect(() => {
     const handler = () => setSidebarCollapsed(localStorage.getItem('sidebar_collapsed') === '1')

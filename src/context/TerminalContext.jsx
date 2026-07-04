@@ -1,36 +1,36 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { Calculator } from 'lucide-react'
+import { Calculator, FileText, FolderOpen, Settings2 } from 'lucide-react'
 
 const TerminalContext = createContext(null)
 
-function getDefaultPosition(index) {
+// 应用图标注册表（用于恢复序列化后的数据）
+const APP_REGISTRY = {
+  traincalc: { icon: Calculator, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
+  betamemo: { icon: FileText, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
+  resources: { icon: FolderOpen, color: 'from-blue-500 to-sky-300', iconClass: 'text-white drop-shadow-md' },
+  customize: { icon: Settings2, color: 'from-purple-500 to-pink-400', iconClass: 'text-white drop-shadow-md' },
+}
+
+function getDefaultPosition(index, appId) {
   const collapsed = localStorage.getItem('sidebar_collapsed') === '1'
   const sidebarW = collapsed ? 56 : 224
+  const isCalc = appId === 'traincalc'
   return {
     left: sidebarW + 30 + index * 30,
     top: 50 + index * 30,
-    width: 600,
-    height: 420,
+    width: isCalc ? 460 : 600,
+    height: isCalc ? 640 : 420,
   }
 }
 
 export function TerminalProvider({ children }) {
-  const [runningApps, setRunningApps] = useState(() => {
-    try {
-      const saved = localStorage.getItem('terminal_running_apps')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        return parsed.map(a => ({ ...a, state: { ...a.state, hidden: true } }))
-      }
-    } catch (_) {}
-    return []
-  })
+  const [runningApps, setRunningApps] = useState([])
   const [nextZ, setNextZ] = useState(100)
 
-  // 持久化运行状态
+  // 启动时清除上次遗留的状态
   useEffect(() => {
-    try { localStorage.setItem('terminal_running_apps', JSON.stringify(runningApps)) } catch (_) {}
-  }, [runningApps])
+    localStorage.removeItem('terminal_running_apps')
+  }, [])
 
   const updateAppState = useCallback((appId, partial) => {
     setRunningApps(prev => prev.map(a =>
@@ -58,7 +58,7 @@ export function TerminalProvider({ children }) {
           : a
         )
       }
-      const pos = getDefaultPosition(prev.length)
+      const pos = getDefaultPosition(prev.length, app.id)
       const newApp = {
         ...app,
         data: extraData || null,
@@ -95,7 +95,7 @@ export function TerminalProvider({ children }) {
           : a
         )
       }
-      const pos = getDefaultPosition(prev.length)
+      const pos = getDefaultPosition(prev.length, app.id)
       const newApp = {
         ...app,
         state: {
@@ -133,7 +133,7 @@ export function TerminalProvider({ children }) {
           )
         }
       }
-      const pos = getDefaultPosition(prev.length)
+      const pos = getDefaultPosition(prev.length, app.id)
       const newApp = {
         ...app,
         state: {
@@ -167,8 +167,8 @@ export function TerminalProvider({ children }) {
           : a
         )
       }
-      const pos = getDefaultPosition(prev.length)
-      pos.width = 460; pos.height = 560 // 养成计算器窄高窗口
+      const pos = getDefaultPosition(prev.length, app.id)
+      pos.width = 460; pos.height = 640 // 养成计算器窄高窗口
       return [...prev, { ...app, data: { characterId: charId }, state: { ...pos, hidden: false, fullscreen: false, zIndex: 100 + prev.length + 1, showOnPage: pagePath } }]
     })
     setNextZ(z => { const nz = z + 1; setRunningApps(prev => prev.map(a => a.id === 'traincalc' ? { ...a, state: { ...a.state, zIndex: nz } } : a)); return nz })

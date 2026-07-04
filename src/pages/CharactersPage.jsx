@@ -581,8 +581,8 @@ export default function CharactersPage() {
           title=""
           columns={columns}
           data={filtered}
-          onEdit={openEdit}
-          onDelete={handleDelete}
+          onEdit={null}
+          onDelete={null}
           onAdd={null}
           searchBar={null}
           sortKeys={sortKeys}
@@ -656,21 +656,6 @@ export default function CharactersPage() {
                     <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface-950/60 backdrop-blur-sm">
                       <ElementIcon elId={char.element_id} className="w-3.5 h-3.5" elemIcons={elemIcons} />
                     </span>
-                  </div>
-                  {/* Edit/Delete on hover */}
-                  <div className="absolute bottom-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={e => { e.stopPropagation(); openEdit(char); }}
-                      className="p-1.5 rounded-lg bg-black/60 text-white/80 hover:text-white"
-                    >
-                      <EditIcon />
-                    </button>
-                    <button
-                      onClick={e => { e.stopPropagation(); handleDelete(char); }}
-                      className="p-1.5 rounded-lg bg-black/60 text-white/80 hover:text-red-400"
-                    >
-                      <TrashIcon />
-                    </button>
                   </div>
                 </div>
                 {/* Card info */}
