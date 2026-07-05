@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readImage: (filename) => ipcRenderer.invoke('read-image', filename),
   startImageDrag: (filename) => ipcRenderer.invoke('start-image-drag', filename),
   importUserImage: () => ipcRenderer.invoke('import-user-image'),
+  importUserImageFile: (srcPath) => ipcRenderer.invoke('import-user-image-file', srcPath),
   readUserImage: (filename) => ipcRenderer.invoke('read-user-image', filename),
   deleteUserImage: (filename) => ipcRenderer.invoke('delete-user-image', filename),
   listDbFiles: () => ipcRenderer.invoke('list-db-files'),

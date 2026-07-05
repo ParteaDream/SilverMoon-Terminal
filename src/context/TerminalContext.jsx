@@ -15,11 +15,12 @@ function getDefaultPosition(index, appId) {
   const collapsed = localStorage.getItem('sidebar_collapsed') === '1'
   const sidebarW = collapsed ? 56 : 224
   const isCalc = appId === 'traincalc'
+  const isMemo = appId === 'betamemo'
   return {
     left: sidebarW + 30 + index * 30,
     top: 50 + index * 30,
-    width: isCalc ? 460 : 600,
-    height: isCalc ? 640 : 420,
+    width: isCalc ? 460 : isMemo ? 900 : 600,
+    height: isCalc ? 640 : isMemo ? 680 : 420,
   }
 }
 

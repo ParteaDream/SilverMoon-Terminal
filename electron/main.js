@@ -2290,6 +2290,29 @@ ipcMain.handle('import-user-image', async () => {
   } catch (e) { return { error: e.message }; }
 });
 
+ipcMain.handle('import-user-image-file', (_event, srcPath) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    if (!srcPath || !fs.existsSync(srcPath)) return { error: '文件不存在' };
+    const originalName = path.basename(srcPath);
+    const userImagesDir = getUserImagesDir(dbDir);
+    const dest = path.join(userImagesDir, originalName);
+
+    // 来源已在 user_images 内，直接返回
+    if (path.dirname(srcPath) === userImagesDir) {
+      return { success: true, filename: originalName, existed: true };
+    }
+
+    // 去重：已有同名文件直接使用
+    if (fs.existsSync(dest)) {
+      return { success: true, filename: originalName, existed: true };
+    }
+
+    fs.copyFileSync(srcPath, dest);
+    return { success: true, filename: originalName };
+  } catch (e) { return { error: e.message }; }
+});
+
 ipcMain.handle('read-user-image', async (_event, filename) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');

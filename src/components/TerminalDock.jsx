@@ -9,7 +9,7 @@ import {
 /** 应用程序注册表 — 终端板块的权威定义 */
 export const APPS = [
   { id: 'traincalc', name: '养成计算器', icon: Calculator, placeholder: false, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
-  { id: 'betamemo', name: 'Beta备忘录', icon: FileText, placeholder: true, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
+  { id: 'betamemo', name: 'Beta备忘录', icon: FileText, placeholder: false, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
 ]
 
 export const SYS_TOOLS = [
