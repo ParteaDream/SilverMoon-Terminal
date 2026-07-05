@@ -75,7 +75,13 @@ export default function TerminalDock({ visible }) {
   function handleClick(app) {
     setContextMenu(null)
     if (app.system) {
-      toggleApp(app)
+      // 系统工具：如果已在当前页面可见则隐藏，否则召唤到当前页面
+      const existing = runningApps.find(a => a.id === app.id)
+      if (existing && !existing.state?.hidden && (existing.state?.showOnPage === '*' || existing.state?.showOnPage === location.pathname)) {
+        toggleApp(app)  // 隐藏
+      } else {
+        summonApp(app, location.pathname)  // 召唤到当前页面
+      }
       return
     }
     summonApp(app, location.pathname)

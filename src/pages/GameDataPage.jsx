@@ -431,7 +431,7 @@ export default function GameDataPage() {
   }, [activeDetailId, data, savePageStateSync])
 
   return (
-    <div className="p-6 flex gap-4 h-[calc(100vh-60px)] min-h-0">
+    <div className="p-6 flex gap-4 h-full min-h-0">
       {/* ═══ 左侧：表格区 ═══ */}
       <div ref={listScrollRef} className={`${activeDetailId ? 'w-[420px] flex-shrink-0' : 'flex-1'} overflow-auto`}>
         {/* 多选开关 */}

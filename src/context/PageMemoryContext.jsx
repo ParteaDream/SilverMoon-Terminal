@@ -24,7 +24,7 @@ export function usePageMemory() {
  */
 export function PageMemoryProvider({ pageKey, children }) {
   const stateRef = useRef({})       // 当前页面的所有状态字段
-  const scrollRef = useRef(0)       // 上次已知的滚动位置
+  const scrollRef = useRef(0)       // 实时跟踪的滚动位置
   const [ready, setReady] = useState(false)
 
   // 挂载时：加载已保存的状态（优先同步读取，避免延迟）
@@ -37,31 +37,36 @@ export function PageMemoryProvider({ pageKey, children }) {
       stateRef.current = saved.state || {}
       scrollRef.current = saved.scrollY || 0
       setReady(true)
-      return
+    } else {
+      // 缓存未命中时异步加载
+      loadPageState(pageKey).then(saved => {
+        if (cancelled) return
+        if (saved) {
+          stateRef.current = saved.state || {}
+          scrollRef.current = saved.scrollY || 0
+        }
+        setReady(true)
+      }).catch(() => {
+        if (!cancelled) setReady(true)
+      })
     }
-    
-    // 缓存未命中时异步加载
-    loadPageState(pageKey).then(saved => {
-      if (cancelled) return
-      if (saved) {
-        stateRef.current = saved.state || {}
-        scrollRef.current = saved.scrollY || 0
-      }
-      setReady(true)
-    }).catch(() => {
-      if (!cancelled) setReady(true)
-    })
     return () => { cancelled = true }
   }, [pageKey])
 
-  // 卸载时：保存当前状态（useLayoutEffect 在 DOM 替换前执行）
+  // 持续追踪 main 的滚动位置，确保卸载时能读取到正确值
+  useEffect(() => {
+    const main = document.querySelector('main')
+    if (!main) return
+    const onScroll = () => { scrollRef.current = main.scrollTop }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => main.removeEventListener('scroll', onScroll)
+  }, [pageKey])
+
+  // 卸载时：保存当前状态
   useLayoutEffect(() => {
     return () => {
-      const main = document.querySelector('main')
-      const scrollY = main ? main.scrollTop : scrollRef.current
-      // 如果 scrollY 为 0，使用 ref 中记录的最后已知位置
-      const finalScrollY = scrollY > 0 ? scrollY : scrollRef.current
-      // 异步保存（fire-and-forget）
+      // scrollRef.current 已被 scroll 事件持续更新，直接使用
+      const finalScrollY = scrollRef.current
       savePageState(pageKey, finalScrollY, stateRef.current)
     }
   }, [pageKey])
@@ -77,13 +82,21 @@ export function PageMemoryProvider({ pageKey, children }) {
     return typeof defaultValue === 'function' ? defaultValue() : defaultValue
   }, [])
 
+  // 主动保存当前状态（在导航前调用，避免 DOM 移除后 scrollTop 归零）
+  const saveNow = useCallback(() => {
+    const main = document.querySelector('main')
+    const scrollY = main ? main.scrollTop : scrollRef.current
+    savePageState(pageKey, scrollY, stateRef.current)
+  }, [pageKey])
+
   const ctx = useMemo(() => ({
     pageKey,
     getSaved,
     registerState,
+    saveNow,
     savedScroll: scrollRef.current,
     ready,
-  }), [pageKey, getSaved, registerState, ready])
+  }), [pageKey, getSaved, registerState, saveNow, ready])
 
   return (
     <PageMemoryContext.Provider value={ctx}>

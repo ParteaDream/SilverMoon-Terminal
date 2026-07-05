@@ -394,6 +394,16 @@ function SystemToolContent({ tool }) {
     window.electronAPI?.openFile(fp)
   }
 
+  function handleFileDragStart(e, file) {
+    if (file.isDirectory) { e.preventDefault(); return }
+    const sep = currentDir.includes('\\') ? '\\' : '/'
+    const fp = currentDir + sep + file.name
+    // 阻止浏览器默认拖拽，交由 Electron 原生文件拖放
+    e.preventDefault()
+    e.stopPropagation()
+    window.electronAPI?.startFileDrag(fp)
+  }
+
   function goBack() {
     const sep = currentDir.includes('\\') ? '\\' : '/'
     const idx = currentDir.lastIndexOf(sep)
@@ -466,6 +476,7 @@ function SystemToolContent({ tool }) {
             <div className="grid grid-cols-4 gap-3">
               {filteredFiles.map((f, i) => (
                 <div key={i} onClick={() => handleFolderClick(f)} onDoubleClick={() => handleFileDoubleClick(f)}
+                  draggable={!f.isDirectory} onDragStart={(e) => handleFileDragStart(e, f)}
                   className="flex flex-col items-center gap-1 p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors group">
                   {getFileIcon(f)}
                   <span className="text-[10px] text-surface-300 text-center leading-tight break-all line-clamp-2 group-hover:text-white transition-colors">{f.name}</span>
@@ -476,6 +487,7 @@ function SystemToolContent({ tool }) {
             <div className="space-y-0.5">
               {filteredFiles.map((f, i) => (
                 <div key={i} onClick={() => handleFolderClick(f)} onDoubleClick={() => handleFileDoubleClick(f)}
+                  draggable={!f.isDirectory} onDragStart={(e) => handleFileDragStart(e, f)}
                   className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors">
                   <div className="shrink-0">{getFileIcon(f, true)}</div>
                   <div className="flex-1 min-w-0"><p className="text-xs text-surface-200 truncate">{f.name}</p><p className="text-[10px] text-surface-500">{f.isDirectory ? '文件夹' : formatSize(f.size)}</p></div>
@@ -500,6 +512,7 @@ function CustomizationTool() {
   const [wallpaper, setWallpaper] = useState(null)
   const [preview, setPreview] = useState(null)
   const [msg, setMsg] = useState(null)
+  const [wallDragOver, setWallDragOver] = useState(false)
 
   useEffect(() => { loadWallpaper() }, [])
 
@@ -514,16 +527,41 @@ function CustomizationTool() {
   async function handleImport() {
     try {
       const result = await window.electronAPI?.importUserImage()
-      if (result?.filename) {
-        const readResult = await window.electronAPI?.readUserImage(result.filename)
-        if (readResult?.data) {
-          setWallpaper(result.filename); setPreview(readResult.data)
-          await window.electronAPI?.setUserConfig('terminalWallpaper', result.filename)
-          setMsg({ type: 'success', text: '壁纸已更新' })
-          window.dispatchEvent(new CustomEvent('terminal-wallpaper-changed', { detail: readResult.data }))
-        }
-      }
+      if (result?.filename) await applyWallpaper(result.filename)
     } catch (e) { setMsg({ type: 'error', text: '导入失败: ' + e.message }) }
+  }
+
+  // 拖拽导入壁纸
+  function handleWallDragOver(e) { e.preventDefault(); e.stopPropagation(); setWallDragOver(true) }
+  function handleWallDragLeave(e) { e.preventDefault(); e.stopPropagation(); setWallDragOver(false) }
+  async function handleWallDrop(e) {
+    e.preventDefault(); e.stopPropagation(); setWallDragOver(false)
+    const files = e.dataTransfer?.files
+    if (!files || files.length === 0) return
+    const file = files[0]
+    if (!file.type.startsWith('image/')) { setMsg({ type: 'error', text: '请拖入图片文件' }); return }
+    try {
+      const result = await window.electronAPI?.importUserImageFile(file.path)
+      if (result?.filename) await applyWallpaper(result.filename)
+      else if (result?.error) setMsg({ type: 'error', text: result.error })
+    } catch (e) { setMsg({ type: 'error', text: '导入失败: ' + e.message }) }
+  }
+
+  async function applyWallpaper(filename) {
+    const readResult = await window.electronAPI?.readUserImage(filename)
+    if (readResult?.data) {
+      setWallpaper(filename); setPreview(readResult.data)
+      await window.electronAPI?.setUserConfig('terminalWallpaper', filename)
+      setMsg({ type: 'success', text: '壁纸已更新' })
+      window.dispatchEvent(new CustomEvent('terminal-wallpaper-changed', { detail: readResult.data }))
+    }
+  }
+
+  async function handlePreset(name) {
+    try {
+      setMsg(null)
+      await applyWallpaper(name)
+    } catch (e) { setMsg({ type: 'error', text: '预设应用失败: ' + e.message }) }
   }
 
   async function handleRemove() {
@@ -552,8 +590,37 @@ function CustomizationTool() {
           <div className="space-y-5">
             <div><h3 className="text-sm font-semibold text-white">桌面壁纸</h3><p className="text-xs text-surface-500 mt-1">自定义终端桌面的背景图片</p></div>
             {msg && <div className={`p-3 rounded-xl text-xs ${msg.type === 'success' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>{msg.text}</div>}
-            <div className="rounded-xl overflow-hidden border border-white/10 bg-surface-800/50 aspect-video flex items-center justify-center">
-              {preview ? <img src={preview} alt="" className="w-full h-full object-cover" /> : <div className="text-center text-surface-500"><Monitor className="w-12 h-12 mx-auto mb-2 opacity-30" /><p className="text-xs">暂未设置壁纸</p></div>}
+            <div
+              className={`rounded-xl overflow-hidden border aspect-video flex items-center justify-center transition-all ${wallDragOver ? 'border-sky-400/60 bg-sky-400/10 ring-2 ring-sky-400/30' : 'border-white/10 bg-surface-800/50'}`}
+              onDragOver={handleWallDragOver}
+              onDragLeave={handleWallDragLeave}
+              onDrop={handleWallDrop}
+            >
+              {preview ? <img src={preview} alt="" className="w-full h-full object-cover" /> : <div className="text-center text-surface-500"><Monitor className="w-12 h-12 mx-auto mb-2 opacity-30" /><p className="text-xs">{wallDragOver ? '松开以设置壁纸' : '拖入图片或点击导入'}</p></div>}
+            </div>
+            {/* 预设壁纸 */}
+            <div>
+              <p className="text-xs text-surface-500 mb-2">预设壁纸</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handlePreset('ToTheMoon.jpg')}
+                  className="relative w-24 h-16 rounded-lg overflow-hidden border border-white/10 hover:border-white/30 transition-all group"
+                >
+                  <img src="/ToTheMoon.jpg" alt="ToTheMoon" className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 flex items-end justify-center pb-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-black/60 to-transparent">
+                    <span className="text-[10px] text-white">ToTheMoon</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => handlePreset('OS_Columbina.jpg')}
+                  className="relative w-24 h-16 rounded-lg overflow-hidden border border-white/10 hover:border-white/30 transition-all group"
+                >
+                  <img src="/OS_Columbina.jpg" alt="Columbina" className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 flex items-end justify-center pb-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-black/60 to-transparent">
+                    <span className="text-[10px] text-white">Columbina</span>
+                  </div>
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <button onClick={handleImport} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-sm text-surface-300 transition-all"><Upload className="w-4 h-4" />导入壁纸</button>

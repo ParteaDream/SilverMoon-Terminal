@@ -18,20 +18,25 @@ export function clearDetailScroll(prefix, id) {
 export function useDetailScroll(prefix, id) {
   const ctx = usePageMemory()
 
-  // ready 后恢复滚动
+  // ready 后恢复滚动（持续重试直到内容足够滚动到目标位置）
   useEffect(() => {
     if (!ctx.ready) return
     const targetY = ctx.savedScroll
     if (targetY > 0) {
-      const tryScroll = (attempt) => {
+      let attempts = 0
+      const maxAttempts = 30 // 30 × 100ms = 3s 超时
+      const tryScroll = () => {
         const main = document.querySelector('main')
         if (!main) return
         main.scrollTo(0, targetY)
-        if (attempt > 0 && main.scrollTop === 0) {
-          setTimeout(() => tryScroll(attempt - 1), 100)
+        attempts++
+        // 内容尚未加载完成时持续重试（scrollTop 未达目标 且 可滚动高度不足）
+        const needMore = main.scrollTop < targetY && main.scrollHeight - main.clientHeight < targetY
+        if (attempts < maxAttempts && needMore) {
+          setTimeout(tryScroll, 100)
         }
       }
-      setTimeout(() => tryScroll(5), 50)
+      setTimeout(tryScroll, 50)
     }
   }, [ctx.ready, ctx.savedScroll])
 }

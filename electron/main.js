@@ -2264,6 +2264,39 @@ ipcMain.handle('start-image-drag', async (_event, filename) => {
   } catch (e) { return { error: e.message }; }
 });
 
+// ── 资源文件拖放：接受原始文件路径，保留原始文件名和格式 ──
+ipcMain.handle('start-file-drag', async (_event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { error: '文件不存在' };
+    const icon = await nativeImage.createThumbnailFromPath(filePath, { width: 64, height: 64 });
+    mainWindow.webContents.startDrag({ file: filePath, icon });
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 预设壁纸：从 public/ 或 dist/ 复制预设图片到 user_images ──
+ipcMain.handle('import-preset-image', async (_event, presetName) => {
+  try {
+    if (!dbDir) throw new Error('数据库路径未设置');
+    const userImagesDir = getUserImagesDir(dbDir);
+    const dest = path.join(userImagesDir, presetName);
+    if (fs.existsSync(dest)) return { success: true, filename: presetName };
+    const fallbackDirs = [
+      path.join(__dirname, '..', 'public'),
+      path.join(__dirname, '..', 'dist'),
+      path.join(process.resourcesPath || '', 'dist'),
+    ];
+    let src = null;
+    for (const d of fallbackDirs) {
+      const candidate = path.join(d, presetName);
+      if (fs.existsSync(candidate)) { src = candidate; break; }
+    }
+    if (!src) return { error: `预设图片 ${presetName} 未找到` };
+    fs.copyFileSync(src, dest);
+    return { success: true, filename: presetName };
+  } catch (e) { return { error: e.message }; }
+});
+
 // ── 用户自定义图片（user_images 目录）──
 ipcMain.handle('import-user-image', async () => {
   try {
@@ -2316,8 +2349,20 @@ ipcMain.handle('import-user-image-file', (_event, srcPath) => {
 ipcMain.handle('read-user-image', async (_event, filename) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');
-    const fp = path.join(getUserImagesDir(dbDir), filename);
-    if (!fs.existsSync(fp)) return { error: '文件不存在' };
+    let fp = path.join(getUserImagesDir(dbDir), filename);
+    if (!fs.existsSync(fp)) {
+      // 回退：public/（开发）或 dist/（打包）— 预设壁纸等内置资源
+      const fallbackDirs = [
+        path.join(__dirname, '..', 'public'),
+        path.join(__dirname, '..', 'dist'),
+        path.join(process.resourcesPath || '', 'dist'),
+      ];
+      for (const d of fallbackDirs) {
+        const candidate = path.join(d, filename);
+        if (fs.existsSync(candidate)) { fp = candidate; break; }
+      }
+      if (!fs.existsSync(fp)) return { error: '文件不存在' };
+    }
     return await readImageFile(fp);
   } catch (e) { return { error: e.message }; }
 });

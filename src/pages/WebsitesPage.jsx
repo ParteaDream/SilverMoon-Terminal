@@ -235,7 +235,7 @@ export default function WebsitesPage() {
   const activeDetail = activeDetailId ? websites.find(w => w.id === activeDetailId) : null
 
   return (
-    <div className="p-6 flex gap-4 h-[calc(100vh-60px)]">
+    <div className="p-6 flex gap-4 h-full min-h-0">
       {/* Left: list / gallery */}
       <div ref={scrollRef} className={`${activeDetail ? 'flex-1 min-w-[340px]' : 'flex-1'} overflow-auto`}>
       {/* List view */}

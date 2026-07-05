@@ -18,11 +18,12 @@ function getDefaultPosition(index, appId) {
   const isCalc = appId === 'traincalc'
   const isMemo = appId === 'betamemo'
   const isSnake = appId === 'dragonsnake'
+  const isCustomize = appId === 'customize'
   return {
     left: sidebarW + 30 + index * 30,
     top: 50 + index * 30,
-    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : 600,
-    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 620 : 420,
+    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : isCustomize ? 560 : 600,
+    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 660 : isCustomize ? 520 : 420,
   }
 }
 
@@ -87,7 +88,7 @@ export function TerminalProvider({ children }) {
     setRunningApps(prev => prev.filter(a => a.id !== appId))
   }, [])
 
-  // Dock 召唤 — 转移到指定板块
+  // Dock 召唤 — 将应用带到当前板块
   const summonApp = useCallback((app, page) => {
     const targetPage = page || '/terminal'
     setRunningApps(prev => {
@@ -126,7 +127,7 @@ export function TerminalProvider({ children }) {
       if (existing) {
         if (existing.state?.hidden) {
           return prev.map(a => a.id === app.id
-            ? { ...a, state: { ...a.state, hidden: false, showOnPage: '*' } }
+            ? { ...a, state: { ...a.state, hidden: false, showOnPage: '/terminal' } }
             : a
           )
         } else {
@@ -143,7 +144,7 @@ export function TerminalProvider({ children }) {
           ...pos,
           hidden: false, fullscreen: false,
           zIndex: 100 + prev.length + 1,
-          showOnPage: '*',
+          showOnPage: '/terminal',
         }
       }
       return [...prev, newApp]

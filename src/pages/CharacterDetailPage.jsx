@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { useTerminal } from '../context/TerminalContext'
-import { PageMemoryProvider } from '../context/PageMemoryContext'
+import { PageMemoryProvider, usePageMemory } from '../context/PageMemoryContext'
 import useDetailState from '../hooks/useDetailState'
 import { useImageDrag } from '../hooks/useImageDrag'
 import { useDetailScroll } from '../hooks/useDetailState'
@@ -1986,10 +1986,12 @@ function DishImage({ filename }) {
 function MaterialBadge({ material, onEdit, onDelete }) {
   const navigate = useNavigate()
   const { saveScroll, savePage } = useNav()
+  const { saveNow } = usePageMemory()
   const RARITY_COLORS = { 1: 'border-gray-500/30', 2: 'border-green-500/30', 3: 'border-blue-500/30', 4: 'border-purple-500/30', 5: 'border-amber-500/30' }
 
   function handleClick() {
     if (material.material_id) {
+      saveNow()
       savePage('materials')
       navigate(`/materials/${material.material_id}`)
     }
