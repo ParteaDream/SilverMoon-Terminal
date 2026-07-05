@@ -1325,9 +1325,16 @@ function EditForm({
             onDrop={async e => {
               e.preventDefault()
               setDragOver(false)
-              const file = e.dataTransfer.files[0]
-              if (file) {
-                const result = await window.electronAPI?.importImageFile(file.path)
+              const files = e.dataTransfer.files
+              let srcPath = null
+              if (files && files.length > 0) {
+                srcPath = files[0].path
+              } else {
+                // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
+                srcPath = e.dataTransfer?.getData('text/plain') || null
+              }
+              if (srcPath) {
+                const result = await window.electronAPI?.importImageFile(srcPath)
                 if (result?.success && result.filename) {
                   setFormVersionImages(prev => [...prev, result.filename])
                 }

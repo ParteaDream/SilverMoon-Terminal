@@ -356,7 +356,20 @@ function CharacterDetailContent() {
     setGalleryDragOver(false)
 
     const files = e.dataTransfer?.files
-    if (!files || files.length === 0) return
+    if (!files || files.length === 0) {
+      // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
+      const text = e.dataTransfer?.getData('text/plain')
+      if (!text) return
+      try {
+        const result = await window.electronAPI?.importImageFile(text)
+        if (result?.filename) {
+          const updated = [...gallery, { label: result.filename, filename: result.filename }]
+          setGallery(updated)
+          await saveGallery(updated)
+        }
+      } catch (_) {}
+      return
+    }
 
     // 处理所有拖入的图片文件
     const newImages = []
@@ -1043,11 +1056,16 @@ function CharacterDetailContent() {
                       e.preventDefault(); e.stopPropagation()
                       setOutfitDragOver(prev => ({ ...prev, [o.id]: false }))
                       const files = e.dataTransfer?.files
-                      if (!files || files.length === 0) return
-                      for (const file of files) {
-                        if (!file.type.startsWith('image/')) continue
+                      let srcPath = null
+                      if (files && files.length > 0) {
+                        srcPath = files[0].path
+                      } else {
+                        // fallback: 从 text/plain 获取文件路径
+                        srcPath = e.dataTransfer?.getData('text/plain') || null
+                      }
+                      if (srcPath) {
                         try {
-                          const result = await window.electronAPI?.importImageFile(file.path)
+                          const result = await window.electronAPI?.importImageFile(srcPath)
                           if (result?.filename) {
                             await query('UPDATE character_outfits SET avatar_image = ? WHERE id = ?', [result.filename, o.id])
                             if (isSelected) setCharacter(prev => ({ ...prev }))

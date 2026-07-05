@@ -206,6 +206,20 @@ export default function DragonSnake() {
 
     ctx.restore()
 
+    // 暂停覆盖层
+    if (gameStateRef.current === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'
+      ctx.fillRect(0, 0, size, size)
+      ctx.fillStyle = '#ffffff'
+      ctx.font = '600 18px "PingFang SC", "Microsoft YaHei", sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('⏸ 暂停中', size / 2, size / 2)
+      ctx.font = '400 13px "PingFang SC", "Microsoft YaHei", sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.6)'
+      ctx.fillText('按 SPACE 或点击按钮继续', size / 2, size / 2 + 28)
+      ctx.textAlign = 'start'
+    }
+
     // 空闲覆盖层
     if (gameStateRef.current === 'idle') {
       ctx.fillStyle = 'rgba(0,0,0,0.45)'
@@ -213,7 +227,7 @@ export default function DragonSnake() {
       ctx.fillStyle = '#ffffff'
       ctx.font = '600 16px "PingFang SC", "Microsoft YaHei", sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText('按任意键开始', size / 2, size / 2)
+      ctx.fillText('按任意键开始', size / 2, size / 2 + CELL_SIZE * 3)
       ctx.textAlign = 'start'
     }
 
@@ -226,7 +240,7 @@ export default function DragonSnake() {
 
   // ── 加载图片 ──
   useEffect(() => {
-    const sources = { head: '/head.png', body: '/body.png', tail: '/tail.png', food: '/EP.png' }
+    const sources = { head: './head.png', body: './body.png', tail: './tail.png', food: './EP.png' }
     let loaded = 0
     const total = Object.keys(sources).length
     const imgs = {}
@@ -363,7 +377,7 @@ export default function DragonSnake() {
     snakeRef.current = snake
     directionRef.current = 'right'
     nextDirRef.current = 'right'
-    foodRef.current = randomFood(snake)
+    // 保持已有食物位置，不重置（初始绘制已放置）
     tailDirRef.current = 'right'
     setScore(0)
     scoreRef.current = 0
@@ -398,25 +412,51 @@ export default function DragonSnake() {
     drawFrame()
   }, [stopTick, drawFrame])
 
+  // ── 暂停/继续 ──
+  const handleSpace = useCallback(() => {
+    const gs = gameStateRef.current
+    if (gs === 'playing') {
+      stopTick()
+      setGameState('paused')
+      gameStateRef.current = 'paused'
+      drawFrame()
+    } else if (gs === 'paused') {
+      setGameState('playing')
+      gameStateRef.current = 'playing'
+      startTick(Math.max(60, 150 - scoreRef.current * 2))
+      drawFrame()
+    }
+  }, [stopTick, startTick, drawFrame])
+
   // ── 键盘事件 ──
   useEffect(() => {
     const handleDown = (e) => {
       const key = e.key.toLowerCase()
 
-      // WASD 高亮
+      // WASD & SPACE 高亮
       const arrowMap = { arrowup: 'w', arrowdown: 's', arrowleft: 'a', arrowright: 'd' }
       const mapped = arrowMap[key] || key
       if (['w', 'a', 's', 'd'].includes(mapped)) {
         setActiveKeys(prev => ({ ...prev, [mapped]: true }))
       }
+      if (key === ' ') {
+        setActiveKeys(prev => ({ ...prev, space: true }))
+      }
 
       const gs = gameStateRef.current
       if (gs === 'idle') {
         e.preventDefault()
-        startGame(mapped)  // mapped = 'w'|'a'|'s'|'d' 或原键
+        startGame(mapped)
         return
       }
       if (gs === 'dead') return
+
+      // 空格暂停/继续
+      if (key === ' ') {
+        e.preventDefault()
+        handleSpace()
+        return
+      }
 
       // 方向输入（游戏中）
       const dirMap = {
@@ -443,6 +483,13 @@ export default function DragonSnake() {
           return next
         })
       }
+      if (key === ' ') {
+        setActiveKeys(prev => {
+          const next = { ...prev }
+          delete next.space
+          return next
+        })
+      }
     }
 
     window.addEventListener('keydown', handleDown)
@@ -451,7 +498,7 @@ export default function DragonSnake() {
       window.removeEventListener('keydown', handleDown)
       window.removeEventListener('keyup', handleUp)
     }
-  }, [startGame])
+  }, [startGame, handleSpace])
 
   // ── WASD 按钮点击 ──
   const handleWASDClick = useCallback((key) => {
@@ -541,8 +588,8 @@ export default function DragonSnake() {
         </div>
       </div>
 
-      {/* WASD 按钮区 */}
-      <div className="w-full flex justify-start px-4 pb-4 pt-2">
+      {/* WASD + SPACE 按钮区 */}
+      <div className="w-full flex items-start gap-6 px-4 pb-4 pt-2">
         <div className="grid grid-cols-3 grid-rows-2 gap-1.5" style={{ width: 120 }}>
           <button
             onPointerDown={() => handleWASDClick('w')}
@@ -573,6 +620,16 @@ export default function DragonSnake() {
                 : 'bg-white/5 border-white/15 text-white/60 hover:bg-white/10'}`}
           >D</button>
         </div>
+        {/* SPACE 按钮 */}
+        <button
+          onPointerDown={() => handleSpace()}
+          className={`px-4 py-2 rounded-md flex items-center justify-center text-[11px] font-bold border transition-all duration-100 select-none tracking-widest
+            ${activeKeys['space']
+              ? 'bg-sky-400/30 border-sky-400/60 text-sky-300 shadow-[0_0_12px_rgba(56,189,248,0.4)]'
+              : 'bg-white/5 border-white/15 text-white/60 hover:bg-white/10'}`}
+          style={{ minWidth: 72, height: 39 }}
+          title="暂停/继续"
+        >SPACE</button>
       </div>
 
       {/* 内联样式 */}

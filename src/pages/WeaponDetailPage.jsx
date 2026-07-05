@@ -147,7 +147,19 @@ function WeaponDetailContent() {
     e.preventDefault()
     setGalleryDragOver(false)
     const files = e.dataTransfer?.files
-    if (!files?.length) return
+    if (!files?.length) {
+      // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
+      const text = e.dataTransfer?.getData('text/plain')
+      if (text) {
+        try {
+          const result = await window.electronAPI?.importImageFile(text)
+          if (result?.filename) await addGalleryImage(result.filename)
+        } catch (err) {
+          console.error('Import failed:', err)
+        }
+      }
+      return
+    }
     for (const file of files) {
       if (file.type.startsWith('image/')) {
         try {

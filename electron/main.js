@@ -2137,7 +2137,7 @@ ipcMain.handle('delete-image', (_event, filename) => {
   } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('read-image', async (_event, filename) => {
+ipcMain.handle('read-image', async (_event, filename, maxWidth) => {
   try {
     if (!db) throw new Error('数据库未初始化');
     if (!dbDir) throw new Error('数据库路径未设置');
@@ -2146,9 +2146,8 @@ ipcMain.handle('read-image', async (_event, filename) => {
     const imagesDir = getImagesDir(dbDir);
     let fp = resolveImagePath(imagesDir, filename);
     if (!fp) {
-      // 回退：public/（开发）或 dist/（打包）— 这些目录仍需精确文件名
+      // 回退到 dist/（打包）目录
       const fallbackDirs = [
-        path.join(__dirname, '..', 'public'),
         path.join(__dirname, '..', 'dist'),
         path.join(process.resourcesPath || '', 'dist'),
       ];
@@ -2159,7 +2158,7 @@ ipcMain.handle('read-image', async (_event, filename) => {
       if (!fp) return { error: '文件不存在' };
     }
 
-    return await readImageFile(fp);
+    return await readImageFile(fp, maxWidth);
   } catch (e) { return { error: e.message }; }
 });
 
@@ -2188,9 +2187,10 @@ function setCachedImage(fp, data) {
 // 通用图片文件读取（供 read-image 和 read-user-image 复用）
 // 使用异步 fs.promises 避免阻塞主进程（防止拖动窗口卡顿）
 const fsPromises = fs.promises;
-async function readImageFile(fp) {
-  // 命中缓存直接返回
-  const cached = getCachedImage(fp);
+async function readImageFile(fp, maxWidth) {
+  // 命中缓存直接返回（注意：如果 maxWidth 不同，缓存 key 也不同）
+  const cacheKey = maxWidth ? `${fp}::w${maxWidth}` : fp;
+  const cached = getCachedImage(cacheKey);
   if (cached) return { success: true, data: cached };
   // 读取文件头检测实际格式（SVG 内容可能以 .webp 等扩展名存储）
   const handle = await fsPromises.open(fp, 'r');
@@ -2201,10 +2201,39 @@ async function readImageFile(fp) {
     if (headStr.startsWith('<svg') || headStr.startsWith('<?xml')) {
       const svgText = await fsPromises.readFile(fp, 'utf-8');
       const svgResult = `data:image/svg+xml;base64,${Buffer.from(svgText).toString('base64')}`;
-      setCachedImage(fp, svgResult);
+      setCachedImage(cacheKey, svgResult);
       return { success: true, data: svgResult };
     }
-    // 二进制图片
+    // 二进制图片 — 如需缩放则使用 nativeImage 异步缩略图
+    if (maxWidth && maxWidth > 0) {
+      // 尝试多次创建缩略图（降级尺寸），确保总能返回可用结果
+      const sizes = [maxWidth, Math.floor(maxWidth / 2), 512, 256];
+      for (const w of sizes) {
+        try {
+          const thumb = await nativeImage.createThumbnailFromPath(fp, { width: w, height: 0 });
+          if (thumb && !thumb.isEmpty()) {
+            const sz = thumb.getSize();
+            if (sz.height > w * 3) {
+              // 竖长图改高度约束
+              const hthumb = await nativeImage.createThumbnailFromPath(fp, { width: 0, height: w * 3 });
+              if (hthumb && !hthumb.isEmpty()) {
+                const buf = hthumb.toPNG();
+                const r = `data:image/png;base64,${buf.toString('base64')}`;
+                setCachedImage(cacheKey, r);
+                return { success: true, data: r };
+              }
+            }
+            const buf = thumb.toPNG();
+            const r = `data:image/png;base64,${buf.toString('base64')}`;
+            setCachedImage(cacheKey, r);
+            return { success: true, data: r };
+          }
+        } catch (_) { /* 尝试下一尺寸 */ }
+      }
+      // 所有尺寸都失败 → 不返回错误，降级为读取原图（无缩放）
+      // fall through to read original file below
+    }
+    // 无需缩放，直接读取原始文件
     const binData = await fsPromises.readFile(fp);
     const headBytes = head.subarray(0, Math.min(bytesRead, 4));
     let mime = 'image/png';
@@ -2213,7 +2242,7 @@ async function readImageFile(fp) {
     else if (headBytes[0] === 0x52 && headBytes[1] === 0x49) mime = 'image/webp';
     else if (headBytes[0] === 0x47 && headBytes[1] === 0x49) mime = 'image/gif';
     const result = `data:${mime};base64,${binData.toString('base64')}`;
-    setCachedImage(fp, result);
+    setCachedImage(cacheKey, result);
     return { success: true, data: result };
   } finally {
     await handle.close();
@@ -2258,7 +2287,15 @@ ipcMain.handle('start-image-drag', async (_event, filename) => {
     if (!dbDir) throw new Error('数据库路径未设置');
     const fp = resolveImagePath(getImagesDir(dbDir), filename);
     if (!fp || !fs.existsSync(fp)) return { error: '文件不存在' };
-    const icon = await nativeImage.createThumbnailFromPath(fp, { width: 64, height: 64 });
+    // macOS 上 startDrag 要求 icon 不能为空
+    const FALLBACK_ICON = nativeImage.createFromDataURL(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    );
+    let icon = FALLBACK_ICON;
+    try {
+      const thumb = await nativeImage.createThumbnailFromPath(fp, { width: 64, height: 64 });
+      if (thumb && !thumb.isEmpty()) icon = thumb;
+    } catch (_) { /* 缩略图失败则使用保底图标 */ }
     mainWindow.webContents.startDrag({ file: fp, icon });
     return { success: true };
   } catch (e) { return { error: e.message }; }
@@ -2268,13 +2305,35 @@ ipcMain.handle('start-image-drag', async (_event, filename) => {
 ipcMain.handle('start-file-drag', async (_event, filePath) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) return { error: '文件不存在' };
-    const icon = await nativeImage.createThumbnailFromPath(filePath, { width: 64, height: 64 });
+    let icon = nativeImage.createEmpty();
+    const ext = path.extname(filePath).toLowerCase();
+    const imgExts = ['.jpg','.jpeg','.png','.webp','.gif','.svg','.bmp'];
+    if (imgExts.includes(ext)) {
+      // 图片文件生成缩略图
+      try {
+        const thumb = await nativeImage.createThumbnailFromPath(filePath, { width: 64, height: 64 });
+        if (thumb && !thumb.isEmpty()) icon = thumb;
+      } catch (_) { /* fall through */ }
+    }
+    // 未获取到有效图标时，通过系统 API 获取文件类型图标
+    if (icon.isEmpty()) {
+      try {
+        const sysIcon = await app.getFileIcon(filePath, { size: 'small' });
+        if (sysIcon && !sysIcon.isEmpty()) icon = sysIcon;
+      } catch (_) { /* fall through */ }
+    }
+    // macOS 上 startDrag 不能传空 icon，确保始终有值
+    if (icon.isEmpty()) {
+      icon = nativeImage.createFromDataURL(
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+      );
+    }
     mainWindow.webContents.startDrag({ file: filePath, icon });
     return { success: true };
   } catch (e) { return { error: e.message }; }
 });
 
-// ── 预设壁纸：从 public/ 或 dist/ 复制预设图片到 user_images ──
+// ── 预设壁纸：从 dist/ 复制预设图片到 user_images ──
 ipcMain.handle('import-preset-image', async (_event, presetName) => {
   try {
     if (!dbDir) throw new Error('数据库路径未设置');
@@ -2282,7 +2341,6 @@ ipcMain.handle('import-preset-image', async (_event, presetName) => {
     const dest = path.join(userImagesDir, presetName);
     if (fs.existsSync(dest)) return { success: true, filename: presetName };
     const fallbackDirs = [
-      path.join(__dirname, '..', 'public'),
       path.join(__dirname, '..', 'dist'),
       path.join(process.resourcesPath || '', 'dist'),
     ];
@@ -2318,12 +2376,12 @@ ipcMain.handle('import-user-image', async () => {
       return { success: true, filename: originalName };
     }
 
-    fs.copyFileSync(src, dest);
+    await fsPromises.copyFile(src, dest);
     return { success: true, filename: originalName };
   } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('import-user-image-file', (_event, srcPath) => {
+ipcMain.handle('import-user-image-file', async (_event, srcPath) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');
     if (!srcPath || !fs.existsSync(srcPath)) return { error: '文件不存在' };
@@ -2341,19 +2399,36 @@ ipcMain.handle('import-user-image-file', (_event, srcPath) => {
       return { success: true, filename: originalName, existed: true };
     }
 
-    fs.copyFileSync(srcPath, dest);
+    await fsPromises.copyFile(srcPath, dest);
     return { success: true, filename: originalName };
   } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('read-user-image', async (_event, filename) => {
+// ── 导入并生成缩略图（墙纸专用，一次 IPC 完成导入+缩放）──
+ipcMain.handle('import-and-thumbnail', async (_event, srcPath, maxWidth) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    if (!srcPath || !fs.existsSync(srcPath)) return { error: '文件不存在' };
+    const originalName = path.basename(srcPath);
+    const userImagesDir = getUserImagesDir(dbDir);
+    const dest = path.join(userImagesDir, originalName);
+    // 不在 user_images 内则复制
+    if (path.dirname(srcPath) !== userImagesDir && !fs.existsSync(dest)) {
+      await fsPromises.copyFile(srcPath, dest);
+    }
+    // 直接生成缩略图返回，无需二次 IPC
+    const result = await readImageFile(dest, maxWidth || 1024);
+    return { success: true, filename: originalName, data: result.data };
+  } catch (e) { return { error: e.message }; }
+});
+
+ipcMain.handle('read-user-image', async (_event, filename, maxWidth) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');
     let fp = path.join(getUserImagesDir(dbDir), filename);
     if (!fs.existsSync(fp)) {
-      // 回退：public/（开发）或 dist/（打包）— 预设壁纸等内置资源
+      // 回退到 dist/（打包）— 预设壁纸等内置资源
       const fallbackDirs = [
-        path.join(__dirname, '..', 'public'),
         path.join(__dirname, '..', 'dist'),
         path.join(process.resourcesPath || '', 'dist'),
       ];
@@ -2363,7 +2438,7 @@ ipcMain.handle('read-user-image', async (_event, filename) => {
       }
       if (!fs.existsSync(fp)) return { error: '文件不存在' };
     }
-    return await readImageFile(fp);
+    return await readImageFile(fp, maxWidth);
   } catch (e) { return { error: e.message }; }
 });
 
@@ -4716,10 +4791,9 @@ ipcMain.handle('set-app-icon', async (_event, { filename, pngData }) => {
       srcPath = path.join(userImagesDir, filename);
       if (!fs.existsSync(srcPath)) srcPath = null;
     }
-    // 没有自定义图标时，使用默认图标（public/ 目录下的默认图片）
+    // 没有自定义图标时，使用默认图标（dist/ 目录下的默认图片）
     if (!srcPath) {
       const defaultDirs = [
-        path.join(__dirname, '..', 'public'),
         path.join(__dirname, '..', 'dist'),
         path.join(process.resourcesPath || '', 'dist'),
       ];

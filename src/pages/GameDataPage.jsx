@@ -11,6 +11,7 @@ import { useImageDrag } from '../hooks/useImageDrag'
 import TableEditor from '../components/TableEditor'
 import ColoredText from '../components/ColoredText'
 import { X, ImagePlus } from 'lucide-react'
+import Lightbox from '../components/Lightbox'
 import { stripFormatting } from '../utils/colorMarkup'
 import { useTypeColor } from '../hooks/useTypeColor'
 
@@ -212,6 +213,7 @@ export default function GameDataPage() {
   const [saving, setSaving] = useState(false)
   const [multiSelect, setMultiSelect] = useState(false)      // 多选模式开关
   const [activeDetailId, setActiveDetailId] = useState(null)  // 右侧详情面板当前条目 ID
+  const [lightbox, setLightbox] = useState(null)              // 图片预览
   const [searchParams] = useSearchParams()
 
 
@@ -555,7 +557,7 @@ export default function GameDataPage() {
                 return (
                   <div className="flex flex-wrap gap-2 mb-4">
                     {imgs.map((fn) => (
-                      <DetailImage key={fn} filename={fn} />
+                      <DetailImage key={fn} filename={fn} onClick={() => setLightbox({ filename: fn, label: fn })} />
                     ))}
                   </div>
                 )
@@ -676,14 +678,19 @@ export default function GameDataPage() {
           />
         </div>
       </EditModal>
+      {/* 图片预览 */}
+      {lightbox && (
+        <Lightbox filename={lightbox.filename} label={lightbox.label} onClose={() => setLightbox(null)} />
+      )}
     </div>
   )
 }
 
 // ── 详情面板中的单张图片加载 ──
-function DetailImage({ filename }) {
+function DetailImage({ filename, onClick }) {
   const { readImage } = useDb()
   const [src, setSrc] = useState(null)
+  const [natural, setNatural] = useState({ w: 0, h: 0 })
   const handleDrag = useImageDrag(filename)
 
   useEffect(() => {
@@ -700,8 +707,28 @@ function DetailImage({ filename }) {
     return <div className="w-32 h-32 rounded-lg bg-surface-800 animate-pulse flex-shrink-0" />
   }
 
+  const maxW = 240
+  const maxH = 240
+  let style = {}
+  if (natural.w > 0 && natural.h > 0) {
+    const ratio = Math.min(maxW / natural.w, maxH / natural.h, 1)
+    style = { width: natural.w * ratio, height: natural.h * ratio }
+  } else {
+    style = { maxWidth: maxW, maxHeight: maxH }
+  }
+
   return (
-    <img src={src} alt="" className="w-32 h-32 rounded-lg object-cover border border-surface-600 flex-shrink-0" draggable onDragStart={handleDrag} />
+    <img
+      src={src} alt=""
+      style={style}
+      className="rounded-lg object-contain border border-surface-600 flex-shrink-0 cursor-pointer hover:border-primary-400/60 hover:scale-105 transition-all"
+      draggable onDragStart={handleDrag}
+      onClick={onClick}
+      onLoad={(e) => {
+        const img = e.target
+        setNatural({ w: img.naturalWidth, h: img.naturalHeight })
+      }}
+    />
   )
 }
 

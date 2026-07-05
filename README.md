@@ -79,7 +79,7 @@ SilverMoon Terminal（银月终端）是一款基于 Electron 的桌面端数据
 │   │   └── useImageDrag.js     # 图片拖拽
 │   └── utils/              # 工具函数
 ├── assets/                 # 应用图标
-├── public/                 # 静态资源
+├── dist/                    # 构建产物（含静态资源）
 ├── scripts/                # 辅助脚本
 ├── index.html              # HTML 模板
 ├── package.json            # 项目依赖与构建配置

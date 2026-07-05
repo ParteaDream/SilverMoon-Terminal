@@ -188,11 +188,16 @@ function CreateView({ onSave, onCancel, tasks }) {
   const handleDrop = useCallback(async (e, typeKey) => {
     e.preventDefault()
     e.stopPropagation()
+    let srcPath = null
     const file = e.dataTransfer?.files?.[0]
-    if (!file) return
-    const filePath = file.path
-    if (filePath) {
-      const result = await window.electronAPI?.importUserImageFile(filePath)
+    if (file) {
+      srcPath = file.path
+    } else {
+      // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
+      srcPath = e.dataTransfer?.getData('text/plain') || null
+    }
+    if (srcPath) {
+      const result = await window.electronAPI?.importUserImageFile(srcPath)
       if (result?.filename) {
         setImages(prev => ({ ...prev, [typeKey]: result.filename }))
       }

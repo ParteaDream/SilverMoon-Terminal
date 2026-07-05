@@ -177,7 +177,7 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
 // ═══════════════════════════════════════════════
 function TrafficLights({ onClose, onHide, onFullscreen, isFullscreen }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2">
+    <div className="flex items-center gap-2 px-3 py-2" onMouseDown={e => e.stopPropagation()}>
       <button onClick={onClose} className="w-3.5 h-3.5 rounded-full bg-red-500 hover:bg-red-400 transition-colors flex items-center justify-center group" title="关闭">
         <X className="w-2 h-2 text-red-900 opacity-0 group-hover:opacity-100 transition-opacity" />
       </button>
@@ -398,9 +398,14 @@ function SystemToolContent({ tool }) {
     if (file.isDirectory) { e.preventDefault(); return }
     const sep = currentDir.includes('\\') ? '\\' : '/'
     const fp = currentDir + sep + file.name
-    // 阻止浏览器默认拖拽，交由 Electron 原生文件拖放
+    // 阻止默认 HTML5 拖拽，改用 Electron 原生 startDrag
+    // 原生 startDrag 提供真实文件：外部拖入访达/Finder 复制原文件，
+    // 内部拖入导入区域时也会通过 HTML5 drop 事件提供 File 对象（含 path）
+    // 同时设置 text/plain 为完整路径，作为内部导入区域的 fallback
     e.preventDefault()
     e.stopPropagation()
+    e.dataTransfer.setData('text/plain', fp)
+    e.dataTransfer.effectAllowed = 'copy'
     window.electronAPI?.startFileDrag(fp)
   }
 
@@ -426,7 +431,7 @@ function SystemToolContent({ tool }) {
     const ext = file.name.split('.').pop()?.toLowerCase()
     if (['jpg','jpeg','png','webp','gif','svg','bmp'].includes(ext)) {
       const p = previews[file.name]
-      if (p && !small) return <img src={p} alt="" className="w-14 h-14 object-cover rounded-lg" />
+      if (p && !small) return <img src={p} alt="" className="w-14 h-14 object-cover rounded-lg" draggable={false} />
       return <Image className={`${sz} text-green-400`} />
     }
     if (['db','sqlite'].includes(ext)) return <Database className={`${sz} text-orange-400`} />
@@ -520,7 +525,7 @@ function CustomizationTool() {
     try {
       const res = await window.electronAPI?.getUserConfig()
       const w = res?.config?.terminalWallpaper
-      if (w) { setWallpaper(w); const result = await window.electronAPI?.readUserImage(w); if (result?.data) setPreview(result.data) }
+      if (w) { setWallpaper(w); const result = await window.electronAPI?.readUserImage(w, 1024); if (result?.data) setPreview(result.data) }
     } catch (_) {}
   }
 
@@ -536,24 +541,41 @@ function CustomizationTool() {
   function handleWallDragLeave(e) { e.preventDefault(); e.stopPropagation(); setWallDragOver(false) }
   async function handleWallDrop(e) {
     e.preventDefault(); e.stopPropagation(); setWallDragOver(false)
+    let srcPath = null
     const files = e.dataTransfer?.files
-    if (!files || files.length === 0) return
-    const file = files[0]
-    if (!file.type.startsWith('image/')) { setMsg({ type: 'error', text: '请拖入图片文件' }); return }
+    if (files && files.length > 0) {
+      const file = files[0]
+      if (!file.type.startsWith('image/')) { setMsg({ type: 'error', text: '请拖入图片文件' }); return }
+      srcPath = file.path
+    } else {
+      // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
+      const text = e.dataTransfer?.getData('text/plain')
+      if (text) srcPath = text
+    }
+    if (!srcPath) return
     try {
-      const result = await window.electronAPI?.importUserImageFile(file.path)
-      if (result?.filename) await applyWallpaper(result.filename)
-      else if (result?.error) setMsg({ type: 'error', text: result.error })
+      // 一次 IPC 完成导入+缩略图，避免二次往返
+      const result = await window.electronAPI?.importAndThumbnail(srcPath, 1024)
+      if (result?.data) {
+        setWallpaper(result.filename); setPreview(result.data)
+        await window.electronAPI?.setUserConfig('terminalWallpaper', result.filename)
+        setMsg({ type: 'success', text: '壁纸已更新' })
+        window.dispatchEvent(new CustomEvent('terminal-wallpaper-changed', { detail: result.data }))
+      } else if (result?.error) {
+        setMsg({ type: 'error', text: result.error })
+      }
     } catch (e) { setMsg({ type: 'error', text: '导入失败: ' + e.message }) }
   }
 
   async function applyWallpaper(filename) {
-    const readResult = await window.electronAPI?.readUserImage(filename)
+    const readResult = await window.electronAPI?.readUserImage(filename, 1024)
     if (readResult?.data) {
       setWallpaper(filename); setPreview(readResult.data)
       await window.electronAPI?.setUserConfig('terminalWallpaper', filename)
       setMsg({ type: 'success', text: '壁纸已更新' })
       window.dispatchEvent(new CustomEvent('terminal-wallpaper-changed', { detail: readResult.data }))
+    } else if (readResult?.error) {
+      setMsg({ type: 'error', text: readResult.error })
     }
   }
 
@@ -606,7 +628,7 @@ function CustomizationTool() {
                   onClick={() => handlePreset('ToTheMoon.jpg')}
                   className="relative w-24 h-16 rounded-lg overflow-hidden border border-white/10 hover:border-white/30 transition-all group"
                 >
-                  <img src="/ToTheMoon.jpg" alt="ToTheMoon" className="w-full h-full object-cover" />
+                  <img src="./ToTheMoon.jpg" alt="ToTheMoon" className="w-full h-full object-cover" />
                   <div className="absolute inset-0 flex items-end justify-center pb-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-black/60 to-transparent">
                     <span className="text-[10px] text-white">ToTheMoon</span>
                   </div>
@@ -615,7 +637,7 @@ function CustomizationTool() {
                   onClick={() => handlePreset('OS_Columbina.jpg')}
                   className="relative w-24 h-16 rounded-lg overflow-hidden border border-white/10 hover:border-white/30 transition-all group"
                 >
-                  <img src="/OS_Columbina.jpg" alt="Columbina" className="w-full h-full object-cover" />
+                  <img src="./OS_Columbina.jpg" alt="Columbina" className="w-full h-full object-cover" />
                   <div className="absolute inset-0 flex items-end justify-center pb-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-black/60 to-transparent">
                     <span className="text-[10px] text-white">Columbina</span>
                   </div>
@@ -732,7 +754,7 @@ export default function TerminalPage() {
       const res = await window.electronAPI?.getUserConfig()
       const config = res?.config || {}
       if (config.terminalWallpaper) {
-        const result = await window.electronAPI?.readUserImage(config.terminalWallpaper)
+        const result = await window.electronAPI?.readUserImage(config.terminalWallpaper, 1024)
         if (result?.data) setWallpaper(result.data)
       }
       if (config.terminalDesktopIcons) setDesktopIcons(config.terminalDesktopIcons)

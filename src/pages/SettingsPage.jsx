@@ -1452,12 +1452,20 @@ function ColorPresetsModule() {
     e.preventDefault()
     e.stopPropagation()
     const files = e.dataTransfer?.files
-    if (!files?.length) return
-    for (const file of files) {
-      if (file.type.startsWith('image/')) {
-        const result = await window.electronAPI?.importImageFile(file.path)
+    if (files?.length) {
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          const result = await window.electronAPI?.importImageFile(file.path)
+          if (result?.filename) setIcon(idx, result.filename)
+          break
+        }
+      }
+    } else {
+      // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
+      const text = e.dataTransfer?.getData('text/plain')
+      if (text) {
+        const result = await window.electronAPI?.importImageFile(text)
         if (result?.filename) setIcon(idx, result.filename)
-        break
       }
     }
   }
