@@ -2008,9 +2008,6 @@ function MaterialBadge({ material, onEdit, onDelete }) {
       )}
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium text-surface-200 truncate">{material.material_name || material.material_id}</p>
-        {(material.quantity || material.quantities) && (
-          <p className="text-[10px] text-surface-500">数量: {material.quantity || material.quantities}</p>
-        )}
         {material.material_type && (
           <span className="text-[10px] px-1 py-0.5 rounded bg-surface-700 text-surface-400">{MATERIAL_TYPE_ZH[material.material_type] || material.material_type}</span>
         )}

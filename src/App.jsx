@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useDb } from './context/DbContext'
 import { useNav } from './context/NavContext'
@@ -56,7 +56,7 @@ export default function App() {
   // Mac: 为红绿灯留出顶部空间；Win: 无边框无需额外 padding
   const wrapperStyle = { paddingTop: isWin ? 0 : TITLEBAR_HEIGHT, height: '100vh' }
 
-  const content = needsSetup ? (
+  const content = useMemo(() => needsSetup ? (
     <SetupWizard />
   ) : !dbReady ? (
     <div className="h-full flex items-center justify-center">
@@ -136,7 +136,7 @@ export default function App() {
       <UpdateToast />
       <TerminalDock />
     </div>
-  )
+  ), [needsSetup, dbReady, devMode, location.key, showBackToTop, goBack, goForward, canGoBack, canGoForward, scrollToTop, handleScroll])
 
 
   return (

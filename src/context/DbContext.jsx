@@ -61,7 +61,7 @@ export function DbProvider({ children }) {
 const _imageRequestMap = new Map()     // filename → Promise（在途请求去重）
 const _imageCache = new Map()          // filename → base64 data（持久缓存，上限 500）
 const _IMAGE_CACHE_MAX = 500
-const _MAX_CONCURRENT = 16              // 最大并发 IPC 调用数
+const _MAX_CONCURRENT = 6              // 最大并发 IPC 调用数（过高会阻塞主进程导致窗口拖动卡顿）
 let _concurrentCount = 0
 const _pendingQueue = []               // { filename, resolve, reject }
 

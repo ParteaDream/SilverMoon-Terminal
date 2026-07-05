@@ -611,7 +611,7 @@ export default function CharactersPage() {
 
       {/* Gallery view */}
       {viewMode === 'gallery' && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3 animate-fade-in">
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-10 gap-2 animate-fade-in">
           {processed.map(char => {
             const wt = weaponTypes.find(w => w.id === char.weapon_type_id)
             const reg = regions.find(r => r.id === char.region_id)
@@ -624,7 +624,8 @@ export default function CharactersPage() {
                 className={`group relative rounded-xl overflow-hidden border cursor-pointer
                   bg-gradient-to-b ${ELEMENT_BG[char.element_id] || 'from-surface-800 to-surface-900'}
                   ${ELEMENT_BORDER[char.element_id] || 'border-surface-700'}
-                  hover:border-primary-500/50 hover:scale-[1.05] transition-all duration-200`}
+                  hover:border-primary-500/50 hover:scale-[1.03] transition-all duration-200
+                  content-visibility-auto contain-layout contain-style contain-paint`}
               >
                 {/* Card image */}
                 <div className="aspect-[3/4] bg-surface-800 flex items-end justify-center overflow-hidden relative">

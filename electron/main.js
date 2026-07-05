@@ -1007,7 +1007,7 @@ function createWindow() {
   const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: 1400, height: 900,
-    minWidth: 1100, minHeight: 700,
+    minWidth: 750, minHeight: 600,
     title: '银月终端',
     titleBarStyle: isMac ? 'hiddenInset' : undefined,
     frame: isMac,  // Mac 保留原生框（红绿灯）, Windows 无边框
@@ -2137,7 +2137,7 @@ ipcMain.handle('delete-image', (_event, filename) => {
   } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('read-image', (_event, filename) => {
+ipcMain.handle('read-image', async (_event, filename) => {
   try {
     if (!db) throw new Error('数据库未初始化');
     if (!dbDir) throw new Error('数据库路径未设置');
@@ -2159,7 +2159,7 @@ ipcMain.handle('read-image', (_event, filename) => {
       if (!fp) return { error: '文件不存在' };
     }
 
-    return readImageFile(fp);
+    return await readImageFile(fp);
   } catch (e) { return { error: e.message }; }
 });
 
@@ -2186,35 +2186,38 @@ function setCachedImage(fp, data) {
 }
 
 // 通用图片文件读取（供 read-image 和 read-user-image 复用）
-function readImageFile(fp) {
+// 使用异步 fs.promises 避免阻塞主进程（防止拖动窗口卡顿）
+const fsPromises = fs.promises;
+async function readImageFile(fp) {
   // 命中缓存直接返回
   const cached = getCachedImage(fp);
   if (cached) return { success: true, data: cached };
   // 读取文件头检测实际格式（SVG 内容可能以 .webp 等扩展名存储）
-  const head = Buffer.alloc(256);
-  const fd = fs.openSync(fp, 'r');
-  const bytesRead = fs.readSync(fd, head, 0, 256, 0);
-  fs.closeSync(fd);
-
-  const headStr = head.toString('utf-8', 0, bytesRead).trimStart();
-  if (headStr.startsWith('<svg') || headStr.startsWith('<?xml')) {
-    const svgText = fs.readFileSync(fp, 'utf-8');
-    const svgResult = `data:image/svg+xml;base64,${Buffer.from(svgText).toString('base64')}`;
-    setCachedImage(fp, svgResult);
-    return { success: true, data: svgResult };
+  const handle = await fsPromises.open(fp, 'r');
+  try {
+    const head = Buffer.alloc(256);
+    const { bytesRead } = await handle.read(head, 0, 256, 0);
+    const headStr = head.toString('utf-8', 0, bytesRead).trimStart();
+    if (headStr.startsWith('<svg') || headStr.startsWith('<?xml')) {
+      const svgText = await fsPromises.readFile(fp, 'utf-8');
+      const svgResult = `data:image/svg+xml;base64,${Buffer.from(svgText).toString('base64')}`;
+      setCachedImage(fp, svgResult);
+      return { success: true, data: svgResult };
+    }
+    // 二进制图片
+    const binData = await fsPromises.readFile(fp);
+    const headBytes = head.subarray(0, Math.min(bytesRead, 4));
+    let mime = 'image/png';
+    if (headBytes[0] === 0xFF && headBytes[1] === 0xD8) mime = 'image/jpeg';
+    else if (headBytes[0] === 0x89 && headBytes[1] === 0x50) mime = 'image/png';
+    else if (headBytes[0] === 0x52 && headBytes[1] === 0x49) mime = 'image/webp';
+    else if (headBytes[0] === 0x47 && headBytes[1] === 0x49) mime = 'image/gif';
+    const result = `data:${mime};base64,${binData.toString('base64')}`;
+    setCachedImage(fp, result);
+    return { success: true, data: result };
+  } finally {
+    await handle.close();
   }
-
-  // 二进制图片
-  const binData = fs.readFileSync(fp);
-  const headBytes = head.subarray(0, Math.min(bytesRead, 4));
-  let mime = 'image/png';
-  if (headBytes[0] === 0xFF && headBytes[1] === 0xD8) mime = 'image/jpeg';
-  else if (headBytes[0] === 0x89 && headBytes[1] === 0x50) mime = 'image/png';
-  else if (headBytes[0] === 0x52 && headBytes[1] === 0x49) mime = 'image/webp';
-  else if (headBytes[0] === 0x47 && headBytes[1] === 0x49) mime = 'image/gif';
-  const result = `data:${mime};base64,${binData.toString('base64')}`;
-  setCachedImage(fp, result);
-  return { success: true, data: result };
 }
 
 // ── 导出图片：用户自选路径保存 ──
@@ -2287,12 +2290,12 @@ ipcMain.handle('import-user-image', async () => {
   } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('read-user-image', (_event, filename) => {
+ipcMain.handle('read-user-image', async (_event, filename) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');
     const fp = path.join(getUserImagesDir(dbDir), filename);
     if (!fs.existsSync(fp)) return { error: '文件不存在' };
-    return readImageFile(fp);
+    return await readImageFile(fp);
   } catch (e) { return { error: e.message }; }
 });
 
@@ -4581,13 +4584,13 @@ ipcMain.handle('open-file', (_event, filePath) => {
 });
 
 // ── 读取文件预览（图片缩略图）──
-ipcMain.handle('read-file-preview', (_event, filePath) => {
+ipcMain.handle('read-file-preview', async (_event, filePath) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) return { error: '文件不存在' };
     const ext = path.extname(filePath).toLowerCase();
     const imgExts = ['.jpg','.jpeg','.png','.webp','.gif','.svg','.bmp'];
     if (!imgExts.includes(ext)) return { success: true, data: null };
-    return readImageFile(filePath);
+    return await readImageFile(filePath);
   } catch (e) { return { error: e.message }; }
 });
 
