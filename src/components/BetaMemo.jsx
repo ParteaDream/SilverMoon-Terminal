@@ -508,7 +508,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
 
   const saveStrokes = useCallback((newStrokes, pushUndo = true) => {
     const prev = getStrokes()
-    if (pushUndo && prev.length > 0) {
+    if (pushUndo) {
       setUndoStack(s => [...s, prev])
       setRedoStack([])
     }
