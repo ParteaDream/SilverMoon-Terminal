@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { Calculator, FileText, FolderOpen, Settings2 } from 'lucide-react'
+import { Calculator, FileText, FolderOpen, Settings2, Swords } from 'lucide-react'
 
 const TerminalContext = createContext(null)
 
@@ -7,6 +7,7 @@ const TerminalContext = createContext(null)
 const APP_REGISTRY = {
   traincalc: { icon: Calculator, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
   betamemo: { icon: FileText, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
+  dragonsnake: { icon: Swords, color: 'from-emerald-700 to-teal-400', iconClass: 'text-white drop-shadow-md' },
   resources: { icon: FolderOpen, color: 'from-blue-500 to-sky-300', iconClass: 'text-white drop-shadow-md' },
   customize: { icon: Settings2, color: 'from-purple-500 to-pink-400', iconClass: 'text-white drop-shadow-md' },
 }
@@ -16,11 +17,12 @@ function getDefaultPosition(index, appId) {
   const sidebarW = collapsed ? 56 : 224
   const isCalc = appId === 'traincalc'
   const isMemo = appId === 'betamemo'
+  const isSnake = appId === 'dragonsnake'
   return {
     left: sidebarW + 30 + index * 30,
     top: 50 + index * 30,
-    width: isCalc ? 460 : isMemo ? 900 : 600,
-    height: isCalc ? 640 : isMemo ? 680 : 420,
+    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : 600,
+    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 620 : 420,
   }
 }
 

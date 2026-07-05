@@ -4,6 +4,7 @@ import { useTerminal } from '../context/TerminalContext'
 import { APPS } from '../components/TerminalDock'
 import TrainCalc from '../components/TrainCalc'
 import BetaMemo from '../components/BetaMemo'
+import DragonSnake from '../components/DragonSnake'
 import {
   X, Minus, Square, Copy, Monitor, ChevronLeft,
   FolderOpen, LayoutList, LayoutGrid,
@@ -276,13 +277,20 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
           <div className="w-16" />
         </div>
         <div className="flex-1 overflow-auto">
-          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
+          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
         </div>
         {!fullscreen && (
           <>
-            <div className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize" onMouseDown={e => handleResizeStart(e, 'se')} />
-            <div className="absolute bottom-0 left-0 right-4 h-1 cursor-s-resize" onMouseDown={e => handleResizeStart(e, 's')} />
-            <div className="absolute top-0 right-0 bottom-4 w-1 cursor-e-resize" onMouseDown={e => handleResizeStart(e, 'e')} />
+            {/* 角落 */}
+            <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize z-10" onMouseDown={e => handleResizeStart(e, 'nw')} />
+            <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize z-10" onMouseDown={e => handleResizeStart(e, 'ne')} />
+            <div className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize z-10" onMouseDown={e => handleResizeStart(e, 'sw')} />
+            <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize z-10" onMouseDown={e => handleResizeStart(e, 'se')} />
+            {/* 边缘 */}
+            <div className="absolute top-0 left-3 right-3 h-1 cursor-n-resize" onMouseDown={e => handleResizeStart(e, 'n')} />
+            <div className="absolute bottom-0 left-3 right-3 h-1 cursor-s-resize" onMouseDown={e => handleResizeStart(e, 's')} />
+            <div className="absolute left-0 top-3 bottom-3 w-1 cursor-w-resize" onMouseDown={e => handleResizeStart(e, 'w')} />
+            <div className="absolute right-0 top-3 bottom-3 w-1 cursor-e-resize" onMouseDown={e => handleResizeStart(e, 'e')} />
           </>
         )}
       </div>

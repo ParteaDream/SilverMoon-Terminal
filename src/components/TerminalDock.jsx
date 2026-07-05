@@ -3,13 +3,14 @@ import { useLocation } from 'react-router-dom'
 import { useTerminal } from '../context/TerminalContext'
 import { useDb } from '../context/DbContext'
 import {
-  Calculator, FileText, FolderOpen, Settings2, Play, X
+  Calculator, FileText, FolderOpen, Settings2, Play, X, Swords
 } from 'lucide-react'
 
 /** 应用程序注册表 — 终端板块的权威定义 */
 export const APPS = [
   { id: 'traincalc', name: '养成计算器', icon: Calculator, placeholder: false, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
   { id: 'betamemo', name: 'Beta备忘录', icon: FileText, placeholder: false, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
+  { id: 'dragonsnake', name: '非完备证明', icon: Swords, placeholder: false, color: 'from-emerald-700 to-teal-400', iconClass: 'text-white drop-shadow-md' },
 ]
 
 export const SYS_TOOLS = [
@@ -65,7 +66,9 @@ export default function TerminalDock({ visible }) {
   }, [contextMenu])
 
   // ── 条件返回在 hooks 之后 ──
+  const anyFullscreen = runningApps.some(a => a.state?.fullscreen)
   if (!visible && !isOnTerminal && !hasRunningNonSystem && runningApps.length === 0) return null
+  if (anyFullscreen) return null
 
   // ── 事件处理 ──
 
@@ -97,7 +100,7 @@ export default function TerminalDock({ visible }) {
 
   return (
     <>
-      <div className="fixed bottom-0 z-[100] pointer-events-none"
+      <div className="fixed bottom-0 z-[200] pointer-events-none"
         style={{
           left: `${sidebarWidth}px`,
           right: '0px',

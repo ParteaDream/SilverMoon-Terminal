@@ -322,6 +322,23 @@ button:hover:not(:disabled) {
 }
 
 /* 游戏数据分类 tag — 已弃用(data-category)，改用 useTypeColor hook 内联样式 */
+
+/* ── Beta备忘录：高对比度滚动条 ── */
+.betamemo-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.betamemo-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+}
+.betamemo-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 4px;
+}
+.betamemo-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}
 .category-tag { background: rgb(var(--surface-700)); color: rgb(var(--surface-300)); }
 
 /* Focus styles */

@@ -97,7 +97,7 @@ export default function BetaMemo() {
 
   switch (view) {
     case 'create':
-      return <CreateView onSave={handleSaveTask} onCancel={handleBack} />
+      return <CreateView onSave={handleSaveTask} onCancel={handleBack} tasks={tasks} />
     case 'manage':
       return selectedTask
         ? <ManageView task={selectedTask} onUpdate={handleUpdateTask} onDelete={handleDeleteTask} onBack={handleBack} />
@@ -171,7 +171,9 @@ function TaskCard({ task, onClick }) {
 // ═══════════════════════════════════════
 // 创建视图
 // ═══════════════════════════════════════
-function CreateView({ onSave, onCancel }) {
+function CreateView({ onSave, onCancel, tasks }) {
+  const [error, setError] = useState('')
+  const existingNames = (tasks || []).map(t => t.name)
   const [name, setName] = useState('')
   const [images, setImages] = useState({ summary: null, constellation: null, questionnaire: null })
   const [saving, setSaving] = useState(false)
@@ -198,23 +200,51 @@ function CreateView({ onSave, onCancel }) {
   }, [])
 
   const handleSave = useCallback(async () => {
-    if (!name.trim()) return
+    const trimmed = name.trim()
+    if (!trimmed) return
+    // 检查重名
+    if (existingNames.includes(trimmed)) {
+      setError('任务名称已存在，请使用不同的名称')
+      return
+    }
+    setError('')
     setSaving(true)
+
+    // 重命名图片为 <任务名>-<类型> 格式
+    const renamedImages = { summary: null, constellation: null, questionnaire: null }
+    for (const t of IMAGE_TYPES) {
+      const oldName = images[t.key]
+      if (!oldName) continue
+      const ext = oldName.includes('.') ? oldName.slice(oldName.lastIndexOf('.')) : ''
+      const newName = `${trimmed}-${t.label}${ext}`
+      if (oldName !== newName) {
+        const result = await window.electronAPI?.renameUserImage(oldName, newName)
+        if (result?.filename) {
+          renamedImages[t.key] = result.filename
+        } else {
+          renamedImages[t.key] = oldName
+        }
+      } else {
+        renamedImages[t.key] = oldName
+      }
+    }
+
     const task = {
       id: uid(),
-      name: name.trim(),
-      summaryImage: images.summary,
-      constellationImage: images.constellation,
-      questionnaireImage: images.questionnaire,
+      name: trimmed,
+      summaryImage: renamedImages.summary,
+      constellationImage: renamedImages.constellation,
+      questionnaireImage: renamedImages.questionnaire,
       strokes: { summary: [], constellation: [], questionnaire: [] },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
     await onSave(task)
     setSaving(false)
-  }, [name, images, onSave])
+  }, [name, images, onSave, existingNames])
 
   const hasAnyImage = Object.values(images).some(Boolean)
+  const nameDuplicate = name.trim() && existingNames.includes(name.trim())
 
   return (
     <div className="h-full flex flex-col">
@@ -231,11 +261,19 @@ function CreateView({ onSave, onCancel }) {
           <input
             type="text"
             value={name}
-            onChange={e => setName(e.target.value)}
+            onChange={e => { setName(e.target.value); setError('') }}
             placeholder="输入任务名称（如：V3.2 测试服第1周）"
-            className="w-full px-3 py-2 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200
-                       placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors"
+            className={`w-full px-3 py-2 rounded-lg bg-surface-800/80 border text-sm text-surface-200
+                       placeholder-surface-600 outline-none transition-colors ${
+                         nameDuplicate ? 'border-red-500/50 focus:border-red-500' : 'border-white/10 focus:border-primary-500/50'
+                       }`}
           />
+          {nameDuplicate && (
+            <p className="text-[11px] text-red-400 mt-1">此名称已被使用，请更换</p>
+          )}
+          {error && !nameDuplicate && (
+            <p className="text-[11px] text-red-400 mt-1">{error}</p>
+          )}
         </div>
 
         {IMAGE_TYPES.map(t => (
@@ -444,42 +482,52 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   // ── 笔迹管理 ──
   const strokesRef = useRef(task.strokes || { summary: [], constellation: [], questionnaire: [] })
   const getStrokes = useCallback(() => strokesRef.current[activeTab] || [], [activeTab])
-  const undoStackRef = useRef([])
-  const redoStackRef = useRef([])
+  const [undoStack, setUndoStack] = useState([])
+  const [redoStack, setRedoStack] = useState([])
 
   useEffect(() => {
     strokesRef.current = task.strokes || { summary: [], constellation: [], questionnaire: [] }
-    undoStackRef.current = []
-    redoStackRef.current = []
   }, [task])
+
+  // 仅在切换任务时重置撤销历史
+  const prevTaskId = useRef(task.id)
+  useEffect(() => {
+    if (prevTaskId.current !== task.id) {
+      prevTaskId.current = task.id
+      setUndoStack([])
+      setRedoStack([])
+    }
+  }, [task.id])
 
   const strokes = getStrokes()
 
   const saveStrokes = useCallback((newStrokes, pushUndo = true) => {
     const prev = getStrokes()
     if (pushUndo && prev.length > 0) {
-      undoStackRef.current.push(prev)
-      redoStackRef.current = []
+      setUndoStack(s => [...s, prev])
+      setRedoStack([])
     }
     strokesRef.current = { ...strokesRef.current, [activeTab]: newStrokes }
     onUpdate({ ...task, strokes: strokesRef.current, updatedAt: new Date().toISOString() })
   }, [activeTab, task, onUpdate, getStrokes])
 
   const handleUndo = useCallback(() => {
-    const stack = undoStackRef.current
-    if (stack.length === 0) return
-    const prev = stack.pop()
-    redoStackRef.current.push(getStrokes())
+    if (undoStack.length === 0) return
+    const prev = undoStack[undoStack.length - 1]
+    const currentStrokes = getStrokes() // 必须在 saveStrokes 之前捕获，否则 ref 已被覆盖
+    setUndoStack(s => s.slice(0, -1))
+    setRedoStack(s => [...s, currentStrokes])
     saveStrokes(prev, false)
-  }, [saveStrokes, getStrokes])
+  }, [saveStrokes, getStrokes, undoStack])
 
   const handleRedo = useCallback(() => {
-    const stack = redoStackRef.current
-    if (stack.length === 0) return
-    const next = stack.pop()
-    undoStackRef.current.push(getStrokes())
+    if (redoStack.length === 0) return
+    const next = redoStack[redoStack.length - 1]
+    const currentStrokes = getStrokes() // 必须在 saveStrokes 之前捕获
+    setRedoStack(s => s.slice(0, -1))
+    setUndoStack(s => [...s, currentStrokes])
     saveStrokes(next, false)
-  }, [saveStrokes, getStrokes])
+  }, [saveStrokes, getStrokes, redoStack])
 
   // ── 加载图片 ──
   useEffect(() => {
@@ -725,147 +773,164 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
     '#a855f7', '#ec4899', '#14b8a6', '#ffffff', '#fbbf24',
   ]
 
-  const canUndo = undoStackRef.current.length > 0
-  const canRedo = redoStackRef.current.length > 0
+  const canUndo = undoStack.length > 0
+  const canRedo = redoStack.length > 0
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header: 返回 + 任务名 + 图片切换tabs + 删除 */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5">
-        <button onClick={onBack} className="p-1 rounded-md text-surface-400 hover:text-white hover:bg-white/10 transition-colors shrink-0">
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <h2 className="text-xs font-semibold text-white truncate">{task.name}</h2>
+    <div className="h-full flex">
+      {/* ── 左侧控制栏 ── */}
+      <div className="w-[148px] shrink-0 flex flex-col border-r border-white/5 bg-surface-800/30">
+        {/* 返回 */}
+        <div className="px-3 py-2 border-b border-white/5">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-surface-400 hover:text-white transition-colors">
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span className="truncate">{task.name}</span>
+          </button>
+        </div>
 
-        {/* 图片类型 tabs */}
-        <div className="flex items-center gap-0.5 ml-2">
+        {/* 图片切换 tabs */}
+        <div className="px-2 py-2 border-b border-white/5 space-y-0.5">
           {IMAGE_TYPES.map(t => (
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
+              className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors text-left ${
                 activeTab === t.key
                   ? 'bg-white/10 text-white'
                   : 'text-surface-500 hover:text-surface-300 hover:bg-white/5'
               }`}
             >
-              <div className={`w-1.5 h-1.5 rounded-full ${task[t.key + 'Image'] ? 'bg-green-500' : 'bg-surface-600'}`} />
-              {t.short}
+              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${task[t.key + 'Image'] ? 'bg-green-500' : 'bg-surface-600'}`} />
+              {t.label}
             </button>
           ))}
         </div>
 
-        <div className="flex-1" />
+        {/* 画笔工具 */}
+        <div className="px-2 py-2 border-b border-white/5 space-y-1">
+          <p className="text-[10px] text-surface-500 px-1 mb-1">画笔</p>
+          <button
+            onClick={() => setBrush('ok')}
+            className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
+              brush === 'ok' ? 'bg-green-500/20 text-green-400 border border-green-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
+            }`}
+            title="OK - 水平绿色直线（长按拖动平滑覆盖）"
+          >
+            <Check className="w-3 h-3" />
+            OK 画笔
+          </button>
 
-        <button
-          onClick={() => { if (confirm('确定要删除此任务吗？')) onDelete(task.id) }}
-          className="p-1 rounded-md text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-          title="删除任务"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
+          <button
+            onClick={() => setBrush('pause')}
+            className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
+              brush === 'pause' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
+            }`}
+            title="暂停 - 自由画笔（点按画圆，拖动涂鸦）"
+          >
+            <Pencil className="w-3 h-3" />
+            暂停画笔
+          </button>
 
-      {/* Toolbar: 画笔 + 撤销/重做 */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-white/5 bg-surface-800/20">
-        <button
-          onClick={() => setBrush('ok')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-            brush === 'ok' ? 'bg-green-500/20 text-green-400 border border-green-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
-          }`}
-          title="OK - 水平绿色直线，覆盖已完成任务（支持长按拖动平滑覆盖区域）"
-        >
-          <Check className="w-3 h-3" />
-          OK
-        </button>
-
-        <button
-          onClick={() => setBrush('pause')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-            brush === 'pause' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
-          }`}
-          title="暂停 - 自由画笔（点按画圆，拖动涂鸦）"
-        >
-          <Pencil className="w-3 h-3" />
-          暂停
-        </button>
-
-        {brush === 'pause' && (
-          <div className="relative">
-            <button
-              onClick={() => setShowColorPicker(!showColorPicker)}
-              className="w-5 h-5 rounded-full border border-white/20 hover:border-white/40 transition-colors"
-              style={{ backgroundColor: pauseColor }}
-              title="选择颜色"
-            />
-            {showColorPicker && (
-              <div
-                className="absolute top-7 left-0 z-50 p-1.5 rounded-xl bg-surface-800 border border-white/10 shadow-xl animate-fade-in"
-                onClick={() => setShowColorPicker(false)}
-              >
-                <div className="flex gap-1 flex-wrap w-28">
-                  {presetColors.map(c => (
-                    <button
-                      key={c}
-                      onClick={() => { setPauseColor(c); setShowColorPicker(false) }}
-                      className={`w-5 h-5 rounded-full border-2 transition-all hover:scale-110 ${
-                        pauseColor === c ? 'border-white' : 'border-transparent'
-                      }`}
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
-                </div>
+          {brush === 'pause' && (
+            <div className="flex items-center gap-1.5 px-2 py-1">
+              <span className="text-[10px] text-surface-500">颜色</span>
+              <div className="relative">
+                <button
+                  onClick={() => setShowColorPicker(!showColorPicker)}
+                  className="w-5 h-5 rounded-full border border-white/20 hover:border-white/40 transition-colors"
+                  style={{ backgroundColor: pauseColor }}
+                />
+                {showColorPicker && (
+                  <div
+                    className="absolute top-7 left-0 z-50 p-1.5 rounded-xl bg-surface-800 border border-white/10 shadow-xl animate-fade-in"
+                    onClick={() => setShowColorPicker(false)}
+                  >
+                    <div className="flex gap-1 flex-wrap w-28">
+                      {presetColors.map(c => (
+                        <button
+                          key={c}
+                          onClick={() => { setPauseColor(c); setShowColorPicker(false) }}
+                          className={`w-5 h-5 rounded-full border-2 transition-all hover:scale-110 ${
+                            pauseColor === c ? 'border-white' : 'border-transparent'
+                          }`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+          )}
+
+          <button
+            onClick={() => setBrush('eraser')}
+            className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
+              brush === 'eraser' ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
+            }`}
+            title="橡皮擦 - 长按拖动持续擦除"
+          >
+            <Eraser className="w-3 h-3" />
+            橡皮擦
+          </button>
+        </div>
+
+        {/* 撤销 / 重做 */}
+        <div className="px-2 py-2 border-b border-white/5 space-y-1">
+          <p className="text-[10px] text-surface-500 px-1 mb-1">编辑</p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleUndo}
+              disabled={!canUndo}
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
+                canUndo ? 'text-surface-300 hover:text-white hover:bg-white/10 bg-white/5' : 'text-surface-600 cursor-not-allowed'
+              }`}
+              title="撤销 (Ctrl+Z)"
+            >
+              <Undo2 className="w-3 h-3" />
+              撤销
+            </button>
+            <button
+              onClick={handleRedo}
+              disabled={!canRedo}
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
+                canRedo ? 'text-surface-300 hover:text-white hover:bg-white/10 bg-white/5' : 'text-surface-600 cursor-not-allowed'
+              }`}
+              title="重做 (Ctrl+Shift+Z)"
+            >
+              <Redo2 className="w-3 h-3" />
+              重做
+            </button>
           </div>
-        )}
+        </div>
 
-        <button
-          onClick={() => setBrush('eraser')}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-            brush === 'eraser' ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
-          }`}
-          title="橡皮擦 - 长按拖动持续擦除"
-        >
-          <Eraser className="w-3 h-3" />
-          橡皮擦
-        </button>
+        {/* 显示 / 删除 */}
+        <div className="px-2 py-2 space-y-1">
+          <button
+            onClick={() => setShowStrokes(!showStrokes)}
+            className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
+              showStrokes ? 'text-surface-300 bg-white/5 border border-white/10' : 'text-surface-500 hover:text-surface-300 hover:bg-white/5 border border-transparent'
+            }`}
+          >
+            {showStrokes ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+            笔迹{showStrokes ? '可见' : '隐藏'}
+          </button>
 
-        <div className="flex-1" />
+          <div className="flex items-center justify-between px-2">
+            <span className="text-[10px] text-surface-500">{strokes.length} 条笔迹</span>
+          </div>
 
-        {/* 撤销 / 重做（放在工具栏行） */}
-        <button
-          onClick={handleUndo}
-          disabled={!canUndo}
-          className={`p-1 rounded-md transition-colors ${canUndo ? 'text-surface-400 hover:text-white hover:bg-white/10' : 'text-surface-600 cursor-not-allowed'}`}
-          title="撤销 (Ctrl+Z)"
-        >
-          <Undo2 className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={handleRedo}
-          disabled={!canRedo}
-          className={`p-1 rounded-md transition-colors ${canRedo ? 'text-surface-400 hover:text-white hover:bg-white/10' : 'text-surface-600 cursor-not-allowed'}`}
-          title="重做 (Ctrl+Shift+Z)"
-        >
-          <Redo2 className="w-3.5 h-3.5" />
-        </button>
-
-        <button
-          onClick={() => setShowStrokes(!showStrokes)}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-            showStrokes ? 'text-surface-300 bg-white/5 border border-white/10' : 'text-surface-500 border border-transparent'
-          }`}
-          title={showStrokes ? '隐藏笔迹' : '显示笔迹'}
-        >
-          {showStrokes ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-          {showStrokes ? '可见' : '隐藏'}
-        </button>
-
-        <span className="text-[10px] text-surface-500 w-8 text-right">{strokes.length}</span>
+          <button
+            onClick={() => { if (confirm('确定要删除此任务吗？')) onDelete(task.id) }}
+            className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          >
+            <Trash2 className="w-3 h-3" />
+            删除任务
+          </button>
+        </div>
       </div>
 
-      {/* Image viewer */}
+      {/* ── 右侧图片查看器 ── */}
       <div ref={containerRef} className="flex-1 overflow-auto relative bg-surface-950/50 betamemo-scroll">
         {!hasImage ? (
           <div className="h-full flex flex-col items-center justify-center text-surface-500">
@@ -906,6 +971,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   )
 }
 
+
 // ── 辅助：查找某个自然坐标位置附近的笔迹 ──
 function findStrokesAt(strokes, pos) {
   const result = []
@@ -913,7 +979,7 @@ function findStrokesAt(strokes, pos) {
     if (s.type === 'ok') {
       const y = s.y
       const halfH = (s.height || 13) / 2
-      if (Math.abs(pos.y - y) <= halfH + 10) {
+      if (Math.abs(pos.y - y) <= halfH + 4) {
         result.push(s)
       }
     } else if (s.type === 'pause') {
@@ -921,7 +987,7 @@ function findStrokesAt(strokes, pos) {
         const dx = pos.x - p.x
         const dy = pos.y - p.y
         const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist < (s.radius || 10) * 2 + 5) {
+        if (dist < (s.radius || 10) * 1.5) {
           result.push(s)
           break
         }

@@ -134,12 +134,18 @@ function DualRangeSlider({ nodes, values, onChange }) {
         onMouseDown={(e) => {
           if (e.button !== 0) return
           const v = getValueFromClientX(e.clientX)
-          if (v <= max) onChange([v, max])
+          // 点击在左端点左侧 → 移动左端点；在右端点右侧 → 移动右端点；中间 → 移动左端点
+          if (v < min) onChange([v, max])
+          else if (v > max) onChange([min, v])
+          else onChange([v, max])
         }}
         onContextMenu={(e) => {
           e.preventDefault()
           const v = getValueFromClientX(e.clientX)
-          if (v >= min) onChange([min, v])
+          // 点击在左端点左侧 → 移动左端点；在右端点右侧 → 移动右端点；中间 → 移动右端点
+          if (v < min) onChange([v, max])
+          else if (v > max) onChange([min, v])
+          else onChange([min, v])
         }}>
         {/* 选中范围 */}
         <div className="absolute h-full rounded-full bg-primary-500/50"

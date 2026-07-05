@@ -2331,6 +2331,21 @@ ipcMain.handle('delete-user-image', (_event, filename) => {
   } catch (e) { return { error: e.message }; }
 });
 
+ipcMain.handle('rename-user-image', (_event, oldName, newName) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    const dir = getUserImagesDir(dbDir);
+    const oldPath = path.join(dir, oldName);
+    const newPath = path.join(dir, newName);
+    if (!fs.existsSync(oldPath)) return { error: '源文件不存在' };
+    if (oldPath === newPath) return { success: true, filename: oldName };
+    // 如果目标已存在，先删除旧的目标文件
+    if (fs.existsSync(newPath)) fs.unlinkSync(newPath);
+    fs.renameSync(oldPath, newPath);
+    return { success: true, filename: newName };
+  } catch (e) { return { error: e.message }; }
+});
+
 // ── 列出数据库文件夹的文件 ──
 ipcMain.handle('list-db-files', async () => {
   try {
