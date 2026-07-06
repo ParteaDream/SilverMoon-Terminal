@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
@@ -115,9 +115,34 @@ function CharacterDetailContent() {
   const [activeOutfitId, setActiveOutfitId] = useState(null)  // 当前激活的时装 ID
   const [outfitDragOver, setOutfitDragOver] = useState({})   // { [outfitId]: true } — 时装卡片的拖放高亮
   const [storyPreview, setStoryPreview] = useState(null)       // 时装故事预览
+  const [readerOpen, setReaderOpen] = useState(false)           // 角色故事阅读器
+  const [readerMode, setReaderMode] = useState('scroll')        // scroll | page
+  const [readerTheme, setReaderTheme] = useState('dark')        // dark | light | sepia
   const [statLevel, setStatLevel] = useDetailState('statLevel', 90) // 属性查看等级: 80/90/95/100
   const [travelerElement, setTravelerElement] = useDetailState('travelerElement', null) // 旅行者当前选中的元素
   useDetailScroll('character', id)  // 保存/恢复详情页滚动位置
+
+  const readerMounted = useRef(false)
+  useEffect(() => {
+    if (!readerMounted.current) return
+    window.electronAPI?.setUserConfig('readerTheme', readerTheme)
+  }, [readerTheme])
+  useEffect(() => {
+    if (!readerMounted.current) return
+    window.electronAPI?.setUserConfig('readerMode', readerMode)
+  }, [readerMode])
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.electronAPI?.getUserConfig()
+        if (res?.success && res.config) {
+          if (res.config.readerTheme) setReaderTheme(res.config.readerTheme)
+          if (res.config.readerMode) setReaderMode(res.config.readerMode)
+        }
+      } catch (_) {}
+      readerMounted.current = true
+    })()
+  }, [])
 
   // 挂载时加载数据（状态恢复由 useDetailState 的懒初始化自动处理）
   useEffect(() => {
@@ -709,9 +734,12 @@ function CharacterDetailContent() {
         ))}
       </div>
 
-      {/* ─── Content Sections ─── */}
-      <div className="px-8 py-6 space-y-8 max-w-5xl">
-        {/* Basic Info */}
+      
+{/* ─── Content Sections ─── */}
+      <div className="px-8 py-6 max-w-7xl">
+        <div className="flex flex-col xl:flex-row xl:gap-8 space-y-8 xl:space-y-0">
+          <div className="xl:w-1/2 flex flex-col space-y-8">
+{/* Basic Info */}
         {effectiveVisible.info && (
           <SectionCard icon={<Info className="w-4 h-4" />} title="基本信息" onEdit={() => setEditCharacter(true)}>
             <p className="text-sm text-surface-300 leading-relaxed"><ColoredText text={character.description_zh || '暂无简介'} /></p>
@@ -804,7 +832,8 @@ function CharacterDetailContent() {
           </SectionCard>
         )}
 
-        {/* Talents */}
+        
+{/* Talents */}
         {effectiveVisible.talents && (
           <SectionCard
             icon={<BookOpen className="w-4 h-4" />}
@@ -838,42 +867,8 @@ function CharacterDetailContent() {
           </SectionCard>
         )}
 
-        {/* Constellations */}
-        {effectiveVisible.constellations && (
-          <SectionCard
-            icon={<Crown className="w-4 h-4" />}
-            title={`命之座 · ${character.constellation_zh || '未设定'}`}
-            onAdd={() => setEditCon({ name_zh: '', description_zh: '', level: filteredCons.length + 1, icon: null })}
-            count={constellations.length}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {filteredCons.map(c => (
-                <div key={c.id} className="p-4 rounded-xl bg-surface-800/50 border border-surface-700/50 hover:border-surface-600 transition-colors group">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      {c.icon ? (
-                        <LocalImage filename={c.icon} className="w-8 h-8 rounded-lg object-cover" />
-                      ) : (
-                        <div className="w-8 h-8 rounded-lg bg-accent-gold/10 border border-accent-gold/20 flex items-center justify-center">
-                          <span className="text-accent-gold text-xs font-mono font-bold">{c.level}</span>
-                        </div>
-                      )}
-                      <span className="text-sm font-medium">{c.level}. {c.name_zh}</span>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => setEditCon({ ...c })} className="p-1 text-surface-400 hover:text-primary-400"><Edit3 className="w-3 h-3" /></button>
-                      <button onClick={() => deleteCon(c.id)} className="p-1 text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
-                    </div>
-                  </div>
-                  {c.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={c.description_zh} /></p>}
-                </div>
-              ))}
-            </div>
-            {constellations.length === 0 && <Empty text="暂无命座数据" />}
-          </SectionCard>
-        )}
-
-        {/* 培养素材 */}
+        
+{/* 培养素材 */}
         {effectiveVisible.materials && (
           <SectionCard icon={<FlaskConical className="w-4 h-4" />} title="培养素材" extra={
             <button onClick={() => launchTrainCalc(parseInt(id), location.pathname)}
@@ -894,7 +889,7 @@ function CharacterDetailContent() {
                   </button>
                 </div>
                 {ascMats.length > 0 ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {filteredAscMats.map(m => (
                       <MaterialBadge key={m.id} material={m} onEdit={() => setEditAscMat({ ...m })} onDelete={() => deleteAscMat(m.id)} />
                     ))}
@@ -915,7 +910,7 @@ function CharacterDetailContent() {
                   </button>
                 </div>
                 {talentMats.length > 0 ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                     {filteredTalentMats.map(m => (
                       <MaterialBadge key={m.id} material={m} onEdit={() => setEditTalentMat({ ...m })} onDelete={() => deleteTalentMat(m.id)} />
                     ))}
@@ -928,41 +923,10 @@ function CharacterDetailContent() {
           </SectionCard>
         )}
 
-        {/* 角色故事 */}
-        {effectiveVisible.lore && (
-          <SectionCard
-            icon={<Sparkles className="w-4 h-4" />}
-            title="角色故事"
-            onAdd={() => setEditStory({ title_zh: '', content: '', sort_order: stories.length + 1 })}
-            count={stories.length}
-            defaultCollapsed
-          >
-            <div className="space-y-3">
-              {stories.map(s => (
-                <div key={s.id} className="p-4 rounded-xl bg-surface-800/50 border border-surface-700/50 hover:border-surface-600 transition-colors group">
-                  <div className="flex items-start justify-between mb-2">
-                    <h4 className="text-sm font-semibold flex items-center gap-2">
-                      <FileText className="w-3.5 h-3.5 text-primary-400" />
-                      {s.title_zh}
-                    </h4>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => setEditStory({ ...s })} className="p-1 text-surface-400 hover:text-primary-400"><Edit3 className="w-3 h-3" /></button>
-                      <button onClick={() => deleteStory(s.id)} className="p-1 text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
-                    </div>
-                  </div>
-                  {s.content && <p className="text-xs text-surface-400 leading-relaxed whitespace-pre-wrap"><ColoredText text={s.content} /></p>}
-                </div>
-              ))}
-            </div>
-            {stories.length === 0 && (
-              <div>
-                <Empty text="暂无角色故事。点击 + 添加角色故事模块。" />
-              </div>
-            )}
-          </SectionCard>
-        )}
-
-        {/* Outfits */}
+        
+          </div>
+          <div className="xl:w-1/2 flex flex-col space-y-8">
+{/* Outfits */}
         {effectiveVisible.outfits && (
           <SectionCard
             icon={<Shirt className="w-4 h-4" />}
@@ -1119,7 +1083,44 @@ function CharacterDetailContent() {
           </SectionCard>
         )}
 
-        {/* Specialty Dish */}
+        
+{/* Constellations */}
+        {effectiveVisible.constellations && (
+          <SectionCard
+            icon={<Crown className="w-4 h-4" />}
+            title={`命之座 · ${character.constellation_zh || '未设定'}`}
+            onAdd={() => setEditCon({ name_zh: '', description_zh: '', level: filteredCons.length + 1, icon: null })}
+            count={constellations.length}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {filteredCons.map(c => (
+                <div key={c.id} className="p-4 rounded-xl bg-surface-800/50 border border-surface-700/50 hover:border-surface-600 transition-colors group">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      {c.icon ? (
+                        <LocalImage filename={c.icon} className="w-8 h-8 rounded-lg object-cover" />
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-accent-gold/10 border border-accent-gold/20 flex items-center justify-center">
+                          <span className="text-accent-gold text-xs font-mono font-bold">{c.level}</span>
+                        </div>
+                      )}
+                      <span className="text-sm font-medium">{c.level}. {c.name_zh}</span>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => setEditCon({ ...c })} className="p-1 text-surface-400 hover:text-primary-400"><Edit3 className="w-3 h-3" /></button>
+                      <button onClick={() => deleteCon(c.id)} className="p-1 text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                  </div>
+                  {c.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={c.description_zh} /></p>}
+                </div>
+              ))}
+            </div>
+            {constellations.length === 0 && <Empty text="暂无命座数据" />}
+          </SectionCard>
+        )}
+
+        
+{/* Specialty Dish */}
         {effectiveVisible.dish && (
           <SectionCard
             icon={<UtensilsCrossed className="w-4 h-4" />}
@@ -1157,7 +1158,8 @@ function CharacterDetailContent() {
           </SectionCard>
         )}
 
-        {/* Namecard */}
+        
+{/* Namecard */}
         {effectiveVisible.namecard && (
           <SectionCard
             icon={<Image className="w-4 h-4" />}
@@ -1187,7 +1189,48 @@ function CharacterDetailContent() {
           </SectionCard>
         )}
 
-        {/* Image Gallery */}
+        
+{/* 角色故事 */}
+        {effectiveVisible.lore && (
+          <SectionCard
+            icon={<Sparkles className="w-4 h-4" />}
+            title="角色故事"
+            onAdd={() => setEditStory({ title_zh: '', content: '', sort_order: stories.length + 1 })}
+            count={stories.length}
+            defaultCollapsed
+            extra={stories.length > 0 ? (
+              <button onClick={() => setReaderOpen(true)} className="px-2.5 py-1 rounded-lg text-xs bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 border border-primary-500/20 transition-colors">
+                <BookOpen className="w-3 h-3 inline mr-1" />阅读
+              </button>
+            ) : null}
+          >
+            <div className="space-y-3">
+              {stories.map(s => (
+                <div key={s.id} className="p-4 rounded-xl bg-surface-800/50 border border-surface-700/50 hover:border-surface-600 transition-colors group">
+                  <div className="flex items-start justify-between mb-2">
+                    <h4 className="text-sm font-semibold flex items-center gap-2">
+                      <FileText className="w-3.5 h-3.5 text-primary-400" />
+                      {s.title_zh}
+                    </h4>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => setEditStory({ ...s })} className="p-1 text-surface-400 hover:text-primary-400"><Edit3 className="w-3 h-3" /></button>
+                      <button onClick={() => deleteStory(s.id)} className="p-1 text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                  </div>
+                  {s.content && <p className="text-xs text-surface-400 leading-relaxed whitespace-pre-wrap"><ColoredText text={s.content} /></p>}
+                </div>
+              ))}
+            </div>
+            {stories.length === 0 && (
+              <div>
+                <Empty text="暂无角色故事。点击 + 添加角色故事模块。" />
+              </div>
+            )}
+          </SectionCard>
+        )}
+
+        
+{/* Image Gallery */}
         {effectiveVisible.gallery && (
           <SectionCard icon={<Image className="w-4 h-4" />} title="图库">
             <div
@@ -1255,7 +1298,25 @@ function CharacterDetailContent() {
             )}
           </SectionCard>
         )}
+      
+          </div>
+        </div>
       </div>
+
+
+      
+      {/* ═══ Story Reader ═══ */}
+      {readerOpen && (
+        <StoryReader
+          stories={stories}
+          characterName={character?.name_zh}
+          onClose={() => setReaderOpen(false)}
+          mode={readerMode}
+          onModeChange={setReaderMode}
+          theme={readerTheme}
+          onThemeChange={setReaderTheme}
+        />
+      )}
 
       {/* ═══ Modals ═══ */}
 
@@ -2027,9 +2088,9 @@ function MaterialBadge({ material, onEdit, onDelete }) {
         </div>
       )}
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-surface-200 truncate">{material.material_name || material.material_id}</p>
+        <p className="text-xs font-medium text-surface-200 whitespace-nowrap">{material.material_name || material.material_id}</p>
         {material.material_type && (
-          <span className="text-[10px] px-1 py-0.5 rounded bg-surface-700 text-surface-400">{MATERIAL_TYPE_ZH[material.material_type] || material.material_type}</span>
+          <span className="text-[10px] px-1 py-0.5 rounded bg-surface-700 text-surface-400 whitespace-nowrap">{MATERIAL_TYPE_ZH[material.material_type] || material.material_type}</span>
         )}
       </div>
       {(onEdit || onDelete) && (
@@ -2054,4 +2115,165 @@ function safeParseJSON(str) {
 function getLevelStat(character, level, stat) {
   const key = `${stat}_${level}`
   return character[key]
+}
+
+
+// ═══════════════════════════════════════════════
+// 角色故事阅读器
+// ═══════════════════════════════════════════════
+const READER_THEMES = {
+  dark: {
+    name: '暗色', bg: 'bg-[#1a1a2e]', card: 'bg-[#1f1f35]',
+    text: 'text-[#c8c8d4]', textMuted: 'text-[#8888a0]', heading: 'text-[#e0e0f0]',
+    buttonBg: 'bg-white/8', buttonHover: 'hover:bg-white/14', buttonText: 'text-white/70',
+    buttonActive: 'bg-white/14 text-white', border: 'border-[#2a2a45]', borderSubtle: 'border-white/8',
+    chapterText: 'text-white/55', chapterHover: 'hover:text-white/85 hover:bg-white/6',
+    chapterActive: 'bg-primary-500/12 text-primary-400 border-l-2 border-primary-500',
+    chapterInactive: 'text-white/55 border-l-2 border-transparent',
+    toggleBg: 'bg-white/6', toggleActive: 'bg-white/14 text-white', toggleInactive: 'text-white/35 hover:text-white/60',
+  },
+  sepia: {
+    name: '仿古', bg: 'bg-[#f5ecd7]', card: 'bg-[#ede0c8]',
+    text: 'text-[#5c4b3a]', textMuted: 'text-[#8b7b6a]', heading: 'text-[#3d2b1a]',
+    buttonBg: 'bg-[#d4c4a8]/60', buttonHover: 'hover:bg-[#c8b490]/70', buttonText: 'text-[#5c4b3a]/70',
+    buttonActive: 'bg-[#c8b490]/70 text-[#3d2b1a]', border: 'border-[#d4c4a8]', borderSubtle: 'border-[#d4c4a8]/50',
+    chapterText: 'text-[#5c4b3a]/55', chapterHover: 'hover:text-[#3d2b1a] hover:bg-[#d4c4a8]/30',
+    chapterActive: 'bg-[#c8a060]/20 text-[#8b6020] border-l-2 border-[#c8a060]',
+    chapterInactive: 'text-[#5c4b3a]/55 border-l-2 border-transparent',
+    toggleBg: 'bg-[#d4c4a8]/50', toggleActive: 'bg-[#c8b490]/70 text-[#3d2b1a]', toggleInactive: 'text-[#5c4b3a]/40 hover:text-[#5c4b3a]/60',
+  },
+  light: {
+    name: '亮色', bg: 'bg-[#fafaf9]', card: 'bg-[#f2f1ef]',
+    text: 'text-[#2d2d2d]', textMuted: 'text-[#7a7a7a]', heading: 'text-[#1a1a1a]',
+    buttonBg: 'bg-[#e8e8e6]', buttonHover: 'hover:bg-[#dddcd8]', buttonText: 'text-[#2d2d2d]/70',
+    buttonActive: 'bg-[#e0e0de] text-[#1a1a1a]', border: 'border-[#e0e0de]', borderSubtle: 'border-[#e8e8e6]',
+    chapterText: 'text-[#2d2d2d]/50', chapterHover: 'hover:text-[#1a1a1a] hover:bg-[#e8e8e6]/60',
+    chapterActive: 'bg-primary-500/8 text-primary-600 border-l-2 border-primary-500',
+    chapterInactive: 'text-[#2d2d2d]/50 border-l-2 border-transparent',
+    toggleBg: 'bg-[#e8e8e6]', toggleActive: 'bg-[#e0e0de] text-[#1a1a1a]', toggleInactive: 'text-[#2d2d2d]/35 hover:text-[#2d2d2d]/55',
+  },
+}
+
+function StoryReader({ stories, characterName, onClose, mode, onModeChange, theme, onThemeChange }) {
+  const [activeIdx, setActiveIdx] = useState(0)
+  const [page, setPage] = useState(1)
+  const contentRef = useRef(null)
+  const windowPosRef = useRef({ x: 0, y: 0 })
+  const dragRef = useRef(null)
+  const t = READER_THEMES[theme] || READER_THEMES.dark
+  const story = stories[activeIdx]
+  const totalPages = story ? Math.ceil((story.content || '').length / 2000) : 1
+
+  useEffect(() => {
+    window.electronAPI?.getWindowPosition().then(([wx, wy]) => { windowPosRef.current = { x: wx, y: wy } })
+  }, [])
+
+  const handleTitleDrag = useCallback((e) => {
+    if (e.button !== 0) return
+    e.preventDefault(); e.stopPropagation()
+    const startX = e.screenX, startY = e.screenY
+    const { x: wx, y: wy } = windowPosRef.current
+    dragRef.current = { startX, startY, wx, wy }
+    window.electronAPI?.getWindowPosition().then(([fx, fy]) => {
+      if (dragRef.current) { dragRef.current.wx = fx; dragRef.current.wy = fy }
+    })
+    const onMove = (ev) => {
+      if (!dragRef.current) return
+      const d = dragRef.current
+      window.electronAPI?.setWindowPosition(d.wx + ev.screenX - d.startX, d.wy + ev.screenY - d.startY)
+    }
+    const onUp = () => {
+      if (dragRef.current) windowPosRef.current = { x: dragRef.current.wx, y: dragRef.current.wy }
+      dragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowLeft' && mode === 'page') setPage(p => Math.max(1, p - 1))
+      if (e.key === 'ArrowRight' && mode === 'page') setPage(p => Math.min(totalPages, p + 1))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mode, totalPages, onClose])
+
+  if (!stories.length) return null
+
+  const pageContent = story?.content ? story.content.slice((page - 1) * 2000, page * 2000) : ''
+
+  return (
+    <div className="fixed inset-0 z-[250] flex no-drag">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className={`relative z-10 flex flex-1 m-3 sm:m-6 rounded-2xl overflow-hidden shadow-2xl border ${t.border} ${t.bg} animate-scale-in transition-colors duration-500`} onClick={e => e.stopPropagation()}>
+        <div className={`w-52 lg:w-60 flex-shrink-0 border-r ${t.border} flex flex-col ${t.card} transition-colors duration-500`}>
+          <div className={`px-4 py-3 border-b ${t.borderSubtle}`}>
+            <h3 className={`text-sm font-semibold ${t.heading}`}>{characterName || ''} · 故事</h3>
+            <p className={`text-[10px] ${t.textMuted} mt-0.5`}>共 {stories.length} 篇</p>
+          </div>
+          <div className="flex-1 overflow-y-auto py-2">
+            {stories.map((s, i) => (
+              <button key={s.id} onClick={() => { setActiveIdx(i); setPage(1) }}
+                className={`w-full text-left px-4 py-2.5 text-xs transition-colors duration-200 flex items-center gap-2 ${
+                  i === activeIdx ? t.chapterActive : `${t.chapterText} ${t.chapterHover} border-l-2 border-transparent`
+                }`}>
+                <FileText className="w-3 h-3 flex-shrink-0" /><span className="truncate">{s.title_zh}</span>
+              </button>
+            ))}
+          </div>
+          <div className={`border-t ${t.borderSubtle} px-4 py-3 space-y-2.5 transition-colors duration-500`}>
+            <div className="flex items-center gap-1.5">
+              {['dark', 'sepia', 'light'].map(th => {
+                const thInfo = READER_THEMES[th]
+                const colors = { dark: '#1a1a2e', sepia: '#d4b896', light: '#fafaf9' }
+                return (
+                  <div key={th} onClick={() => onThemeChange(th)}
+                    className="w-6 h-6 rounded-full border-2 transition-[border-color,box-shadow] duration-300 cursor-pointer"
+                    style={{ backgroundColor: colors[th], borderColor: theme === th ? 'rgb(129 140 248)' : 'rgba(255,255,255,0.15)' }}
+                    onMouseEnter={e => { if (theme !== th) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.6)' }}
+                    onMouseLeave={e => { if (theme !== th) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)' }}
+                    title={thInfo.name} />
+                )
+              })}
+            </div>
+            <div className={`flex items-center rounded-lg ${t.toggleBg} p-0.5 transition-colors duration-300`}>
+              <button onClick={() => onModeChange('scroll')} className={`flex-1 py-1 rounded-md text-[10px] transition-colors duration-200 ${mode === 'scroll' ? t.toggleActive : t.toggleInactive}`}>滚动</button>
+              <button onClick={() => onModeChange('page')} className={`flex-1 py-1 rounded-md text-[10px] transition-colors duration-200 ${mode === 'page' ? t.toggleActive : t.toggleInactive}`}>翻页</button>
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className={`flex items-center justify-between px-5 py-3 border-b ${t.border} flex-shrink-0 transition-colors duration-500`} onMouseDown={handleTitleDrag}>
+            <div className="flex items-center gap-2 min-w-0">
+              <BookOpen className="w-4 h-4 text-primary-400 flex-shrink-0" />
+              <span className={`text-sm font-medium ${t.heading} truncate`}>{story?.title_zh || ''}</span>
+            </div>
+            <button onClick={onClose} className={`p-1.5 rounded-lg ${t.textMuted} hover:${t.heading} ${t.buttonBg} ${t.buttonHover} transition-colors`}><X className="w-4 h-4" /></button>
+          </div>
+          <div ref={contentRef} className={`flex-1 overflow-y-auto px-6 sm:px-12 lg:px-20 py-8 ${t.text} text-sm leading-relaxed transition-colors duration-500`}>
+            {mode === 'scroll' ? (
+              <div className="max-w-2xl mx-auto">
+                <h2 className={`text-lg font-bold mb-6 ${t.heading}`}>{story?.title_zh}</h2>
+                <div className="whitespace-pre-wrap">{story?.content || '暂无内容'}</div>
+              </div>
+            ) : (
+              <div className="max-w-2xl mx-auto min-h-full flex flex-col">
+                <h2 className={`text-lg font-bold mb-6 ${t.heading}`}>{story?.title_zh}</h2>
+                <div className="whitespace-pre-wrap flex-1">{pageContent}</div>
+                <div className={`flex items-center justify-between pt-8 mt-8 border-t ${t.border}`}>
+                  <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className={`px-3 py-1.5 rounded-lg text-xs ${t.buttonBg} ${t.buttonHover} ${t.buttonText} disabled:opacity-25 transition-colors`}>← 上一页</button>
+                  <span className={`text-xs ${t.textMuted}`}>{page} / {totalPages}</span>
+                  <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className={`px-3 py-1.5 rounded-lg text-xs ${t.buttonBg} ${t.buttonHover} ${t.buttonText} disabled:opacity-25 transition-colors`}>下一页 →</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }

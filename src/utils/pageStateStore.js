@@ -86,6 +86,13 @@ export function savePageStateSync(key, scrollY, extra = {}) {
     savePageState(key, scrollY, extra)
     return
   }
+  // 检查是否与上次保存的状态相同，避免无变化时频繁写文件
+  const existing = _cache.find(s => s.key === key)
+  if (existing && existing.scrollY === scrollY) {
+    const extraSame = Object.keys(extra).every(k => existing.state?.[k] === extra[k])
+      && Object.keys(existing.state || {}).every(k => extra[k] === existing.state?.[k])
+    if (extraSame) return  // 状态没变化，跳过写入
+  }
   const filtered = _cache.filter(s => s.key !== key)
   filtered.push({ key, scrollY, state: extra, ts: Date.now() })
   _cache = filtered.length > MAX_ENTRIES ? filtered.slice(-MAX_ENTRIES) : filtered

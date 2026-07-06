@@ -405,10 +405,23 @@ function loadUserConfig() {
   return {};
 }
 
+let _userConfigSaveTimer = null
+let _userConfigPending = null
+
 function saveUserConfig(config) {
   const p = getUserConfigPath();
   if (!p) return;
-  fs.writeFileSync(p, JSON.stringify(config, null, 2));
+  // 合并到待写入数据，延迟 500ms 批量写入，减少频繁 I/O
+  _userConfigPending = config
+  if (_userConfigSaveTimer) return
+  _userConfigSaveTimer = setTimeout(() => {
+    _userConfigSaveTimer = null
+    const toSave = _userConfigPending
+    _userConfigPending = null
+    if (toSave) {
+      try { fs.writeFileSync(p, JSON.stringify(toSave, null, 2)) } catch (_) {}
+    }
+  }, 500)
 }
 
 // ── 图片缓存已弃用（base64 存入 SQLite 会撑爆 WASM 内存）──
@@ -4550,11 +4563,19 @@ ipcMain.handle('get-user-config', () => {
   }
 });
 
+// user.json 内存缓存 + 合并写入（避免频繁 I/O 触发外部工具保存冲突）
+let _userConfigCache = null
+function _getUserConfigCache() {
+  if (!_userConfigCache) _userConfigCache = loadUserConfig()
+  return _userConfigCache
+}
+
 ipcMain.handle('set-user-config', (_event, key, value) => {
   try {
-    const config = loadUserConfig();
-    config[key] = value;
-    saveUserConfig(config);
+    const config = _getUserConfigCache()
+    config[key] = value
+    _userConfigCache = config
+    saveUserConfig(config)
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };

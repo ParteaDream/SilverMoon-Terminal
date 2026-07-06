@@ -695,7 +695,7 @@ export default function GameDataPage() {
   return (
     <div className="pt-6 px-6 pb-0 flex gap-4 h-full min-h-0">
       {/* ═══ 左侧：表格区 ═══ */}
-      <div ref={listScrollRef} className={`${activeDetailId ? 'w-[420px] flex-shrink-0' : 'flex-1'} overflow-auto bg-surface-900`}>
+      <div ref={listScrollRef} className={`${activeDetailId ? 'w-[420px] flex-shrink-0' : 'flex-1'} overflow-auto`}>
         {/* 多选开关 */}
         <div className="flex items-center gap-3 mb-3">
           <label className="flex items-center gap-2 cursor-pointer select-none">

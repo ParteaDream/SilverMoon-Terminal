@@ -314,10 +314,10 @@ input[type="checkbox"], input[type="radio"], input[type="submit"], input[type="b
   -webkit-user-select: none;
 }
 
-/* 按钮悬停高亮 — 使用主题第四色 (低透明度，不覆盖已有 hover 样式) */
-button:hover:not(:disabled) {
-  background-color: rgb(var(--scrollbar-thumb));
-  color: rgb(var(--btn-text-4th));
+/* 按钮悬停高亮 — 仅应用于无自定义 hover 样式的按钮 */
+button:where(:not([class*="hover:"])):hover:not(:disabled) {
+  background-color: rgb(var(--surface-800));
+  color: rgb(var(--surface-200));
   border-radius: 6px;
 }
 
@@ -377,10 +377,36 @@ button:hover:not(:disabled) {
   to { opacity: 1; transform: scale(1); }
 }
 
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 .animate-fade-in { animation: fadeIn 0.2s ease-out; }
 .animate-slide-up { animation: slideUp 0.3s ease-out; }
 .animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
 .animate-scale-in { animation: scaleIn 0.2s ease-out; }
+
+/* 终端窗口动画 — 神奇效果（类似 macOS 窗口吸入 Dock） */
+@keyframes genieOut {
+  0% { transform: scale(0.2, 0.02) translateY(40px); opacity: 0; }
+  60% { transform: scale(0.7, 0.15) translateY(15px); opacity: 0.6; }
+  100% { transform: scale(1, 1) translateY(0); opacity: 1; }
+}
+@keyframes genieIn {
+  0% { transform: scale(1, 1) translateY(0); opacity: 1; }
+  40% { transform: scale(0.7, 0.15) translateY(15px); opacity: 0.6; }
+  100% { transform: scale(0.2, 0.02) translateY(40px); opacity: 0; }
+}
+.animate-genie-out { animation: genieOut 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+.animate-genie-in { animation: genieIn 0.3s cubic-bezier(0.6, 0, 0.8, 0.2) forwards; }
+.animate-fade-out { animation: fadeOut 0.12s ease-in forwards; }
+.terminal-window-maximizing {
+  transition: left 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+              top 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+              width 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+              height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
 
 
 /* 侧栏文字延迟淡入：等宽度过渡完成后再显示文字，避免展开过程换行抖动 */

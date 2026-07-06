@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useDb } from '../context/DbContext'
 import { useTerminal } from '../context/TerminalContext'
 import { APPS } from '../components/TerminalDock'
@@ -217,11 +217,27 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
   // 检测 macOS（红绿灯偏移用）
   const isMac = !/Win/i.test(navigator.platform || '')
 
-  // 全屏时避开侧栏和开发者工具栏
+  // 全屏时避开侧栏和开发者工具栏（使用显式 width/height 以支持投射动画）
+  const [winSize, setWinSize] = useState({ w: window.innerWidth, h: window.innerHeight })
+  useEffect(() => {
+    const onResize = () => setWinSize({ w: window.innerWidth, h: window.innerHeight })
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // 最大化/恢复投射动画：fullscreen 变化时短暂开启全属性 transition
+  const [maximizing, setMaximizing] = useState(false)
+  useLayoutEffect(() => {
+    setMaximizing(true)
+    const timer = setTimeout(() => setMaximizing(false), 550)
+    return () => clearTimeout(timer)
+  }, [fullscreen])
+
   const fullscreenStyle = fullscreen ? {
     position: 'fixed',
     left: sidebarWidth, top: 0,
-    right: 0, bottom: devMode ? 40 : 0,
+    width: winSize.w - sidebarWidth,
+    height: winSize.h - (devMode ? 40 : 0),
     zIndex: 9999,
   } : null
 
@@ -233,7 +249,9 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
     onFocus?.()
   }, [left, top, width, height, onFocus])
 
-  const handleTitleDoubleClick = useCallback(() => {
+  const handleTitleDoubleClick = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
     onUpdateState({ fullscreen: !fullscreen })
   }, [fullscreen, onUpdateState])
 
@@ -315,20 +333,53 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp) }
   }, [dragging, resizing, onUpdateState])
 
-  if (hidden) return null
+  // 隐藏/唤起动画：genie 神奇效果（吸入/弹出 Dock）
+  const [hideAnimating, setHideAnimating] = useState(false)
+  const [summoning, setSummoning] = useState(false)
+  const [actuallyHidden, setActuallyHidden] = useState(hidden)
+  const hideTimerRef = useRef(null)
+
+  useEffect(() => {
+    if (hidden && !actuallyHidden) {
+      setHideAnimating(true)
+      setSummoning(false)
+      hideTimerRef.current = setTimeout(() => {
+        setActuallyHidden(true)
+        setHideAnimating(false)
+      }, 350)
+    } else if (!hidden && actuallyHidden) {
+      clearTimeout(hideTimerRef.current)
+      setActuallyHidden(false)
+      setSummoning(true)
+      setTimeout(() => setSummoning(false), 400)
+    }
+    return () => clearTimeout(hideTimerRef.current)
+  }, [hidden, actuallyHidden])
+
+  // 关闭淡出
+  const [closing, setClosing] = useState(false)
+  const handleClose = useCallback(() => {
+    if (closing) return
+    setClosing(true)
+    setTimeout(() => onClose(), 120)
+  }, [closing, onClose])
+
+  if (actuallyHidden) return null
+  const animClass = hideAnimating ? 'animate-genie-in' : (summoning ? 'animate-genie-out' : '')
+  const closeClass = closing ? 'animate-fade-out' : ''
   const AppIcon = app.icon
   const isPageVisible = pageVisible !== false // 默认可见
 
   return (
     <div ref={windowRef}
-      className="no-drag animate-scale-in"
-      style={{ ...((fullscreen ? fullscreenStyle : { position: 'fixed', left, top, width, height, zIndex })), display: isPageVisible ? undefined : 'none' }}
+      className={`no-drag ${maximizing ? 'terminal-window-maximizing' : ''} ${animClass} ${closeClass}`}
+      style={{ ...((fullscreen ? fullscreenStyle : { position: 'fixed', left, top, width, height, zIndex })), display: isPageVisible ? undefined : 'none', transformOrigin: 'center bottom' }}
       onMouseDown={handleWindowClick}
     >
       <div className={`h-full flex flex-col overflow-hidden border border-white/10 shadow-2xl bg-surface-900/90 backdrop-blur-xl transition-all duration-150 ${fullscreen ? 'rounded-none border-0' : 'rounded-xl'}`}>
-        <div className="flex items-center bg-surface-800/60 backdrop-blur-sm border-b border-white/5 select-none" style={{ minHeight: 38 }} onMouseDown={fullscreen ? handleFullscreenTitleMouseDown : handleTitleMouseDown} onDoubleClick={handleTitleDoubleClick}>
+        <div className="flex items-center bg-surface-800/60 backdrop-blur-sm border-b border-white/5 select-none no-drag" style={{ minHeight: 38 }} onMouseDown={fullscreen ? handleFullscreenTitleMouseDown : handleTitleMouseDown} onDoubleClick={handleTitleDoubleClick}>
           {fullscreen && isMac && <div style={{ width: Math.max(0, 72 - sidebarWidth), flexShrink: 0 }} />}
-          <TrafficLights onClose={onClose} onHide={onHide} onFullscreen={() => onUpdateState({ fullscreen: !fullscreen })} isFullscreen={fullscreen} />
+          <TrafficLights onClose={handleClose} onHide={onHide} onFullscreen={() => onUpdateState({ fullscreen: !fullscreen })} isFullscreen={fullscreen} />
           <div className="flex-1 flex items-center gap-2 justify-center">
             <AppIcon className="w-3.5 h-3.5 text-surface-400" />
             <span className="text-[11px] font-medium text-surface-400">{app.name}</span>
@@ -852,9 +903,13 @@ export default function TerminalPage() {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden select-none relative"
-      style={{ background: wallpaper ? `url(${wallpaper}) center/cover no-repeat` : undefined }}>
-      {wallpaper && <div className="absolute inset-0 bg-black/40 pointer-events-none" />}
+    <div className="h-full flex flex-col overflow-hidden select-none relative">
+      {wallpaper && (
+        <>
+          <img src={wallpaper} alt="" className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
+          <div className="absolute inset-0 bg-black/40 pointer-events-none" />
+        </>
+      )}
       <div ref={desktopRef} className="flex-1 relative overflow-hidden">
         <div className="absolute inset-0 p-1">
           {APPS.map((app, i) => (
