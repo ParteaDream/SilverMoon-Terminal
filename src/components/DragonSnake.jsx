@@ -75,7 +75,7 @@ export default function DragonSnake() {
   const nextDirRef = useRef('right')
   const foodRef = useRef(null)
   const tickIdRef = useRef(null)
-  const tailDirRef = useRef('right')
+  const tailDirRef = useRef('left')
   const imagesRef = useRef({})
   const imagesReadyRef = useRef(false)
   const gameStateRef = useRef('idle')
@@ -378,7 +378,7 @@ export default function DragonSnake() {
     directionRef.current = 'right'
     nextDirRef.current = 'right'
     // 保持已有食物位置，不重置（初始绘制已放置）
-    tailDirRef.current = 'right'
+    tailDirRef.current = 'left'
     setScore(0)
     scoreRef.current = 0
     setIsNewRecord(false)
@@ -403,7 +403,7 @@ export default function DragonSnake() {
     directionRef.current = 'right'
     nextDirRef.current = 'right'
     foodRef.current = randomFood(snakeRef.current)
-    tailDirRef.current = 'right'
+    tailDirRef.current = 'left'
     setScore(0)
     scoreRef.current = 0
     setIsNewRecord(false)
@@ -525,7 +525,7 @@ export default function DragonSnake() {
   // ── 初始绘制 ──
   useEffect(() => {
     foodRef.current = randomFood(snakeRef.current)
-    tailDirRef.current = 'right'
+    tailDirRef.current = 'left'
     drawFrame()
   }, [drawFrame])
 

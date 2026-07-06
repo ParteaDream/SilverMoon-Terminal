@@ -59,6 +59,11 @@ export default function BetaMemo() {
     setView('manage')
   }, [])
 
+  const handleReorder = useCallback(async (reordered) => {
+    setTasks(reordered)
+    await saveTasks(reordered)
+  }, [])
+
   const handleBack = useCallback(async () => {
     setView('list')
     setSelectedTask(null)
@@ -101,16 +106,59 @@ export default function BetaMemo() {
     case 'manage':
       return selectedTask
         ? <ManageView task={selectedTask} onUpdate={handleUpdateTask} onDelete={handleDeleteTask} onBack={handleBack} />
-        : <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} />
+        : <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} onReorder={handleReorder} />
     default:
-      return <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} />
+      return <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} onReorder={handleReorder} />
   }
 }
 
 // ═══════════════════════════════════════
 // 任务列表视图
 // ═══════════════════════════════════════
-function TaskListView({ tasks, onCreate, onManage }) {
+function TaskListView({ tasks, onCreate, onManage, onReorder }) {
+  const [dragIndex, setDragIndex] = useState(null)
+  const [overIndex, setOverIndex] = useState(null)
+  const dragNode = useRef(null)
+
+  function handleDragStart(e, index) {
+    dragNode.current = index
+    setDragIndex(index)
+    e.dataTransfer.effectAllowed = 'move'
+    // 让被拖拽卡片半透明
+    if (e.target) e.target.style.opacity = '0.5'
+  }
+
+  function handleDragOver(e, index) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragNode.current !== index) setOverIndex(index)
+  }
+
+  function handleDragEnd(e) {
+    if (e.target) e.target.style.opacity = ''
+    setDragIndex(null)
+    setOverIndex(null)
+    dragNode.current = null
+  }
+
+  function handleDrop(e, index) {
+    e.preventDefault()
+    const fromIdx = dragNode.current
+    if (fromIdx == null || fromIdx === index) {
+      setDragIndex(null)
+      setOverIndex(null)
+      dragNode.current = null
+      return
+    }
+    const next = [...tasks]
+    const [moved] = next.splice(fromIdx, 1)
+    next.splice(index, 0, moved)
+    onReorder(next)
+    setDragIndex(null)
+    setOverIndex(null)
+    dragNode.current = null
+  }
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
@@ -133,8 +181,22 @@ function TaskListView({ tasks, onCreate, onManage }) {
           </div>
         ) : (
           <div className="grid gap-3">
-            {tasks.map(task => (
-              <TaskCard key={task.id} task={task} onClick={() => onManage(task)} />
+            {tasks.map((task, i) => (
+              <div
+                key={task.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, i)}
+                onDragOver={(e) => handleDragOver(e, i)}
+                onDragEnd={handleDragEnd}
+                onDrop={(e) => handleDrop(e, i)}
+                className={`transition-all duration-200 ${
+                  overIndex === i && dragIndex !== i
+                    ? 'translate-y-1 opacity-80'
+                    : ''
+                } ${dragIndex === i ? 'cursor-grabbing' : 'cursor-grab'}`}
+              >
+                <TaskCard task={task} onClick={() => onManage(task)} />
+              </div>
             ))}
           </div>
         )}
@@ -159,9 +221,16 @@ function TaskCard({ task, onClick }) {
           </p>
         </div>
         <div className="flex gap-1 shrink-0 ml-3">
-          {IMAGE_TYPES.map(t => (
-            <div key={t.key} className={`w-2 h-2 rounded-full ${task[t.key + 'Image'] ? 'bg-green-500' : 'bg-surface-600'}`} />
-          ))}
+          {IMAGE_TYPES.map(t => {
+            const hasImg = !!task[t.key + 'Image']
+            const completed = task.completedTypes?.[t.key]
+            let dotColor = 'bg-surface-600' // 无图=灰
+            if (hasImg && completed) dotColor = 'bg-green-500' // 有图且完成=绿
+            else if (hasImg) dotColor = 'bg-yellow-500' // 有图未完成=黄
+            return (
+              <div key={t.key} className={`w-2 h-2 rounded-full ${dotColor}`} />
+            )
+          })}
         </div>
       </div>
     </button>
@@ -241,6 +310,7 @@ function CreateView({ onSave, onCancel, tasks }) {
       constellationImage: renamedImages.constellation,
       questionnaireImage: renamedImages.questionnaire,
       strokes: { summary: [], constellation: [], questionnaire: [] },
+      completedTypes: { summary: false, constellation: false, questionnaire: false },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -390,9 +460,9 @@ function ImageDropZone({ label, filename, onImport, onDrop, onRemove }) {
 // ═══════════════════════════════════════
 
 // ── 绘制所有笔迹（纯函数，被多处复用）──
-function drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, previewY, okDragRect) {
+function drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, previewY, okDragRect, pausePreview) {
   ctx.clearRect(0, 0, w, h)
-  if (!showStrokes && previewY == null && !okDragRect) return
+  if (!showStrokes && previewY == null && !okDragRect && !pausePreview) return
 
   const scaleX = w / (imgNaturalSize.w || 1)
   const scaleY = h / (imgNaturalSize.h || 1)
@@ -400,14 +470,25 @@ function drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, preview
   for (const s of strokes) {
     ctx.save()
     if (s.type === 'ok') {
-      const y = s.y * scaleY
+      // 兼容新旧格式：新格式用 points 数组，旧格式用 y/height
       const hh = (s.height || 13) / 2
       ctx.globalAlpha = s.globalAlpha ?? 1
       ctx.fillStyle = 'rgba(34, 197, 94, 0.75)'
-      ctx.fillRect(0, y - hh, w, s.height || 13)
       ctx.strokeStyle = 'rgba(34, 197, 94, 0.9)'
       ctx.lineWidth = 1
-      ctx.strokeRect(0, y - hh, w, s.height || 13)
+      if (s.points) {
+        // 统一取 min/max，一笔实心矩形，透明度均匀无叠加
+        const ptsY = s.points.map(p => p.y * scaleY)
+        const minY = Math.min(...ptsY)
+        const maxY = Math.max(...ptsY)
+        const totalH = (maxY - minY) + (s.height || 13)
+        ctx.fillRect(0, minY - hh, w, totalH)
+        ctx.strokeRect(0, minY - hh, w, totalH)
+      } else {
+        const y = s.y * scaleY
+        ctx.fillRect(0, y - hh, w, s.height || 13)
+        ctx.strokeRect(0, y - hh, w, s.height || 13)
+      }
     } else if (s.type === 'pause') {
       const color = s.color || '#f97316'
       const r = s.radius || 10
@@ -437,7 +518,7 @@ function drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, preview
     ctx.restore()
   }
 
-  // OK 拖动实时预览（平滑矩形区域）
+  // OK 拖动实时预览：展示从起点到当前位置的完整笔迹覆盖范围
   if (okDragRect) {
     const top = Math.min(okDragRect.y1, okDragRect.y2) * scaleY
     const bottom = Math.max(okDragRect.y1, okDragRect.y2) * scaleY
@@ -454,16 +535,34 @@ function drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, preview
     ctx.restore()
   }
 
-  // 悬停预览线（非拖动时的 OK 预览）
-  if (previewY != null && !okDragRect) {
+  // 自由画笔悬停预览：显示圆圈光标
+  if (pausePreview) {
+    const px = pausePreview.x * scaleX
+    const py = pausePreview.y * scaleY
+    const color = pausePreview.color || '#f97316'
+    const r = pausePreview.radius || 10
+    ctx.save()
+    ctx.globalAlpha = 0.5
+    ctx.fillStyle = color
+    ctx.beginPath()
+    ctx.arc(px, py, r, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // 悬停/拖动时居中光标条带（表示鼠标当前中心位置）
+  if (previewY != null) {
     const py = previewY * scaleY
     ctx.save()
-    ctx.globalAlpha = 0.4
-    ctx.fillStyle = 'rgba(34, 197, 94, 0.6)'
+    ctx.globalAlpha = 0.8
+    ctx.fillStyle = 'rgba(34, 197, 94, 0.9)'
     ctx.fillRect(0, py - 6.5, w, 13)
-    ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)'
+    ctx.strokeStyle = 'rgba(34, 197, 94, 1)'
     ctx.lineWidth = 1
-    ctx.setLineDash([4, 4])
+    ctx.setLineDash([3, 3])
     ctx.strokeRect(0, py - 6.5, w, 13)
     ctx.setLineDash([])
     ctx.restore()
@@ -476,6 +575,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   const [brush, setBrush] = useState('ok')
   const [pauseColor, setPauseColor] = useState('#f97316')
   const [showColorPicker, setShowColorPicker] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const canvasRef = useRef(null)
   const imageRef = useRef(null)
   const containerRef = useRef(null)
@@ -483,6 +583,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   const [imgDataUrl, setImgDataUrl] = useState(null)
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
   const [cursorY, setCursorY] = useState(null)
+  const [cursorPos, setCursorPos] = useState(null) // pause 画笔悬停时的光标位置 {x,y}
 
   // ── 笔迹管理 ──
   const strokesRef = useRef(task.strokes || { summary: [], constellation: [], questionnaire: [] })
@@ -612,18 +713,23 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   // ── 鼠标事件 ──
   const isDrawing = useRef(false)
   const currentStroke = useRef(null)
-  const okStartY = useRef(null)
-  const okCurrentY = useRef(null)
-  const erasedThisDrag = useRef(new Set()) // 一次拖动中已擦除的 stroke ID 集合
+  const erasedThisDrag = useRef(new Set())
 
+  // ── 鼠标按下：仅 canvas 区域触发的绘制事件 ──
   const handleMouseDown = useCallback((e) => {
     if (!imageLoaded) return
+    if (e.target !== canvasRef.current) return
     const pos = getCanvasPos(e)
 
     if (brush === 'ok') {
       isDrawing.current = true
-      okStartY.current = pos.y
-      okCurrentY.current = pos.y
+      currentStroke.current = {
+        id: uid(),
+        type: 'ok',
+        height: 13,
+        globalAlpha: 1,
+        points: [{ y: pos.y }],
+      }
     } else if (brush === 'pause') {
       isDrawing.current = true
       currentStroke.current = {
@@ -637,7 +743,6 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
     } else if (brush === 'eraser') {
       isDrawing.current = true
       erasedThisDrag.current = new Set()
-      // 立即擦除当前位置的笔迹
       const cur = getStrokes()
       const toRemove = findStrokesAt(cur, pos)
       if (toRemove.length > 0) {
@@ -657,36 +762,29 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
     const scaleY = canvas.height / (imgNaturalSize.h || 1)
 
     // 光标预览
-    setCursorY(brush === 'ok' && !isDrawing.current ? pos.y : null)
-
-    // OK 画笔拖动：平滑覆盖从起始 Y 到当前 Y 的连续区域
-    if (isDrawing.current && brush === 'ok') {
-      okCurrentY.current = pos.y
-      // 重绘全部笔迹 + OK 拖动预览
-      drawAllStrokes(ctx, canvas.width, canvas.height, strokes, imgNaturalSize, showStrokes, null, {
-        y1: okStartY.current,
-        y2: okCurrentY.current,
-      })
+    if (brush === 'ok' && !isDrawing.current) {
+      setCursorY(pos.y)
+      setCursorPos(null)
+    } else if (brush === 'pause' && !isDrawing.current) {
+      setCursorPos({ x: pos.x, y: pos.y })
+      setCursorY(null)
+    } else {
+      setCursorY(null)
+      setCursorPos(null)
     }
 
-    // Pause 画笔拖动：实时绘制
+    // OK 画笔：沿路径实时绘制条带，松手保存为一笔
+    if (isDrawing.current && brush === 'ok' && currentStroke.current) {
+      currentStroke.current.points.push({ y: pos.y })
+      const allStrokes = strokes.concat([currentStroke.current])
+      drawAllStrokes(ctx, canvas.width, canvas.height, allStrokes, imgNaturalSize, showStrokes, pos.y, null)
+    }
+
+    // 自由画笔拖动：重绘全部笔迹+当前笔画，确保透明度均匀
     if (isDrawing.current && brush === 'pause' && currentStroke.current) {
       currentStroke.current.points.push({ x: pos.x, y: pos.y })
-      const pts = currentStroke.current.points
-      const lastTwo = pts.slice(-2)
-      if (lastTwo.length === 2) {
-        ctx.save()
-        ctx.globalAlpha = 0.55
-        ctx.strokeStyle = pauseColor
-        ctx.lineWidth = 20
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-        ctx.beginPath()
-        ctx.moveTo(lastTwo[0].x * scaleX, lastTwo[0].y * scaleY)
-        ctx.lineTo(lastTwo[1].x * scaleX, lastTwo[1].y * scaleY)
-        ctx.stroke()
-        ctx.restore()
-      }
+      const allStrokes = strokes.concat([currentStroke.current])
+      drawAllStrokes(ctx, canvas.width, canvas.height, allStrokes, imgNaturalSize, showStrokes, null, null)
     }
 
     // 橡皮擦拖动：持续擦除接触到的笔迹
@@ -713,23 +811,10 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   const handleMouseUp = useCallback(() => {
     if (!isDrawing.current) return
 
-    if (brush === 'ok' && okStartY.current != null) {
-      const y1 = okStartY.current
-      const y2 = okCurrentY.current
-      const minY = Math.min(y1, y2)
-      const maxY = Math.max(y1, y2)
-      const height = Math.max(maxY - minY, 13)
-      const newStroke = {
-        id: uid(),
-        type: 'ok',
-        y: (minY + maxY) / 2,
-        height,
-        globalAlpha: 1,
-      }
+    if (brush === 'ok' && currentStroke.current) {
       const cur = getStrokes()
-      saveStrokes([...cur, newStroke])
-      okStartY.current = null
-      okCurrentY.current = null
+      saveStrokes([...cur, currentStroke.current])
+      currentStroke.current = null
     }
 
     if (brush === 'pause' && currentStroke.current) {
@@ -747,16 +832,33 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
 
   const handleMouseLeave = useCallback(() => {
     setCursorY(null)
-    handleMouseUp()
-  }, [handleMouseUp])
+    setCursorPos(null)
+    // 取消进行中的绘制
+    if (isDrawing.current && (brush === 'ok' || brush === 'pause')) {
+      currentStroke.current = null
+      isDrawing.current = false
+    } else if (isDrawing.current) {
+      handleMouseUp()
+    }
+    // 无条件重绘 canvas，清除所有预览线
+    const canvas = canvasRef.current
+    if (canvas && imageLoaded) {
+      const ctx = canvas.getContext('2d')
+      drawAllStrokes(ctx, canvas.width, canvas.height, strokes, imgNaturalSize, showStrokes, null, null)
+    }
+  }, [handleMouseUp, strokes, imageLoaded, showStrokes, imgNaturalSize])
 
-  // ── OK 画笔悬停预览 Effect（非拖动时） ──
+  // ── 画笔悬停预览 Effect（非拖动时） ──
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || brush !== 'ok' || cursorY == null || !imageLoaded || isDrawing.current) return
+    if (!canvas || !imageLoaded || isDrawing.current) return
     const ctx = canvas.getContext('2d')
-    drawAllStrokes(ctx, canvas.width, canvas.height, strokes, imgNaturalSize, showStrokes, cursorY, null)
-  }, [cursorY, brush, strokes, showStrokes, imageLoaded, imgNaturalSize])
+    if (brush === 'ok' && cursorY != null) {
+      drawAllStrokes(ctx, canvas.width, canvas.height, strokes, imgNaturalSize, showStrokes, cursorY, null, null)
+    } else if (brush === 'pause' && cursorPos) {
+      drawAllStrokes(ctx, canvas.width, canvas.height, strokes, imgNaturalSize, showStrokes, null, null, { ...cursorPos, color: pauseColor, radius: 10 })
+    }
+  }, [cursorY, cursorPos, brush, strokes, showStrokes, imageLoaded, imgNaturalSize, pauseColor])
 
   // ── 快捷键 ──
   useEffect(() => {
@@ -784,7 +886,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   return (
     <div className="h-full flex">
       {/* ── 左侧控制栏 ── */}
-      <div className="w-[148px] shrink-0 flex flex-col border-r border-white/5 bg-surface-800/30">
+      <div className="w-[148px] shrink-0 flex flex-col border-r border-white/5 bg-surface-800/30" onMouseDown={e => e.stopPropagation()}>
         {/* 返回 */}
         <div className="px-3 py-2 border-b border-white/5">
           <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-surface-400 hover:text-white transition-colors">
@@ -795,24 +897,39 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
 
         {/* 图片切换 tabs */}
         <div className="px-2 py-2 border-b border-white/5 space-y-0.5">
-          {IMAGE_TYPES.map(t => (
-            <button
-              key={t.key}
-              onClick={() => setActiveTab(t.key)}
-              className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors text-left ${
-                activeTab === t.key
-                  ? 'bg-white/10 text-white'
-                  : 'text-surface-500 hover:text-surface-300 hover:bg-white/5'
-              }`}
-            >
-              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${task[t.key + 'Image'] ? 'bg-green-500' : 'bg-surface-600'}`} />
-              {t.label}
-            </button>
-          ))}
+          {IMAGE_TYPES.map(t => {
+            const hasImg = !!task[t.key + 'Image']
+            const completed = task.completedTypes?.[t.key]
+            let dotColor = 'bg-surface-600'
+            if (hasImg && completed) dotColor = 'bg-green-500'
+            else if (hasImg) dotColor = 'bg-yellow-500'
+            return (
+              <button
+                key={t.key}
+                onClick={() => setActiveTab(t.key)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  if (!hasImg) return
+                  const newCompleted = !completed
+                  const newCompletedTypes = { ...(task.completedTypes || {}), [t.key]: newCompleted }
+                  onUpdate({ ...task, completedTypes: newCompletedTypes, updatedAt: new Date().toISOString() })
+                }}
+                className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors text-left ${
+                  activeTab === t.key
+                    ? 'bg-white/10 text-white'
+                    : 'text-surface-500 hover:text-surface-300 hover:bg-white/5'
+                }`}
+                title={hasImg ? (completed ? '已完成 — 右键切换为未完成' : '未完成 — 右键标记为已完成') : '暂无图片'}
+              >
+                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+                {t.label}
+              </button>
+            )
+          })}
         </div>
 
         {/* 画笔工具 */}
-        <div className="px-2 py-2 border-b border-white/5 space-y-1">
+        <div className="px-2 py-2 border-b border-white/5 space-y-1" onMouseDown={e => e.stopPropagation()}>
           <p className="text-[10px] text-surface-500 px-1 mb-1">画笔</p>
           <button
             onClick={() => setBrush('ok')}
@@ -830,10 +947,10 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
             className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
               brush === 'pause' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
             }`}
-            title="暂停 - 自由画笔（点按画圆，拖动涂鸦）"
+            title="自由画笔（点按画圆，拖动涂鸦）"
           >
             <Pencil className="w-3 h-3" />
-            暂停画笔
+            自由画笔
           </button>
 
           {brush === 'pause' && (
@@ -933,6 +1050,27 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
             删除任务
           </button>
         </div>
+
+        {/* ── 操作提示 ── */}
+        <div className="border-t border-white/5">
+          <button
+            onClick={() => setShowHelp(!showHelp)}
+            className="w-full flex items-center gap-1.5 px-3 py-2 text-[11px] text-surface-400 hover:text-surface-200 transition-colors"
+          >
+            <span className="w-4 h-4 rounded-full bg-surface-600 text-surface-300 text-[10px] font-bold flex items-center justify-center">i</span>
+            操作提示
+            <span className="ml-auto text-surface-600">{showHelp ? '▲' : '▼'}</span>
+          </button>
+          {showHelp && (
+            <div className="px-3 pb-3 text-[10px] text-surface-500 space-y-1.5 leading-relaxed">
+              <p><span className="text-green-400 font-medium">● OK 画笔</span>：点按放置绿色条带，长按拖动使条带跟随鼠标移动，松手放置。</p>
+              <p><span className="text-orange-400 font-medium">● 自由画笔</span>：点按画圆标记，拖动涂鸦路径。可切换颜色。</p>
+              <p><span className="text-red-400 font-medium">● 橡皮擦</span>：长按拖动擦除接触到的笔迹。</p>
+              <p><span className="text-surface-400 font-medium">● 撤销/重做</span>：Ctrl+Z / Ctrl+Shift+Z 或点击按钮。</p>
+              <p><span className="text-surface-400 font-medium">● 图片类型</span>：右键标签可在「已完成/未完成」间切换。</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── 右侧图片查看器 ── */}
@@ -982,10 +1120,19 @@ function findStrokesAt(strokes, pos) {
   const result = []
   for (const s of strokes) {
     if (s.type === 'ok') {
-      const y = s.y
       const halfH = (s.height || 13) / 2
-      if (Math.abs(pos.y - y) <= halfH + 4) {
-        result.push(s)
+      if (s.points) {
+        for (const p of s.points) {
+          if (Math.abs(pos.y - p.y) <= halfH + 4) {
+            result.push(s)
+            break
+          }
+        }
+      } else {
+        const y = s.y
+        if (Math.abs(pos.y - y) <= halfH + 4) {
+          result.push(s)
+        }
       }
     } else if (s.type === 'pause') {
       for (const p of s.points) {

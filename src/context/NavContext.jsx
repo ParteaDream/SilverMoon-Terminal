@@ -134,8 +134,11 @@ export function NavProvider({ children }) {
   const push = useCallback((path, search = '') => {
     navigatingRef.current = true
     dispatch({ type: 'PUSH', pathname: path, search })
-    navigate(path + search, { replace: true })
-  }, [navigate])
+    const target = path + search
+    const current = location.pathname + (location.search || '')
+    // 相同页面创建新历史条目，触发组件重新挂载（侧栏点击刷新）
+    navigate(target, { replace: target !== current })
+  }, [navigate, location.pathname, location.search])
 
   /** Go back one step in the stack (上一步) */
   const goBack = useCallback(() => {

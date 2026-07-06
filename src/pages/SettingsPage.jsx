@@ -41,6 +41,20 @@ function formatSize(bytes) {
   return bytes + ' B'
 }
 
+const PAGE_OPTIONS = [
+  { path: '/characters', label: '角色' },
+  { path: '/weapons', label: '武器' },
+  { path: '/artifacts', label: '圣遗物' },
+  { path: '/materials', label: '材料' },
+  { path: '/wishes', label: '祈愿' },
+  { path: '/challenges', label: '挑战' },
+  { path: '/data', label: '数据' },
+  { path: '/websites', label: '站点' },
+  { path: '/terminal', label: '终端' },
+  { path: '/changelog', label: '更新日志' },
+  { path: '/settings', label: '设置' },
+]
+
 function GeneralModule() {
   const { dbPath, selectLocation, getDbPath, updateDatabase, devMode, listBaselineDbs, switchBaselineDb } = useDb()
   const [dbInfo, setDbInfo] = useState({ dbDir: null, isPopulated: false })
@@ -58,6 +72,28 @@ function GeneralModule() {
   const [checkingPack, setCheckingPack] = useState(null) // pack path being checked for update
   const [baiduDialog, setBaiduDialog] = useState(null)   // { packType, label } for Baidu Pan dialog
   const { progress: dlProgress, startDownload, cancelDownload, checkPersisted } = useDownloadProgress()
+  const [defaultPage, setDefaultPage] = useState(() => localStorage.getItem('default_page') || '/characters')
+
+  // 每次路由变化时重新读取 localStorage 中默认启动页（支持 Settings 页面修改后即时生效）
+  useEffect(() => {
+    const saved = localStorage.getItem('default_page')
+    if (saved && saved !== defaultPage) {
+      setDefaultPage(saved)
+    }
+  }, [location.pathname])
+
+  // 加载用户配置中的默认启动页
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.electronAPI?.getUserConfig()
+        if (res?.config?.defaultPage) {
+          setDefaultPage(res.config.defaultPage)
+          localStorage.setItem('default_page', res.config.defaultPage)
+        }
+      } catch {}
+    })()
+  }, [])
 
   useEffect(() => { refreshDbInfo(); loadImagePacks(); checkStaleDownloads(); loadBaselineDbs() }, [dbPath])
 
@@ -686,6 +722,35 @@ function GeneralModule() {
           </div>
         </div>
       )}
+
+      {/* ── 默认启动页 ── */}
+      <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 flex items-center justify-center text-surface-400 flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium">默认启动页</p>
+            <p className="text-xs text-surface-400 mt-0.5">程序启动时自动跳转的目标板块</p>
+          </div>
+          <select
+            value={defaultPage}
+            onChange={async (e) => {
+              const val = e.target.value
+              setDefaultPage(val)
+              localStorage.setItem('default_page', val)
+              await window.electronAPI?.setUserConfig('defaultPage', val)
+              // 通知 App.jsx 更新默认页（通过自定义事件）
+              window.dispatchEvent(new CustomEvent('default-page-changed', { detail: val }))
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs bg-surface-700 border border-surface-600 text-surface-200 outline-none focus:border-primary-500/50 transition-colors cursor-pointer"
+          >
+            {PAGE_OPTIONS.map(p => (
+              <option key={p.path} value={p.path}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {/* ── 清理缓存 ── */}
       <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-3">

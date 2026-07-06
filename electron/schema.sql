@@ -185,6 +185,20 @@ CREATE TABLE IF NOT EXISTS game_data (
   updated_at TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
+-- ── 关联条目（数据/角色/武器/圣遗物/材料之间的任意关联）──
+CREATE TABLE IF NOT EXISTS related_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_type TEXT NOT NULL,        -- 'game_data' | 'characters' | 'weapons' | 'artifacts' | 'materials'
+  source_id INTEGER NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id INTEGER NOT NULL,
+  label TEXT,                       -- 显示名称（创建时从源表查询，避免每次联表查询）
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_related_source ON related_links(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_related_target ON related_links(target_type, target_id);
+
 CREATE TABLE IF NOT EXISTS websites (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title_zh TEXT NOT NULL,

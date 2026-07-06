@@ -340,6 +340,15 @@ function getImagesDir(dir) {
   return dir;
 }
 
+// ── 内置资源目录（开发模式 public/ 优先，生产模式 dist/ 兜底）──
+function getBuiltinAssetDirs() {
+  return [
+    path.join(__dirname, '..', 'public'),
+    path.join(__dirname, '..', 'dist'),
+    path.join(process.resourcesPath || '', 'dist'),
+  ];
+}
+
 function getActiveImagePackName(dir) {
   // 返回当前 active 的图包名称（相对于 dbDir 的文件夹名）
   let manualSelection = null;
@@ -905,6 +914,20 @@ function migrateSchema() {
       updated_at TEXT DEFAULT (datetime('now', 'localtime'))
     )`);
 
+    // related_links 表（游戏数据/角色/武器/圣遗物/材料之间的关联）
+    dbRun(`CREATE TABLE IF NOT EXISTS related_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_type TEXT NOT NULL,
+      source_id INTEGER NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id INTEGER NOT NULL,
+      label TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    )`);
+    try { db.exec('CREATE INDEX IF NOT EXISTS idx_related_source ON related_links(source_type, source_id)'); } catch (_) {}
+    try { db.exec('CREATE INDEX IF NOT EXISTS idx_related_target ON related_links(target_type, target_id)'); } catch (_) {}
+
     // 删除旧的 image_cache 表（base64 图片缓存会撑爆 WASM 内存）
     try { db.exec('DROP TABLE IF EXISTS image_cache'); } catch (_) {}
 
@@ -1086,6 +1109,13 @@ ipcMain.handle('window-maximize', () => {
 });
 ipcMain.handle('window-close', () => { mainWindow?.close(); });
 ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized() || false);
+ipcMain.handle('window-get-position', () => {
+  if (!mainWindow) return [0, 0];
+  return mainWindow.getPosition();
+});
+ipcMain.handle('window-set-position', (_event, x, y) => {
+  if (mainWindow) mainWindow.setPosition(x, y);
+});
 
 ipcMain.handle('select-db-location', async () => {
   try {
@@ -1954,7 +1984,11 @@ ipcMain.handle('db-query', (_event, sql, params = []) => {
     }
 
     // ── 写操作：根据 devMode 路由 ──
-    if (devMode) {
+    // related_links 表始终走基准库（跨类型关联元数据，不需要 _user_delta 增量保护）
+    const writeTableName = _extractTableName(sql);
+    const isRelatedLinks = writeTableName === 'related_links';
+
+    if (devMode || isRelatedLinks) {
       const result = dbRun(sql, params);
       try { dbSave(); } catch (saveErr) {
         return { changes: result.changes, lastId: result.lastId, saveError: saveErr.message };
@@ -1971,12 +2005,11 @@ ipcMain.handle('db-query', (_event, sql, params = []) => {
       } else if (trimmed.startsWith('INSERT')) {
         result = dbRunOnDb(udb, sql, params);
       } else if (trimmed.startsWith('DELETE')) {
-        const tableName = _extractTableName(sql);
         const idMatch = sql.match(/WHERE\s+id\s*=\s*\?/i);
-        if (tableName && idMatch && params.length > 0) {
+        if (writeTableName && idMatch && params.length > 0) {
           const delId = params[params.length - 1];
           try {
-            const safeTable = tableName.replace(/'/g, "''");
+            const safeTable = writeTableName.replace(/'/g, "''");
             udb.exec(`INSERT OR REPLACE INTO _user_delta (table_name, row_id, column_name, new_value, op_type, updated_at) VALUES ('${safeTable}', ${Number(delId)}, '_deleted', '1', 'delete', datetime('now','localtime'))`);
             result = { changes: 1, lastId: null };
           } catch (e) {
@@ -2146,12 +2179,8 @@ ipcMain.handle('read-image', async (_event, filename, maxWidth) => {
     const imagesDir = getImagesDir(dbDir);
     let fp = resolveImagePath(imagesDir, filename);
     if (!fp) {
-      // 回退到 dist/（打包）目录
-      const fallbackDirs = [
-        path.join(__dirname, '..', 'dist'),
-        path.join(process.resourcesPath || '', 'dist'),
-      ];
-      for (const d of fallbackDirs) {
+      // 回退到内置资源目录（开发模式 public/ 优先，生产模式 dist/ 兜底）
+      for (const d of getBuiltinAssetDirs()) {
         const candidate = path.join(d, filename);
         if (fs.existsSync(candidate)) { fp = candidate; break; }
       }
@@ -2340,10 +2369,7 @@ ipcMain.handle('import-preset-image', async (_event, presetName) => {
     const userImagesDir = getUserImagesDir(dbDir);
     const dest = path.join(userImagesDir, presetName);
     if (fs.existsSync(dest)) return { success: true, filename: presetName };
-    const fallbackDirs = [
-      path.join(__dirname, '..', 'dist'),
-      path.join(process.resourcesPath || '', 'dist'),
-    ];
+    const fallbackDirs = getBuiltinAssetDirs();
     let src = null;
     for (const d of fallbackDirs) {
       const candidate = path.join(d, presetName);
@@ -2427,12 +2453,8 @@ ipcMain.handle('read-user-image', async (_event, filename, maxWidth) => {
     if (!dbDir) throw new Error('数据库未初始化');
     let fp = path.join(getUserImagesDir(dbDir), filename);
     if (!fs.existsSync(fp)) {
-      // 回退到 dist/（打包）— 预设壁纸等内置资源
-      const fallbackDirs = [
-        path.join(__dirname, '..', 'dist'),
-        path.join(process.resourcesPath || '', 'dist'),
-      ];
-      for (const d of fallbackDirs) {
+      // 回退到内置资源目录（开发模式 public/ 优先，生产模式 dist/ 兜底）
+      for (const d of getBuiltinAssetDirs()) {
         const candidate = path.join(d, filename);
         if (fs.existsSync(candidate)) { fp = candidate; break; }
       }
@@ -4791,13 +4813,9 @@ ipcMain.handle('set-app-icon', async (_event, { filename, pngData }) => {
       srcPath = path.join(userImagesDir, filename);
       if (!fs.existsSync(srcPath)) srcPath = null;
     }
-    // 没有自定义图标时，使用默认图标（dist/ 目录下的默认图片）
+    // 没有自定义图标时，使用默认图标（内置资源目录）
     if (!srcPath) {
-      const defaultDirs = [
-        path.join(__dirname, '..', 'dist'),
-        path.join(process.resourcesPath || '', 'dist'),
-      ];
-      for (const d of defaultDirs) {
+      for (const d of getBuiltinAssetDirs()) {
         const candidate = path.join(d, 'UI_Talent_U_Columbina_02.webp');
         if (fs.existsSync(candidate)) { srcPath = candidate; break; }
       }

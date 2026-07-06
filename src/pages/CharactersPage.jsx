@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, memo } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
@@ -165,24 +165,24 @@ export default function CharactersPage() {
   }, [])
 
 
-  // 滚动时保存
+  // 滚动时保存（使用 rAF 替代 setTimeout 减少主线程压力）
   useLayoutEffect(() => {
     const main = document.querySelector('main')
     if (!main) return
-    let timer = null
+    let rafId = null
     const save = () => {
       if (restoringScroll.current) return
       savePage('characters', stateRef.current)
     }
     const onScroll = () => {
-      clearTimeout(timer)
-      timer = setTimeout(save, 150)
+      if (rafId) cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(save)
     }
     main.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       main.removeEventListener('scroll', onScroll)
-      clearTimeout(timer)
-      save() // 离开前最终保存（此时 DOM 尚未替换，scrollTop 正确）
+      if (rafId) cancelAnimationFrame(rafId)
+      save()
     }
   }, [savePage])
 
@@ -611,79 +611,27 @@ export default function CharactersPage() {
 
       {/* Gallery view */}
       {viewMode === 'gallery' && (
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-10 gap-2 animate-fade-in">
-          {processed.map(char => {
-            const wt = weaponTypes.find(w => w.id === char.weapon_type_id)
-            const reg = regions.find(r => r.id === char.region_id)
-            return (
-              <div
-                key={char.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
-                data-item-id={char.id}
-                onClick={() => navigateToDetail(char.id)}
-                onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, char }) }}
-                className={`group relative rounded-xl overflow-hidden border cursor-pointer
-                  bg-gradient-to-b ${ELEMENT_BG[char.element_id] || 'from-surface-800 to-surface-900'}
-                  ${ELEMENT_BORDER[char.element_id] || 'border-surface-700'}
-                  hover:border-primary-500/50 hover:scale-[1.03] transition-all duration-200
-                  content-visibility-auto contain-layout contain-style contain-paint`}
-              >
-                {/* Card image */}
-                <div className="aspect-[3/4] bg-surface-800 flex items-end justify-center overflow-hidden relative">
-                  {char._displayCardArt ? (
-                    <CardImage filename={char._displayCardArt} className="w-full h-auto max-h-full object-contain object-bottom" />
-                  ) : char.splash_art ? (
-                    <CardImage filename={char.splash_art} className="w-full h-auto max-h-full object-contain object-bottom" />
-                  ) : (
-                    <span className={`text-6xl font-bold pb-4 ${ELEMENT_COLORS[char.element_id] || 'text-surface-500'}`}>
-                      {char.name_zh[0]}
-                    </span>
-                  )}
-                  {/* Top gradient overlay — 元素色渐变覆盖，向下渐隐 */}
-                  <div className={`absolute top-0 left-0 right-0 h-3/4 bg-gradient-to-b ${ELEMENT_OVERLAY[char.element_id] || 'from-surface-900/50 to-transparent'}`} />
-                  {/* 顶部细框线 — 强化上缘框效果 */}
-                  <div className={`absolute top-0 left-0 right-0 h-[2px] ${ELEMENT_BORDER[char.element_id] ? ELEMENT_BORDER[char.element_id].replace('border-', 'bg-').replace('/30', '/40') : 'bg-surface-600/50'}`} />
-                  {/* 顶部玻璃质感高光条 */}
-                  <div className="absolute top-0 left-0 right-0 h-[2px] bg-white/20" />
-                  {/* Rarity badge */}
-                  <div className="absolute top-2 left-2">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                      char.rarity === 5 ? 'bg-accent-gold/20 text-accent-gold border border-accent-gold/30' : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                    }`}>
-                      {RARITY_STARS[char.rarity]}
-                    </span>
-                  </div>
-                  {/* Element badge */}
-                  <div className="absolute top-2 right-2">
-                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface-950/60 backdrop-blur-sm">
-                      <ElementIcon elId={char.element_id} className="w-3.5 h-3.5" elemIcons={elemIcons} />
-                    </span>
-                  </div>
-                </div>
-                {/* Card info */}
-                <div className="p-3">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-xs font-semibold text-white truncate block max-w-full">{char.name_zh}</span>
-                    <span className="text-[10px] font-mono text-surface-600">{char.id}</span>
-                  </div>
-                  {char.title_zh && <p className="text-[10px] text-surface-400 truncate mb-1.5">{char.title_zh}</p>}
-                  <div className="flex items-center gap-2 text-[10px] text-surface-500">
-                    {wt && <span className="flex items-center gap-0.5"><Sword className="w-2.5 h-2.5" />{wt.name_zh}</span>}
-                    {reg && <span className="flex items-center gap-0.5"><MapPin className="w-2.5 h-2.5" />{reg.name_zh}</span>}
-                  </div>
-                  {char.release_date && <p className="text-[10px] text-surface-500 mt-1">上线: {char.release_date}</p>}
-                </div>
-              </div>
-            )
-          })}
-          {processed.length === 0 && (
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-10 gap-2 animate-fade-in will-change-transform">
+          {processed.length === 0 ? (
             <div className="col-span-full py-16 text-center text-surface-500 text-sm">
               {characters.length === 0 ? '暂无角色' : '没有匹配筛选条件的结果'}
             </div>
+          ) : (
+            processed.map(char => (
+              <GalleryCard
+                key={char.id}
+                char={char}
+                weaponTypes={weaponTypes}
+                regions={regions}
+                elemIcons={elemIcons}
+                onNavigate={navigateToDetail}
+                onContextMenu={(e, c) => { setContextMenu({ x: e.clientX, y: e.clientY, char: c }) }}
+              />
+            ))
           )}
         </div>
       )}
 
-      {/* Edit Modal */}
       <EditModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -772,3 +720,67 @@ function CharThumb({ filename }) {
 }
 
 function UserIcon() { return <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-surface-500"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> }
+
+/** React.memo 画廊卡片 — 避免排序/筛选变化时的全量重渲染 */
+const GalleryCard = memo(function GalleryCard({ char, weaponTypes, regions, elemIcons, onNavigate, onContextMenu }) {
+  const wt = weaponTypes.find(w => w.id === char.weapon_type_id)
+  const reg = regions.find(r => r.id === char.region_id)
+  return (
+    <div
+      data-item-id={char.id}
+      onClick={() => onNavigate(char.id)}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, char) }}
+      className={`group relative rounded-xl overflow-hidden border cursor-pointer
+        bg-gradient-to-b ${ELEMENT_BG[char.element_id] || 'from-surface-800 to-surface-900'}
+        ${ELEMENT_BORDER[char.element_id] || 'border-surface-700'}
+        hover:border-primary-500/50 hover:scale-[1.03] transition-all duration-200
+        content-visibility-auto contain-layout contain-style contain-paint`}
+    >
+      {/* Card image */}
+      <div className="aspect-[3/4] bg-surface-800 flex items-end justify-center overflow-hidden relative">
+        {char._displayCardArt ? (
+          <CardImage filename={char._displayCardArt} className="w-full h-auto max-h-full object-contain object-bottom" />
+        ) : char.splash_art ? (
+          <CardImage filename={char.splash_art} className="w-full h-auto max-h-full object-contain object-bottom" />
+        ) : (
+          <span className={`text-6xl font-bold pb-4 ${ELEMENT_COLORS[char.element_id] || 'text-surface-500'}`}>
+            {char.name_zh[0]}
+          </span>
+        )}
+        {/* Top gradient overlay — 元素色渐变覆盖，向下渐隐 */}
+        <div className={`absolute top-0 left-0 right-0 h-3/4 bg-gradient-to-b ${ELEMENT_OVERLAY[char.element_id] || 'from-surface-900/50 to-transparent'}`} />
+        {/* 顶部细框线 — 强化上缘框效果 */}
+        <div className={`absolute top-0 left-0 right-0 h-[2px] ${ELEMENT_BORDER[char.element_id] ? ELEMENT_BORDER[char.element_id].replace('border-', 'bg-').replace('/30', '/40') : 'bg-surface-600/50'}`} />
+        {/* 顶部玻璃质感高光条 */}
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-white/20" />
+        {/* Rarity badge */}
+        <div className="absolute top-2 left-2">
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+            char.rarity === 5 ? 'bg-accent-gold/20 text-accent-gold border border-accent-gold/30' : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+          }`}>
+            {RARITY_STARS[char.rarity]}
+          </span>
+        </div>
+        {/* Element badge */}
+        <div className="absolute top-2 right-2">
+          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface-950/60 backdrop-blur-sm">
+            <ElementIcon elId={char.element_id} className="w-3.5 h-3.5" elemIcons={elemIcons} />
+          </span>
+        </div>
+      </div>
+      {/* Card info */}
+      <div className="p-3">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-xs font-semibold text-white truncate block max-w-full">{char.name_zh}</span>
+          <span className="text-[10px] font-mono text-surface-600">{char.id}</span>
+        </div>
+        {char.title_zh && <p className="text-[10px] text-surface-400 truncate mb-1.5">{char.title_zh}</p>}
+        <div className="flex items-center gap-2 text-[10px] text-surface-500">
+          {wt && <span className="flex items-center gap-0.5"><Sword className="w-2.5 h-2.5" />{wt.name_zh}</span>}
+          {reg && <span className="flex items-center gap-0.5"><MapPin className="w-2.5 h-2.5" />{reg.name_zh}</span>}
+        </div>
+        {char.release_date && <p className="text-[10px] text-surface-500 mt-1">上线: {char.release_date}</p>}
+      </div>
+    </div>
+  )
+})

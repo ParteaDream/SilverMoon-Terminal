@@ -91,6 +91,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
   isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+  getWindowPosition: () => ipcRenderer.invoke('window-get-position'),
+  setWindowPosition: (x, y) => ipcRenderer.invoke('window-set-position', x, y),
 
   onRequestDbLocation: (callback) => {
     ipcRenderer.on('request-db-location', callback);

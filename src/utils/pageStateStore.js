@@ -15,6 +15,9 @@ let _cache = null
 let _loaded = false
 let _loadPromise = null
 let _saveVersion = 0   // 版本号，防止旧 save 覆盖新数据
+let _saveTimer = null   // debounce timer，减少文件写入频率
+let _pendingStates = null // 待写入的最新状态
+const SAVE_DEBOUNCE_MS = 1000  // 文件写入 debounce 间隔（毫秒）
 
 async function _load() {
   if (_loaded) return _cache
@@ -40,8 +43,19 @@ async function _load() {
   return _loadPromise
 }
 
-async function _save(states) {
+function _scheduleSave(states) {
   _cache = states
+  _pendingStates = states
+  if (_saveTimer) return  // 已有定时器在等待，只更新待写入数据
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null
+    const toSave = _pendingStates
+    _pendingStates = null
+    if (toSave) _doSave(toSave)
+  }, SAVE_DEBOUNCE_MS)
+}
+
+async function _doSave(states) {
   const version = ++_saveVersion
   try {
     if (window.electronAPI) {
@@ -54,6 +68,17 @@ async function _save(states) {
   }
 }
 
+/** 立即刷新待写入的状态到文件（用于导航前确保状态已持久化） */
+export function flushPageStates() {
+  if (_saveTimer) {
+    clearTimeout(_saveTimer)
+    _saveTimer = null
+  }
+  const toSave = _pendingStates
+  _pendingStates = null
+  if (toSave) _doSave(toSave)
+}
+
 /** 同步保存页面状态（即时更新缓存，异步写文件） */
 export function savePageStateSync(key, scrollY, extra = {}) {
   if (!_loaded || !_cache) {
@@ -64,8 +89,8 @@ export function savePageStateSync(key, scrollY, extra = {}) {
   const filtered = _cache.filter(s => s.key !== key)
   filtered.push({ key, scrollY, state: extra, ts: Date.now() })
   _cache = filtered.length > MAX_ENTRIES ? filtered.slice(-MAX_ENTRIES) : filtered
-  // 异步持久化到文件
-  _save(_cache)
+  // 异步持久化到文件（debounce 1s，减少频繁写入）
+  _scheduleSave(_cache)
 }
 
 /** 保存页面状态（自动去重，超出上限自动淘汰最旧） */
@@ -77,7 +102,7 @@ export async function savePageState(key, scrollY, extra = {}) {
   filtered.push({ key, scrollY, state: extra, ts: Date.now() })
   // 超出上限：保留最后 MAX_ENTRIES 条
   const trimmed = filtered.length > MAX_ENTRIES ? filtered.slice(-MAX_ENTRIES) : filtered
-  await _save(trimmed)
+  _scheduleSave(trimmed)
 }
 
 /** 加载页面状态，不存在则返回 null */
@@ -101,8 +126,11 @@ export function clearAllPageStates() {
   _cache = []
   _loaded = true
   _loadPromise = null
-  // 异步持久化到文件
-  _save([])
+  // 立即持久化到文件（清空操作需要即时生效）
+  _cache = []
+  _pendingStates = []
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null }
+  _doSave([])
 }
 
 /** 预加载缓存（应用启动时调用，确保后续同步读取可用） */
@@ -117,7 +145,7 @@ export async function clearPageState(key) {
   const states = await _load()
   const filtered = states.filter(s => s.key !== key)
   if (filtered.length !== states.length) {
-    await _save(filtered)
+    _scheduleSave(filtered)
   }
 }
 

@@ -177,7 +177,7 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
 // ═══════════════════════════════════════════════
 function TrafficLights({ onClose, onHide, onFullscreen, isFullscreen }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2" onMouseDown={e => e.stopPropagation()}>
+    <div className="flex items-center gap-2 px-3 py-2 no-drag" onMouseDown={e => e.stopPropagation()}>
       <button onClick={onClose} className="w-3.5 h-3.5 rounded-full bg-red-500 hover:bg-red-400 transition-colors flex items-center justify-center group" title="关闭">
         <X className="w-2 h-2 text-red-900 opacity-0 group-hover:opacity-100 transition-opacity" />
       </button>
@@ -202,15 +202,27 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
   const resizeDir = useRef('')
 
   const { left = 100, top = 80, width = 600, height = 420, hidden = false, fullscreen = false } = state
+  const { devMode } = useDb()
 
-  // 全屏范围：内容区（不含侧栏、标题栏、开发者工具栏）
-  const sidebarW = localStorage.getItem('sidebar_collapsed') === '1' ? 56 : 224
-  const titlebarH = 38
+  // 侧栏宽度（响应折叠/展开）
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    return localStorage.getItem('sidebar_collapsed') === '1' ? 56 : 224
+  })
+  useEffect(() => {
+    const update = () => setSidebarWidth(localStorage.getItem('sidebar_collapsed') === '1' ? 56 : 224)
+    window.addEventListener('sidebar-toggled', update)
+    return () => window.removeEventListener('sidebar-toggled', update)
+  }, [])
+
+  // 检测 macOS（红绿灯偏移用）
+  const isMac = !/Win/i.test(navigator.platform || '')
+
+  // 全屏时避开侧栏和开发者工具栏
   const fullscreenStyle = fullscreen ? {
     position: 'fixed',
-    left: `${sidebarW}px`, top: `${titlebarH}px`,
-    right: 0, bottom: 0,
-    zIndex: 999,
+    left: sidebarWidth, top: 0,
+    right: 0, bottom: devMode ? 40 : 0,
+    zIndex: 9999,
   } : null
 
   const handleTitleMouseDown = useCallback((e) => {
@@ -224,6 +236,52 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
   const handleTitleDoubleClick = useCallback(() => {
     onUpdateState({ fullscreen: !fullscreen })
   }, [fullscreen, onUpdateState])
+
+  // 全屏时拖拽标题栏 → 移动整个 Electron 窗口（IPC 手动拖拽，避免 drag-region 拦截双击）
+  const fullscreenDragRef = useRef(null)
+  const windowPosRef = useRef({ x: 0, y: 0 })
+
+  // 全屏时预缓存窗口位置，避免拖拽时异步延迟导致事件穿透
+  // 依赖 fullscreen + hidden + pageVisible：确保隐藏/跨页面重新打开时刷新缓存
+  useEffect(() => {
+    if (!fullscreen || hidden) return
+    window.electronAPI?.getWindowPosition().then(([wx, wy]) => {
+      windowPosRef.current = { x: wx, y: wy }
+    })
+  }, [fullscreen, hidden, pageVisible])
+
+  const handleFullscreenTitleMouseDown = useCallback((e) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.screenX, startY = e.screenY
+    const { x: wx, y: wy } = windowPosRef.current
+    fullscreenDragRef.current = { startX, startY, wx, wy }
+    // 同时异步更新缓存（以防窗口在其他地方被移动过）
+    window.electronAPI?.getWindowPosition().then(([fx, fy]) => {
+      if (fullscreenDragRef.current) {
+        fullscreenDragRef.current.wx = fx
+        fullscreenDragRef.current.wy = fy
+      }
+    })
+    const onMove = (ev) => {
+      if (!fullscreenDragRef.current) return
+      const d = fullscreenDragRef.current
+      window.electronAPI?.setWindowPosition(d.wx + ev.screenX - d.startX, d.wy + ev.screenY - d.startY)
+    }
+    const onUp = () => {
+      // 拖拽结束后更新缓存
+      if (fullscreenDragRef.current) {
+        const d = fullscreenDragRef.current
+        windowPosRef.current = { x: d.wx, y: d.wy }
+      }
+      fullscreenDragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [])
 
   const handleWindowClick = useCallback((e) => { onFocus?.() }, [onFocus])
 
@@ -268,7 +326,8 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
       onMouseDown={handleWindowClick}
     >
       <div className={`h-full flex flex-col overflow-hidden border border-white/10 shadow-2xl bg-surface-900/90 backdrop-blur-xl transition-all duration-150 ${fullscreen ? 'rounded-none border-0' : 'rounded-xl'}`}>
-        <div className="flex items-center bg-surface-800/60 backdrop-blur-sm border-b border-white/5 select-none" style={{ minHeight: 38 }} onMouseDown={handleTitleMouseDown} onDoubleClick={handleTitleDoubleClick}>
+        <div className="flex items-center bg-surface-800/60 backdrop-blur-sm border-b border-white/5 select-none" style={{ minHeight: 38 }} onMouseDown={fullscreen ? handleFullscreenTitleMouseDown : handleTitleMouseDown} onDoubleClick={handleTitleDoubleClick}>
+          {fullscreen && isMac && <div style={{ width: Math.max(0, 72 - sidebarWidth), flexShrink: 0 }} />}
           <TrafficLights onClose={onClose} onHide={onHide} onFullscreen={() => onUpdateState({ fullscreen: !fullscreen })} isFullscreen={fullscreen} />
           <div className="flex-1 flex items-center gap-2 justify-center">
             <AppIcon className="w-3.5 h-3.5 text-surface-400" />

@@ -65,10 +65,14 @@ export default function TerminalDock({ visible }) {
     }
   }, [contextMenu])
 
-  // ── 条件返回在 hooks 之后 ──
-  const anyFullscreen = runningApps.some(a => a.state?.fullscreen)
+  // 仅当有全屏窗口且未隐藏、在当前页面可见时才隐藏 dock
+  const anyFullscreenVisible = runningApps.some(a => {
+    if (!a.state?.fullscreen || a.state?.hidden) return false
+    const page = a.state?.showOnPage || '/terminal'
+    return page === '*' || page === location.pathname
+  })
   if (!visible && !isOnTerminal && !hasRunningNonSystem && runningApps.length === 0) return null
-  if (anyFullscreen) return null
+  if (anyFullscreenVisible) return null
 
   // ── 事件处理 ──
 

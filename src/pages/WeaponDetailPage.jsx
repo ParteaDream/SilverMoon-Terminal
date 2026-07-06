@@ -518,6 +518,7 @@ function SectionCard({ icon, title, children, onAdd }) {
 
 function GalleryTile({ filename, label, onClick }) {
   const [src, setSrc] = useState(null)
+  const [natural, setNatural] = useState({ w: 0, h: 0 })
   const { readImage } = useDb()
   useEffect(() => {
     let cancelled = false
@@ -528,11 +529,27 @@ function GalleryTile({ filename, label, onClick }) {
     load()
     return () => { cancelled = true }
   }, [filename, readImage])
+
+  let imgStyle = {}
+  if (natural.w > 0 && natural.h > 0) {
+    const maxSide = 200
+    const ratio = Math.min(maxSide / natural.w, maxSide / natural.h, 1)
+    imgStyle = { width: natural.w * ratio, height: natural.h * ratio, maxWidth: '100%' }
+  }
+
   return (
     <div onClick={onClick} className="cursor-pointer rounded-xl bg-surface-800/50 border border-surface-700 overflow-hidden hover:border-primary-500/50 transition-colors">
-      <div className="aspect-square bg-surface-700/50 flex items-center justify-center overflow-hidden">
+      <div className="bg-surface-700/50 flex items-center justify-center p-2 min-h-[80px]">
         {src ? (
-          <img src={src} alt="" className="w-full h-full object-cover" />
+          <img
+            src={src} alt=""
+            style={imgStyle}
+            className="rounded object-contain max-h-[200px]"
+            onLoad={(e) => {
+              const img = e.target
+              setNatural({ w: img.naturalWidth, h: img.naturalHeight })
+            }}
+          />
         ) : (
           <Sword className="w-8 h-8 text-surface-500" />
         )}

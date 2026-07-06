@@ -55,7 +55,7 @@ function getSharedObserver() {
           loader()
         }
       }
-    }, { rootMargin: '1200px' })
+    }, { rootMargin: '3000px' })
   }
   return _globalObserver
 }
@@ -75,7 +75,7 @@ function ensureScrollCheck() {
     _scrollTicking = true
     requestAnimationFrame(() => {
       _scrollTicking = false
-      const margin = 1200
+      const margin = 3000
       const ih = window.innerHeight
       for (const [el, loader] of _pendingElements) {
         try {
@@ -144,7 +144,7 @@ export function useLazyImage(filename, _rootMargin) {
     if (loaded.current) return
 
     // 同步检查：元素已在视口或预加载范围内 → 立即加载
-    const margin = Math.max(1200, typeof _rootMargin === 'number' ? _rootMargin : parseInt(_rootMargin || '1200') || 1200)
+    const margin = Math.max(3000, typeof _rootMargin === 'number' ? _rootMargin : parseInt(_rootMargin || '3000') || 3000)
     try {
       const rect = el.getBoundingClientRect()
       if (rect.bottom > -margin && rect.top < window.innerHeight + margin) {

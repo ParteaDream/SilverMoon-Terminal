@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useDb } from '../context/DbContext'
-import { Search, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
+import { Search, RefreshCw, ChevronDown, ChevronUp, Minimize2 } from 'lucide-react'
 
 // ═══════════════════════════════════════
 // 等级区间 / 材料数据
@@ -187,6 +187,26 @@ export default function TrainCalc({ initialData }) {
   const [burstRange, setBurstRange] = useState([0, TALENT_NODES.length - 1])
 
   const [showList, setShowList] = useState(true)
+  const [showCalcHelp, setShowCalcHelp] = useState(false)
+
+  // 精简模式状态（默认开启，从 user.json 恢复）
+  const [compact, setCompact] = useState(() => {
+    const saved = localStorage.getItem('traincalc_compact')
+    return saved !== null ? saved === 'true' : true
+  })
+
+  useEffect(() => {
+    const initCompact = async () => {
+      try {
+        const res = await window.electronAPI?.getUserConfig()
+        if (res?.config?.trainCalcCompact !== undefined) {
+          setCompact(res.config.trainCalcCompact)
+          localStorage.setItem('traincalc_compact', res.config.trainCalcCompact)
+        }
+      } catch {}
+    }
+    initCompact()
+  }, [])
 
   // 加载角色列表
   useEffect(() => {
@@ -409,6 +429,29 @@ export default function TrainCalc({ initialData }) {
               className="px-2.5 py-1 rounded-lg text-xs bg-white/10 hover:bg-white/20 text-surface-300 transition-colors flex items-center gap-1">
               <RefreshCw className="w-3 h-3" />重新选择
             </button>
+            <button
+              onClick={async () => {
+                const next = !compact
+                setCompact(next)
+                localStorage.setItem('traincalc_compact', next)
+                try { await window.electronAPI?.setUserConfig('trainCalcCompact', next) } catch {}
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs transition-colors flex items-center gap-1 ${
+                compact ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30' : 'bg-white/10 hover:bg-white/20 text-surface-300'
+              }`}
+              title={compact ? '精简模式 — 点击切换为完整模式' : '完整模式 — 点击切换为精简模式'}
+            >
+              <Minimize2 className="w-3 h-3" />{compact ? '精简' : '完整'}
+            </button>
+            <button
+              onClick={() => setShowCalcHelp(!showCalcHelp)}
+              className={`w-6 h-6 rounded-full transition-colors flex items-center justify-center shrink-0 ${
+                showCalcHelp ? 'bg-sky-500/80 text-white' : 'bg-surface-600 hover:bg-surface-500 text-surface-200'
+              }`}
+              title="操作提示"
+            >
+              <span className="text-[11px] font-bold leading-none">i</span>
+            </button>
           </div>
 
           {/* 旅行者元素选择 */}
@@ -428,10 +471,19 @@ export default function TrainCalc({ initialData }) {
 
           {/* 进度条区 */}
           <div className="flex-1 overflow-auto p-4 space-y-4">
-            <SliderBlock label="角色等级" nodes={LEVEL_NODES} values={levelRange} onChange={setLevelRange} />
-            <SliderBlock label="普通攻击" nodes={TALENT_NODES} values={normalRange} onChange={setNormalRange} />
-            <SliderBlock label="元素战技" nodes={TALENT_NODES} values={skillRange} onChange={setSkillRange} />
-            <SliderBlock label="元素爆发" nodes={TALENT_NODES} values={burstRange} onChange={setBurstRange} />
+            {showCalcHelp && (
+              <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-[11px] text-surface-300 space-y-1.5 leading-relaxed animate-fade-in">
+                <p className="text-sky-400 font-medium mb-1">💡 滑块操作提示</p>
+                <p>• <span className="text-surface-200">左键</span>点击轨道：移动左端点（起点）到点击位置。</p>
+                <p>• <span className="text-surface-200">右键</span>点击轨道：移动右端点（终点）到点击位置。</p>
+                <p>• 拖拽圆形手柄可精细调整区间。</p>
+                <p>• 点击右上角「<span className="text-primary-400">精简</span>」按钮可切换紧凑布局。</p>
+              </div>
+            )}
+            <SliderBlock label="角色等级" nodes={LEVEL_NODES} values={levelRange} onChange={setLevelRange} compact={compact} />
+            <SliderBlock label="普通攻击" nodes={TALENT_NODES} values={normalRange} onChange={setNormalRange} compact={compact} />
+            <SliderBlock label="元素战技" nodes={TALENT_NODES} values={skillRange} onChange={setSkillRange} compact={compact} />
+            <SliderBlock label="元素爆发" nodes={TALENT_NODES} values={burstRange} onChange={setBurstRange} compact={compact} />
 
             {/* 材料总计 */}
             {totals && totals.length > 0 ? (
@@ -465,7 +517,21 @@ export default function TrainCalc({ initialData }) {
 // ═══════════════════════════════════════
 // 滑块行
 // ═══════════════════════════════════════
-function SliderBlock({ label, nodes, values, onChange }) {
+function SliderBlock({ label, nodes, values, onChange, compact }) {
+  const shortLabels = { '角色等级': '角色', '普通攻击': '普攻', '元素战技': '战技', '元素爆发': '大招' }
+  if (compact) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] text-surface-400 w-8 shrink-0 text-right font-medium">{shortLabels[label] || label}</span>
+        <div className="flex-1 min-w-0">
+          <DualRangeSlider nodes={nodes} values={values} onChange={onChange} />
+        </div>
+        <span className="text-[10px] text-surface-500 font-mono w-14 shrink-0 text-right">
+          {nodes[values[0]]}→{nodes[values[1]]}
+        </span>
+      </div>
+    )
+  }
   return (
     <div>
       <div className="flex items-center justify-between mb-0.5">
