@@ -328,6 +328,24 @@ button:where(:not([class*="hover:"])):hover:not(:disabled) {
   width: 8px;
   height: 8px;
 }
+
+/* 技能倍率表横向滚动条 — 加粗 + 异色外框 */
+.skill-table-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+.skill-table-scroll::-webkit-scrollbar-track {
+  background: rgb(var(--surface-800));
+  border-radius: 5px;
+  border: 1px solid rgb(var(--primary-400)/0.3);
+}
+.skill-table-scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--primary-400)/0.35);
+  border-radius: 5px;
+  border: 1px solid rgb(var(--primary-400)/0.5);
+}
+.skill-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--primary-400)/0.55);
+}
 .betamemo-scroll::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 4px;

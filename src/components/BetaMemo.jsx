@@ -884,7 +884,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   const canRedo = redoStack.length > 0
 
   return (
-    <div className="h-full flex">
+    <div className="h-full flex select-none">
       {/* ── 左侧控制栏 ── */}
       <div className="w-[148px] shrink-0 flex flex-col border-r border-white/5 bg-surface-800/30" onMouseDown={e => e.stopPropagation()}>
         {/* 返回 */}

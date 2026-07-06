@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
@@ -1881,10 +1881,23 @@ function SkillTableDisplay({ data, talentType }) {
     if (e.target === e.currentTarget) setSel(null)
   }
 
+  // 点击表格外部取消所有选取
+  const tableRef = useRef(null)
+  useEffect(() => {
+    const onDocMouseDown = (e) => {
+      if (tableRef.current && !tableRef.current.contains(e.target)) {
+        setSel(null)
+        dragging.current = false
+      }
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    return () => document.removeEventListener('mousedown', onDocMouseDown)
+  }, [])
+
   const b = selectionBounds()
 
   return (
-    <div className="mt-3 overflow-x-auto" ref={scrollRef} onClick={onTableClick}>
+    <div className="mt-3 overflow-x-auto skill-table-scroll" ref={(el) => { scrollRef.current = el; tableRef.current = el }} onClick={onTableClick}>
       <table className={`text-[10px] border-collapse ${maxLevels === 1 ? 'w-full' : 'w-full'}`}>
         <thead>
           <tr className="bg-surface-700/50">
@@ -2158,39 +2171,9 @@ function StoryReader({ stories, characterName, onClose, mode, onModeChange, them
   const [activeIdx, setActiveIdx] = useState(0)
   const [page, setPage] = useState(1)
   const contentRef = useRef(null)
-  const windowPosRef = useRef({ x: 0, y: 0 })
-  const dragRef = useRef(null)
   const t = READER_THEMES[theme] || READER_THEMES.dark
   const story = stories[activeIdx]
   const totalPages = story ? Math.ceil((story.content || '').length / 2000) : 1
-
-  useEffect(() => {
-    window.electronAPI?.getWindowPosition().then(([wx, wy]) => { windowPosRef.current = { x: wx, y: wy } })
-  }, [])
-
-  const handleTitleDrag = useCallback((e) => {
-    if (e.button !== 0) return
-    e.preventDefault(); e.stopPropagation()
-    const startX = e.screenX, startY = e.screenY
-    const { x: wx, y: wy } = windowPosRef.current
-    dragRef.current = { startX, startY, wx, wy }
-    window.electronAPI?.getWindowPosition().then(([fx, fy]) => {
-      if (dragRef.current) { dragRef.current.wx = fx; dragRef.current.wy = fy }
-    })
-    const onMove = (ev) => {
-      if (!dragRef.current) return
-      const d = dragRef.current
-      window.electronAPI?.setWindowPosition(d.wx + ev.screenX - d.startX, d.wy + ev.screenY - d.startY)
-    }
-    const onUp = () => {
-      if (dragRef.current) windowPosRef.current = { x: dragRef.current.wx, y: dragRef.current.wy }
-      dragRef.current = null
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }, [])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -2247,7 +2230,7 @@ function StoryReader({ stories, characterName, onClose, mode, onModeChange, them
           </div>
         </div>
         <div className="flex-1 flex flex-col min-w-0">
-          <div className={`flex items-center justify-between px-5 py-3 border-b ${t.border} flex-shrink-0 transition-colors duration-500`} onMouseDown={handleTitleDrag}>
+          <div className={`flex items-center justify-between px-5 py-3 border-b ${t.border} flex-shrink-0 transition-colors duration-500 drag-region`}>
             <div className="flex items-center gap-2 min-w-0">
               <BookOpen className="w-4 h-4 text-primary-400 flex-shrink-0" />
               <span className={`text-sm font-medium ${t.heading} truncate`}>{story?.title_zh || ''}</span>
