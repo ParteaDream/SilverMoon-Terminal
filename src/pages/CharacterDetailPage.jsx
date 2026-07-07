@@ -2176,6 +2176,7 @@ function StoryReader({ stories, characterName, onClose, mode, onModeChange, them
   const [animating, setAnimating] = useState(false)
   const [animDir, setAnimDir] = useState(1)
   const contentRef = useRef(null)
+  const scrollJumping = useRef(false)  // 侧栏点击跳转中，暂停 Observer 更新
   const t = READER_THEMES[theme] || READER_THEMES.dark
   const story = stories[activeIdx]
   const hasPrev = activeIdx > 0
@@ -2194,6 +2195,7 @@ function StoryReader({ stories, characterName, onClose, mode, onModeChange, them
     const visibleChapters = new Map()  // idx -> max ratio seen
     const observer = new IntersectionObserver(
       (entries) => {
+        if (scrollJumping.current) return
         for (const entry of entries) {
           const idx = parseInt(entry.target.dataset.chapterIdx, 10)
           if (isNaN(idx)) continue
@@ -2223,8 +2225,12 @@ function StoryReader({ stories, characterName, onClose, mode, onModeChange, them
   const scrollToChapter = useCallback((idx) => {
     setActiveIdx(idx)
     if (mode === 'scroll' && contentRef.current) {
+      scrollJumping.current = true
       const el = contentRef.current.querySelector('[data-chapter-idx="' + idx + '"]')
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      // 等滚动动画结束后恢复 Observer
+      clearTimeout(scrollJumping._timer)
+      scrollJumping._timer = setTimeout(() => { scrollJumping.current = false }, 800)
     } else {
       goToChapter(idx)
     }

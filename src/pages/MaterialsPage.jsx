@@ -18,6 +18,16 @@ const MATERIAL_TYPES = {
   boss_drop: 'Boss掉落', weekly_boss_drop: '周本掉落', event: '活动材料',
 }
 
+// 数据库中存在中英文混用的 type 值，统一映射为英文 key
+const TYPE_CN_TO_EN = {
+  '天赋书': 'talent', 'Boss掉落': 'boss_drop', '周本掉落': 'weekly_boss_drop',
+  '通用掉落': 'common', '角色突破素材': 'character_ascension',
+  '武器突破': 'weapon_ascension', '至冬区域特产': 'local_specialty',
+}
+function normalizeType(type) {
+  return TYPE_CN_TO_EN[type] || type
+}
+
 export default function MaterialsPage() {
   const { query } = useDb()
   const { restorePage, savePage, push, consumeBackToList } = useNav()
@@ -156,7 +166,8 @@ export default function MaterialsPage() {
 
   async function loadData() {
     const result = await query('SELECT * FROM materials ORDER BY id')
-    setMaterials(result.data || [])
+    const data = (result.data || []).map(r => ({ ...r, type: normalizeType(r.type) }))
+    setMaterials(data)
   }
 
   function navigateToDetail(id) {
@@ -165,7 +176,7 @@ export default function MaterialsPage() {
   }
 
   function openAdd() { setEditing(null); setForm({ id: 0, type: 'common', rarity: 1, sort_order: 0 }); setModalOpen(true) }
-  function openEdit(row) { setEditing(row); setForm({ ...row }); setModalOpen(true) }
+  function openEdit(row) { setEditing(row); setForm({ ...row, type: normalizeType(row.type) }); setModalOpen(true) }
 
   async function handleSave() {
     if (editing) {

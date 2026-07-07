@@ -16,6 +16,16 @@ const MATERIAL_TYPES = {
   boss_drop: 'Boss掉落', weekly_boss_drop: '周本掉落', event: '活动材料',
 }
 
+// 数据库中存在中英文混用的 type 值，统一映射为英文 key
+const TYPE_CN_TO_EN = {
+  '天赋书': 'talent', 'Boss掉落': 'boss_drop', '周本掉落': 'weekly_boss_drop',
+  '通用掉落': 'common', '角色突破素材': 'character_ascension',
+  '武器突破': 'weapon_ascension', '至冬区域特产': 'local_specialty',
+}
+function normalizeType(type) {
+  return TYPE_CN_TO_EN[type] || type
+}
+
 export default function MaterialDetailPage() {
   const { id } = useParams()
   return (
@@ -43,8 +53,9 @@ function MaterialDetailContent() {
     try {
       const result = await query('SELECT * FROM materials WHERE id = ?', [id])
       if (result.data?.length > 0) {
-        setMaterial(result.data[0])
-        setForm(result.data[0])
+        const data = { ...result.data[0], type: normalizeType(result.data[0].type) }
+        setMaterial(data)
+        setForm(data)
       }
     } catch (e) {
       console.error('Failed to load material:', e)

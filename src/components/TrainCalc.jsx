@@ -296,7 +296,7 @@ export default function TrainCalc({ initialData }) {
         specialty: ascMats.find(m => m.type === 'local_specialty'),
         boss: ascMats.find(m => m.type === 'Boss掉落' || m.type === 'boss_drop'),
         gems: ascMats.filter(m => m.type === 'character_ascension').sort((a, b) => a.rarity - b.rarity),
-        commons: ascMats.filter(m => m.type === '通用掉落').sort((a, b) => a.rarity - b.rarity),
+        commons: ascMats.filter(m => m.type === '通用掉落' || m.type === 'common').sort((a, b) => a.rarity - b.rarity),
         talentBooks: [], weeklyBoss: null, talentCommons: [],
       }
       // 天赋材料分类（排除智识之冕 104319，防止其混入天赋书数组导致 index 偏移）
