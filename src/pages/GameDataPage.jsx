@@ -431,6 +431,7 @@ export default function GameDataPage() {
   const [saving, setSaving] = useState(false)
   const [multiSelect, setMultiSelect] = useState(false)      // 多选模式开关
   const [activeDetailId, setActiveDetailId] = useState(null)  // 右侧详情面板当前条目 ID
+  const [relatedLinksKey, setRelatedLinksKey] = useState(0)    // 相关链接刷新键
   const [lightbox, setLightbox] = useState(null)              // 图片预览
   const [searchParams] = useSearchParams()
 
@@ -525,6 +526,7 @@ export default function GameDataPage() {
       }
       setModalOpen(false)
       loadData()
+      setRelatedLinksKey(prev => prev + 1)
     } finally {
       setSaving(false)
     }
@@ -899,7 +901,7 @@ export default function GameDataPage() {
             <div className="mt-6 pt-3 border-t border-surface-700 text-xs text-surface-500">
               更新时间：{activeDetail.updated_at || '-'}
             </div>
-            <RelatedLinksDisplay sourceId={activeDetail.id} sourceType="game_data"
+            <RelatedLinksDisplay key={relatedLinksKey} sourceId={activeDetail.id} sourceType="game_data"
               onBeforeNavigate={() => {
                 const el = listScrollRef.current
                 const scrollY = el ? el.scrollTop : 0

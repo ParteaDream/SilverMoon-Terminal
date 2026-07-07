@@ -529,6 +529,18 @@ function ensureUserDbSchema() {
     console.log('[ensureUserDbSchema] _user_delta table ready');
     // 尝试迁移旧的 user.db 数据（如果有完整表结构的数据）
     try { migrateOldUserDb(); } catch (_) {}
+    // related_links 表：用户关联数据（非开发者模式写入 user.db）
+    userDb.exec(`CREATE TABLE IF NOT EXISTS related_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_type TEXT NOT NULL,
+      source_id INTEGER NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id INTEGER NOT NULL,
+      label TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    )`);
+    try { userDb.exec('CREATE INDEX IF NOT EXISTS idx_related_source_user ON related_links(source_type, source_id)'); } catch (_) {}
   } catch (e) {
     console.error('[ensureUserDbSchema] error:', e.message);
   }
@@ -1850,6 +1862,9 @@ ipcMain.handle('init-database', () => {
 ipcMain.handle('update-database', () => {
   try {
     if (!dbDir) throw new Error('数据库路径未设置');
+    // 备份 related_links 数据（更新种子数据会清空基准库）
+    let relatedBackup = null
+    try { relatedBackup = dbAll('SELECT * FROM related_links', []) } catch (_) {}
     // 关闭并删除基准库，保留 user.db
     const basePath = getDbPath(dbDir);
     closeDatabase(); // 关闭两个库
@@ -1858,6 +1873,16 @@ ipcMain.handle('update-database', () => {
     // 重新打开基准库（不关闭 user.db — closeDatabase 已关闭它，重新打开）
     openDb(dbDir); // openUserDb 会重新打开已存在的 user.db
     const result = seedDatabase();
+    // 恢复 related_links 数据
+    if (relatedBackup && relatedBackup.length > 0) {
+      try {
+        for (const row of relatedBackup) {
+          dbRun('INSERT OR IGNORE INTO related_links (id, source_type, source_id, target_type, target_id, label, sort_order, created_at) VALUES (?,?,?,?,?,?,?,?)',
+            [row.id, row.source_type, row.source_id, row.target_type, row.target_id, row.label, row.sort_order, row.created_at])
+        }
+        console.log('[update-database] restored', relatedBackup.length, 'related_links')
+      } catch (e) { console.warn('[update-database] failed to restore related_links:', e.message) }
+    }
     dbSave();
     return result;
   } catch (error) {
@@ -1974,6 +1999,16 @@ ipcMain.handle('db-query', (_event, sql, params = []) => {
       if (userDb && trimmed.startsWith('SELECT')) {
         try {
           const tableName = _extractTableName(sql);
+          // related_links：非 dev 模式下合并 user.db 中的用户修改
+          if (tableName === 'related_links') {
+            try {
+              const userResult = dbAllOnDb(userDb, sql, params);
+              if (userResult.length > 0) {
+                return { data: userResult };
+              }
+            } catch (_) {}
+            return { data: baseResult };
+          }
           if (tableName) {
             // 调试：检查 characters 表是否有 delta
             if (tableName === 'characters' && userDb) {
@@ -1997,11 +2032,11 @@ ipcMain.handle('db-query', (_event, sql, params = []) => {
     }
 
     // ── 写操作：根据 devMode 路由 ──
-    // related_links 表始终走基准库（跨类型关联元数据，不需要 _user_delta 增量保护）
+    // related_links 在非 dev 模式写入 user.db，dev 模式写入基准库
     const writeTableName = _extractTableName(sql);
     const isRelatedLinks = writeTableName === 'related_links';
 
-    if (devMode || isRelatedLinks) {
+    if (devMode) {
       const result = dbRun(sql, params);
       try { dbSave(); } catch (saveErr) {
         return { changes: result.changes, lastId: result.lastId, saveError: saveErr.message };
@@ -2013,7 +2048,10 @@ ipcMain.handle('db-query', (_event, sql, params = []) => {
       if (!udb) throw new Error('无法创建用户数据库');
 
       let result;
-      if (trimmed.startsWith('UPDATE')) {
+      // related_links：直接写入 user.db 的同名表
+      if (isRelatedLinks) {
+        result = dbRunOnDb(udb, sql, params);
+      } else if (trimmed.startsWith('UPDATE')) {
         result = storeUpdateAsDelta(udb, sql, params);
       } else if (trimmed.startsWith('INSERT')) {
         result = dbRunOnDb(udb, sql, params);

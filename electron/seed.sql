@@ -1,5 +1,5 @@
 -- ============================================================================
--- 银月终端数据库 - 种子数据（导出于 2026-07-06）
+-- 银月终端数据库 - 种子数据（导出于 2026-07-07）
 -- 数据版本: 7.0.1-extra
 -- 来源: /Users/stargomia/Files/GenshinWikiData/silvermoon_terminal.db
 -- 不含 image_cache 表数据
@@ -38,7 +38,7 @@ INSERT INTO "settings" ("key", "value") VALUES
   ('element_colors', '[{"color":"#F19E9C","icon":"Pyro.webp"},{"color":"#8EBEFA","icon":"Hydro.webp"},{"color":"#F3B0FA","icon":"Electro.webp"},{"color":"#B1FCFE","icon":"Cryo.webp"},{"color":"#BEE855","icon":"Dendro.webp"},{"color":"#B7F3CE","icon":"Anemo.webp"},{"color":"#ECD87B","icon":"Geo.webp"}]'),
   ('dev_mode', '1'),
   ('default_view_mode', '{"characters":"gallery","weapons":"gallery","artifacts":"gallery","materials":"gallery","wishes":"images"}'),
-  ('theme', '{"id":"slate","custom":null}');
+  ('theme', '{"id":"trailblaze","custom":null}');
 
 -- ----------------------------------------------------------------------------
 -- weapon_types
@@ -4741,7 +4741,7 @@ INSERT INTO "game_data" ("id", "category", "title_zh", "content", "tags", "image
 ```
 ```
 最终草原核伤害 = (草原核基础+额外提升)×抗性系数﻿
-```', NULL, '["月绽放.jpeg"]', '[]', 0, '2026-06-17 14:47:06', '2026-07-05 01:38:17'),
+```', NULL, '["月绽放.jpeg"]', '[]', 0, '2026-06-17 14:47:06', '2026-07-07 11:49:49'),
   (8, '元素反应', '增幅反应', '# [b]增幅反应[/b]
 增幅反应包括[color=#ffd780]蒸发反应[/color]与[color=#ffd780]融化反应[/color]。
 触发增幅反应时，会为本次伤害附加增幅系数。若攻击没有出现伤害数字（例如命中护盾），则本次伤害不会计算增幅系数。
@@ -38310,7 +38310,8 @@ INSERT INTO "related_links" ("id", "source_type", "source_id", "target_type", "t
   (32, 'game_data', 12, 'artifacts', 15046, '影中沉凝的幻灭', 1, '2026-07-06 20:01:34'),
   (33, 'game_data', 6, 'game_data', 5, '剧变反应', 0, '2026-07-06 20:01:46'),
   (34, 'game_data', 13, 'game_data', 5, '剧变反应', 0, '2026-07-06 20:02:36'),
-  (35, 'game_data', 13, 'artifacts', 15047, '血红之证', 1, '2026-07-06 20:02:36');
+  (35, 'game_data', 13, 'artifacts', 15047, '血红之证', 1, '2026-07-06 20:02:36'),
+  (36, 'game_data', 7, 'game_data', 5, '剧变反应', 0, '2026-07-07 11:49:49');
 
 -- ----------------------------------------------------------------------------
 -- version_additions
