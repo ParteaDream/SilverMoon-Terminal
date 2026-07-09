@@ -10,7 +10,7 @@ import {
   FolderOpen, RefreshCw, Database, AlertTriangle, CheckCircle2,
   Palette, Image, Upload, Settings, ChevronRight, Sparkles, Paintbrush,
   Wrench, Download, Upload as UploadIcon, FileCode, ShieldAlert,
-  LayoutList, LayoutGrid, List, Info, Images, HardDrive, Save, Pencil, Trash2, Shirt, X
+  LayoutList, LayoutGrid, List, Info, Images, HardDrive, Save, Pencil, Trash2, Shirt, X, Shield
 } from 'lucide-react'
 import { PRESET_COLORS } from '../utils/colorMarkup'
 import ColorPicker from '../components/ColorPicker'
@@ -1419,6 +1419,15 @@ function AppearanceModule() {
                 >
                   <LayoutGrid className="w-3.5 h-3.5" />画廊
                 </button>
+                {s.key === 'weapons' && (
+                  <button
+                    onClick={() => setViewMode(s.key, 'equipment')}
+                    className={`px-3 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5
+                      ${viewDefaults[s.key] === 'equipment' ? 'bg-surface-600 text-white' : 'text-surface-400 hover:text-surface-200'}`}
+                  >
+                    <Shield className="w-3.5 h-3.5" />装备
+                  </button>
+                )}
               </div>
             </div>
           ))}

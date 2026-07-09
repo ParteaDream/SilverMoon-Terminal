@@ -95,6 +95,14 @@ CREATE TABLE IF NOT EXISTS character_talent_materials (
   UNIQUE(character_id, material_id, material_type)
 );
 
+CREATE TABLE IF NOT EXISTS character_related_effects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,                  -- 效果名称（用于引用: [effect:名称]）
+  content TEXT NOT NULL DEFAULT '',    -- 效果正文（支持 [color=...] [b] [i] 标记）
+  sort_order INTEGER DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS character_talents (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
@@ -309,6 +317,7 @@ CREATE TABLE IF NOT EXISTS weapons (
   image TEXT,                         -- 武器图片文件名
   simple_art TEXT,                    -- 装备图文件名（用于头像）
   gallery_images TEXT,                -- JSON: [{label, filename}] 图库
+  category TEXT DEFAULT '武器',       -- 分类：武器/皮肤/TPS
   sort_order INTEGER DEFAULT 0
 );
 

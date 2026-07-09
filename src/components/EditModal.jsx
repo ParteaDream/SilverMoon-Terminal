@@ -252,7 +252,8 @@ export function ImagePicker({ label, currentImage, onSelect, onRemove }) {
     const files = e.dataTransfer?.files
     if (files && files.length > 0) {
       const file = files[0]
-      if (!file.type.startsWith('image/')) return
+      // 允许空 type（某些来源不提供 MIME）
+      if (file.type && !file.type.startsWith('image/')) return
       srcPath = file.path
     } else {
       // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
@@ -261,13 +262,15 @@ export function ImagePicker({ label, currentImage, onSelect, onRemove }) {
     if (!srcPath) return
 
     // Send the file path to main process via IPC
-    const result = await window.electronAPI.importImageFile(srcPath)
-    if (result && result.conflict) {
-      alert(result.message)
-      return
-    }
-    if (result && result.filename) {
-      onSelect(result.filename)
+    try {
+      const result = await window.electronAPI.importImageFile(srcPath)
+      if (result?.filename) {
+        onSelect(result.filename)
+      } else if (result?.error) {
+        console.error('Image import failed:', result.error)
+      }
+    } catch (e) {
+      console.error('Image import error:', e)
     }
   }
 

@@ -14,6 +14,7 @@ const MATERIAL_TYPES = {
   character_ascension: '角色突破', weapon_ascension: '武器突破', talent: '天赋书',
   cooking: '食材', local_specialty: '地区特产', common: '通用掉落',
   boss_drop: 'Boss掉落', weekly_boss_drop: '周本掉落', event: '活动材料',
+  valuable: '贵重物品',
 }
 
 // 数据库中存在中英文混用的 type 值，统一映射为英文 key
@@ -128,11 +129,12 @@ function MaterialDetailContent() {
         <div className="relative z-10 flex items-start justify-between">
           <div className="flex items-start gap-6">
             <div
-              className="w-28 h-28 rounded-2xl bg-surface-800/50 border border-surface-600 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-lg cursor-pointer hover:scale-105 transition-transform"
+              className="w-28 h-28 rounded-2xl border border-surface-600 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-lg cursor-pointer hover:scale-105 transition-transform"
+              style={{ backgroundImage: `url(./background/${material.rarity || 1}star.webp)`, backgroundSize: 'cover', backgroundPosition: 'center' }}
               onClick={() => material.image && setLightbox({ filename: material.image, label: material.name_zh })}
             >
               {material.image ? (
-                <LocalImage filename={material.image} className="w-full h-full object-cover" />
+                <LocalImage filename={material.image} className="w-20 h-20 object-contain drop-shadow-md" />
               ) : (
                 <Package className="w-10 h-10 text-surface-500" />
               )}
@@ -178,7 +180,7 @@ function MaterialDetailContent() {
         {material.image && (
           <SectionCard icon={<Package className="w-4 h-4" />} title="图片">
             <div className="max-w-xs">
-              <ImageTile filename={material.image} label={material.name_zh} onClick={() => setLightbox({ filename: material.image, label: material.name_zh })} />
+              <ImageTile filename={material.image} label={material.name_zh} rarity={material.rarity} onClick={() => setLightbox({ filename: material.image, label: material.name_zh })} />
             </div>
           </SectionCard>
         )}
@@ -235,10 +237,11 @@ function StatBadge({ label, value }) {
   )
 }
 
-function ImageTile({ filename, label, onClick }) {
+function ImageTile({ filename, label, rarity, onClick }) {
   const [src, setSrc] = useState(null)
   const { readImage } = useDb()
   const handleDrag = useImageDrag(filename)
+  const bgUrl = `./background/${rarity || 1}star.webp`
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -254,8 +257,9 @@ function ImageTile({ filename, label, onClick }) {
       className={`rounded-xl bg-surface-800/50 border border-surface-700 overflow-hidden ${onClick ? 'cursor-pointer hover:border-primary-500/50 transition-colors' : ''}`}
       onClick={onClick}
     >
-      <div className="bg-surface-700 flex items-center justify-center aspect-square overflow-hidden">
-        <img src={src} alt="" className="w-full h-full object-cover" draggable onDragStart={handleDrag} />
+      <div className="flex items-center justify-center aspect-square"
+        style={{ backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+        <img src={src} alt="" className="max-w-[80%] max-h-[80%] object-contain drop-shadow-md" draggable onDragStart={handleDrag} />
       </div>
       <div className="p-2">
         <p className="text-[10px] text-surface-400 text-center truncate">{label}</p>

@@ -9,12 +9,13 @@ import { useImageDrag } from '../hooks/useImageDrag'
 import { useDetailScroll } from '../hooks/useDetailState'
 import {
   ArrowLeft, Star, Edit3, Plus, Trash2, Image, ChevronDown, ChevronRight, X,
-  Zap, BookOpen, Crown, Sparkles, User, Info, MapPin, Calendar, Sword, Shirt, UtensilsCrossed, FileText, FlaskConical, Upload, CheckCircle2
+  Zap, BookOpen, Crown, Sparkles, User, Info, MapPin, Calendar, Sword, Shirt, UtensilsCrossed, FileText, FlaskConical, Upload, CheckCircle2, Copy
 } from 'lucide-react'
 import EditModal, { FormInput, FormSelect, SearchSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
-import { ELEM_ID_TO_SETTINGS_INDEX } from '../utils/colorMarkup'
+import ColorTextInput from '../components/ColorTextInput'
+import { ELEM_ID_TO_SETTINGS_INDEX, stripFormatting } from '../utils/colorMarkup'
 
 const ELEMENT_COLORS = {
   1: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20', glow: 'shadow-red-500/10' },
@@ -55,6 +56,7 @@ const MATERIAL_TYPE_ZH = {
   character_ascension: '角色突破', weapon_ascension: '武器突破', talent: '天赋书',
   cooking: '食材', local_specialty: '地区特产', common: '通用掉落',
   boss_drop: 'Boss掉落', weekly_boss_drop: '周本掉落', event: '活动材料',
+  valuable: '贵重物品',
 }
 
 function defaultSkillTable() {
@@ -106,6 +108,9 @@ function CharacterDetailContent() {
   const [editStory, setEditStory] = useState(null)
   const [editAscMat, setEditAscMat] = useState(null)
   const [editTalentMat, setEditTalentMat] = useState(null)
+  const [relatedEffects, setRelatedEffects] = useState([])
+  const [editEffect, setEditEffect] = useState(null)
+  const [effectForm, setEffectForm] = useState({ name: '', content: '' })
   const [form, setForm] = useState({})
   const [dish, setDish] = useState({ name_zh: '', description_zh: '', effect: '', image: null })
   const [gallery, setGallery] = useState([])   // 自定义图库 [{label, filename}]
@@ -155,7 +160,7 @@ function CharacterDetailContent() {
 
   async function loadAll() {
     try {
-      const [chars, elems, wtypes, regs, tals, cons, fits, mats, ecolors] = await Promise.all([
+      const [chars, elems, wtypes, regs, tals, cons, fits, effs, mats, ecolors] = await Promise.all([
         query('SELECT * FROM characters WHERE id = ?', [id]),
         query('SELECT * FROM elements'),
         query('SELECT * FROM weapon_types'),
@@ -163,6 +168,7 @@ function CharacterDetailContent() {
         query('SELECT * FROM character_talents WHERE character_id = ? ORDER BY sort_order, type', [id]),
         query('SELECT * FROM character_constellations WHERE character_id = ? ORDER BY level', [id]),
         query('SELECT * FROM character_outfits WHERE character_id = ?', [id]),
+        query('SELECT * FROM character_related_effects WHERE character_id = ? ORDER BY sort_order, id', [id]),
         query('SELECT * FROM materials ORDER BY type, rarity DESC, name_zh'),
         query("SELECT value FROM settings WHERE key = 'element_colors'"),
       ])
@@ -241,6 +247,7 @@ function CharacterDetailContent() {
       setTalents(tals.data || [])
       setConstellations(cons.data || [])
       setOutfits(fits.data || [])
+      setRelatedEffects(effs.data || [])
 
       // Scroll to outfit if hash present (e.g. #outfit-123)
       const hash = location.hash
@@ -620,6 +627,36 @@ function CharacterDetailContent() {
       alert('删除失败: ' + (e.message || '未知错误'))
     }
   }
+  // ── Related Effects CRUD ──
+  async function saveEffect() {
+    if (!effectForm.name.trim()) { alert('请输入效果名称'); return }
+    try {
+      if (editEffect && editEffect.id) {
+        await query('UPDATE character_related_effects SET name = ?, content = ? WHERE id = ?',
+          [effectForm.name.trim(), effectForm.content, editEffect.id])
+      } else {
+        const maxOrder = relatedEffects.reduce((m, e) => Math.max(m, e.sort_order || 0), 0)
+        await query('INSERT INTO character_related_effects (character_id, name, content, sort_order) VALUES (?, ?, ?, ?)',
+          [character.id, effectForm.name.trim(), effectForm.content, maxOrder + 1])
+      }
+      setEditEffect(null)
+      await loadAll()
+    } catch (e) {
+      console.error('Save effect failed:', e)
+      alert('保存失败: ' + (e.message || '未知错误'))
+    }
+  }
+  async function deleteEffect(id) {
+    if (!confirm('确定删除此相关效果？（已引用的附注不会自动删除，但会失去同步）')) return
+    try {
+      await query('DELETE FROM character_related_effects WHERE id = ?', [id])
+      await loadAll()
+    } catch (e) {
+      console.error('Delete effect failed:', e)
+      alert('删除失败: ' + (e.message || '未知错误'))
+    }
+  }
+
   // ── Loading / not found ──
   if (loading) {
     return (
@@ -638,6 +675,11 @@ function CharacterDetailContent() {
     )
   }
 
+  // 相关效果引用映射：name → content（用于 ColoredText 展开 [effect:name]）
+  const effectMap = {}
+  for (const ef of relatedEffects) {
+    if (ef.name) effectMap[stripFormatting(ef.name)] = { rawName: ef.name, content: ef.content }
+  }
   const elemColor = ELEMENT_COLORS[character.element_id] || { bg: 'bg-surface-800', text: 'text-surface-300', border: 'border-surface-600', glow: '' }
   const wt = weaponTypes.find(w => w.id === character.weapon_type_id)
   const reg = regions.find(r => r.id === character.region_id)
@@ -736,13 +778,13 @@ function CharacterDetailContent() {
 
       
 {/* ─── Content Sections ─── */}
-      <div className="px-8 py-6 max-w-7xl">
+      <div className="px-8 py-6">
         <div className="flex flex-col xl:flex-row xl:gap-8 space-y-8 xl:space-y-0">
           <div className="xl:w-1/2 flex flex-col space-y-8">
 {/* Basic Info */}
         {effectiveVisible.info && (
           <SectionCard icon={<Info className="w-4 h-4" />} title="基本信息" onEdit={() => setEditCharacter(true)}>
-            <p className="text-sm text-surface-300 leading-relaxed"><ColoredText text={character.description_zh || '暂无简介'} /></p>
+            <p className="text-sm text-surface-300 leading-relaxed"><ColoredText text={character.description_zh || '暂无简介'}  effectMap={effectMap} /></p>
             {character.name_en && <p className="text-xs text-surface-500 mt-2">英文名: {character.name_en}</p>}
             {character.constellation_zh && <p className="text-xs text-surface-500 mt-1">命之座: {character.constellation_zh}</p>}
 
@@ -853,7 +895,7 @@ function CharacterDetailContent() {
                     </h4>
                     <div className="space-y-2">
                       {group.map((t, i) => (
-                        <TalentCard key={t.id} talent={t} index={typeKey === 'passive' ? i + 1 : null} onEdit={() => setEditTalent({
+                        <TalentCard key={t.id} talent={t} index={typeKey === 'passive' ? i + 1 : null} effectMap={effectMap} onEdit={() => setEditTalent({
                           ...t,
                           skill_table: t.skill_table ? safeParseJSON(t.skill_table) : (t.type !== 'passive' ? defaultSkillTable() : null)
                         })} onDelete={() => deleteTalent(t.id)} />
@@ -866,6 +908,56 @@ function CharacterDetailContent() {
             </div>
           </SectionCard>
         )}
+
+        
+{/* Constellations — 单列布局：排在天赋技能下方 */}
+        {effectiveVisible.constellations && (
+          <div className="xl:hidden">
+          <SectionCard
+            icon={<Crown className="w-4 h-4" />}
+            title={`命之座 · ${character.constellation_zh || '未设定'}`}
+            onAdd={() => setEditCon({ name_zh: '', description_zh: '', level: filteredCons.length + 1, icon: null })}
+            count={constellations.length}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {filteredCons.map(c => (
+                <div key={c.id} className="p-4 rounded-xl bg-surface-800/50 border border-surface-700/50 hover:border-surface-600 transition-colors group">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      {c.icon ? (
+                        <LocalImage filename={c.icon} className="w-8 h-8 rounded-lg object-cover" />
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-accent-gold/10 border border-accent-gold/20 flex items-center justify-center">
+                          <span className="text-accent-gold text-xs font-mono font-bold">{c.level}</span>
+                        </div>
+                      )}
+                      <span className="text-sm font-medium">{c.level}. {c.name_zh}</span>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => setEditCon({ ...c })} className="p-1 text-surface-400 hover:text-primary-400"><Edit3 className="w-3 h-3" /></button>
+                      <button onClick={() => deleteCon(c.id)} className="p-1 text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                  </div>
+                  {c.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={c.description_zh}  effectMap={effectMap} /></p>}
+                </div>
+              ))}
+            </div>
+            {constellations.length === 0 && <Empty text="暂无命座数据" />}
+          </SectionCard>
+          </div>
+        )}
+
+        
+{/* 相关效果 — 单列布局 */}
+        <div className="xl:hidden">
+          <RelatedEffectsSection
+            effects={relatedEffects}
+            effectMap={effectMap}
+            onAdd={() => { setEditEffect({}); setEffectForm({ name: '', content: '' }) }}
+            onEdit={(ef) => { setEditEffect(ef); setEffectForm({ name: ef.name, content: ef.content }) }}
+            onDelete={deleteEffect}
+          />
+        </div>
 
         
 {/* 培养素材 */}
@@ -1039,11 +1131,8 @@ function CharacterDetailContent() {
                       }
                     }}
                   >
-                    <p className="text-xs font-medium pointer-events-none">{o.name_zh}</p>
-                    <div className="flex items-start gap-2 mt-0.5">
-                      <p className={`text-[10px] flex-1 min-w-0 pointer-events-none ${isSelected ? 'text-primary-300' : 'text-surface-500'}`}>
-                        <ColoredText text={o.description_zh || '无描述'} />
-                      </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-medium pointer-events-none">{o.name_zh}</p>
                       {o.story_zh && (
                         <button
                           onClick={e => { e.stopPropagation(); setStoryPreview(o) }}
@@ -1052,6 +1141,11 @@ function CharacterDetailContent() {
                           <BookOpen className="w-3 h-3" />故事
                         </button>
                       )}
+                    </div>
+                    <div className="flex items-start gap-2 mt-0.5">
+                      <p className={`text-[10px] flex-1 min-w-0 pointer-events-none ${isSelected ? 'text-primary-300' : 'text-surface-500'}`}>
+                        <ColoredText text={o.description_zh || '无描述'}  effectMap={effectMap} />
+                      </p>
                     </div>
                     {/* 导入头像按钮（非默认时装且无头像时显示） */}
                     {!o.is_default && !o.avatar_image && (
@@ -1084,8 +1178,9 @@ function CharacterDetailContent() {
         )}
 
         
-{/* Constellations */}
+{/* Constellations — 双列布局：保持在右栏原位置 */}
         {effectiveVisible.constellations && (
+          <div className="hidden xl:block">
           <SectionCard
             icon={<Crown className="w-4 h-4" />}
             title={`命之座 · ${character.constellation_zh || '未设定'}`}
@@ -1111,13 +1206,26 @@ function CharacterDetailContent() {
                       <button onClick={() => deleteCon(c.id)} className="p-1 text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
                     </div>
                   </div>
-                  {c.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={c.description_zh} /></p>}
+                  {c.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={c.description_zh}  effectMap={effectMap} /></p>}
                 </div>
               ))}
             </div>
             {constellations.length === 0 && <Empty text="暂无命座数据" />}
           </SectionCard>
+          </div>
         )}
+
+        
+{/* 相关效果 — 双列布局 */}
+        <div className="hidden xl:block">
+          <RelatedEffectsSection
+            effects={relatedEffects}
+            effectMap={effectMap}
+            onAdd={() => { setEditEffect({}); setEffectForm({ name: '', content: '' }) }}
+            onEdit={(ef) => { setEditEffect(ef); setEffectForm({ name: ef.name, content: ef.content }) }}
+            onDelete={deleteEffect}
+          />
+        </div>
 
         
 {/* Specialty Dish */}
@@ -1143,11 +1251,11 @@ function CharacterDetailContent() {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold mb-1">{dish.name_zh}</h3>
-                  {dish.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={dish.description_zh} /></p>}
+                  {dish.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={dish.description_zh}  effectMap={effectMap} /></p>}
                   {dish.effect && (
                     <div className="mt-2 pt-2 border-t border-surface-700">
                       <span className="text-[10px] text-surface-500 font-medium">效果</span>
-                      <p className="text-xs text-surface-300 leading-relaxed mt-0.5"><ColoredText text={dish.effect} /></p>
+                      <p className="text-xs text-surface-300 leading-relaxed mt-0.5"><ColoredText text={dish.effect}  effectMap={effectMap} /></p>
                     </div>
                   )}
                 </div>
@@ -1177,7 +1285,7 @@ function CharacterDetailContent() {
                 <div className="flex-1 min-w-0">
                   {namecardName && <h3 className="text-sm font-semibold mb-1">{namecardName}</h3>}
                   {namecardDesc ? (
-                    <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={namecardDesc} /></p>
+                    <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={namecardDesc}  effectMap={effectMap} /></p>
                   ) : (
                     <Empty text="暂未设置名片简介" />
                   )}
@@ -1217,7 +1325,7 @@ function CharacterDetailContent() {
                       <button onClick={() => deleteStory(s.id)} className="p-1 text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
                     </div>
                   </div>
-                  {s.content && <p className="text-xs text-surface-400 leading-relaxed whitespace-pre-wrap"><ColoredText text={s.content} /></p>}
+                  {s.content && <p className="text-xs text-surface-400 leading-relaxed whitespace-pre-wrap"><ColoredText text={s.content}  effectMap={effectMap} /></p>}
                 </div>
               ))}
             </div>
@@ -1342,7 +1450,7 @@ function CharacterDetailContent() {
           <FormInput label="上线时间" value={form.release_date} onChange={v => setForm({ ...form, release_date: v })} placeholder="YYYY-MM-DD" />
           <FormInput label="所属" value={form.affiliation} onChange={v => setForm({ ...form, affiliation: v })} />
         </div>
-        <FormInput label="简介" value={form.description_zh} onChange={v => setForm({ ...form, description_zh: v })} multiline />
+        <FormInput label="简介" value={form.description_zh} onChange={v => setForm({ ...form, description_zh: v })} multiline effects={relatedEffects} effectMap={effectMap} />
         {/* 角色属性 */}
         <div className="mt-2 pt-3 border-t border-surface-700">
           <h4 className="text-xs font-semibold text-surface-400 mb-3">角色属性</h4>
@@ -1397,7 +1505,7 @@ function CharacterDetailContent() {
                 ]} />
             )}
           </div>
-          <FormInput label="描述" value={editTalent.description_zh} onChange={v => setEditTalent({ ...editTalent, description_zh: v })} multiline />
+          <FormInput label="描述" value={editTalent.description_zh} onChange={v => setEditTalent({ ...editTalent, description_zh: v })} multiline effects={relatedEffects} effectMap={effectMap} />
           <ImagePicker label="技能图标" currentImage={editTalent.icon} onSelect={v => setEditTalent({ ...editTalent, icon: v })} onRemove={() => setEditTalent({ ...editTalent, icon: null })} />
 
           {/* 技能数值表格 (非固有天赋) */}
@@ -1430,7 +1538,7 @@ function CharacterDetailContent() {
                 ]} />
             )}
           </div>
-          <FormInput label="描述" value={editCon.description_zh} onChange={v => setEditCon({ ...editCon, description_zh: v })} multiline />
+          <FormInput label="描述" value={editCon.description_zh} onChange={v => setEditCon({ ...editCon, description_zh: v })} multiline effects={relatedEffects} effectMap={effectMap} />
           <ImagePicker label="命座图标" currentImage={editCon.icon} onSelect={v => setEditCon({ ...editCon, icon: v })} onRemove={() => setEditCon({ ...editCon, icon: null })} />
         </EditModal>
       )}
@@ -1439,8 +1547,8 @@ function CharacterDetailContent() {
       {editOutfit && (
         <EditModal isOpen={!!editOutfit} onClose={() => setEditOutfit(null)} onSave={handleSaveOutfit} saving={saving} title={editOutfit.id ? '编辑时装' : '添加时装'}>
           <FormInput label="名称" value={editOutfit.name_zh} onChange={v => setEditOutfit({ ...editOutfit, name_zh: v })} />
-          <FormInput label="描述" value={editOutfit.description_zh} onChange={v => setEditOutfit({ ...editOutfit, description_zh: v })} multiline />
-          <FormInput label="故事" value={editOutfit.story_zh} onChange={v => setEditOutfit({ ...editOutfit, story_zh: v })} multiline />
+          <FormInput label="描述" value={editOutfit.description_zh} onChange={v => setEditOutfit({ ...editOutfit, description_zh: v })} multiline effects={relatedEffects} effectMap={effectMap} />
+          <FormInput label="故事" value={editOutfit.story_zh} onChange={v => setEditOutfit({ ...editOutfit, story_zh: v })} multiline effects={relatedEffects} effectMap={effectMap} />
           <ImagePicker label="时装图片" currentImage={editOutfit.image} onSelect={v => setEditOutfit({ ...editOutfit, image: v })} onRemove={() => setEditOutfit({ ...editOutfit, image: null })} />
           <ImagePicker label="头像图片" currentImage={editOutfit.avatar_image} onSelect={v => setEditOutfit({ ...editOutfit, avatar_image: v })} onRemove={() => setEditOutfit({ ...editOutfit, avatar_image: null })} />
         </EditModal>
@@ -1458,7 +1566,7 @@ function CharacterDetailContent() {
               </button>
             </div>
             <div className="px-5 py-4 overflow-y-auto max-h-[calc(85vh-8rem)] whitespace-pre-wrap text-sm text-surface-200 leading-relaxed">
-              <ColoredText text={storyPreview.story_zh} />
+              <ColoredText text={storyPreview.story_zh}  effectMap={effectMap} />
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-surface-700 bg-surface-900/50">
               <button onClick={() => setStoryPreview(null)} className="px-4 py-2 rounded-lg text-sm text-surface-400 hover:text-white hover:bg-surface-700 transition-colors">
@@ -1473,8 +1581,8 @@ function CharacterDetailContent() {
       {editDish && (
         <EditModal isOpen={editDish} onClose={() => setEditDish(false)} onSave={handleSaveDish} saving={saving} title={`特殊料理 - ${character.name_zh}`}>
           <FormInput label="料理名称" value={dish.name_zh} onChange={v => setDish({ ...dish, name_zh: v })} />
-          <FormInput label="料理描述" value={dish.description_zh} onChange={v => setDish({ ...dish, description_zh: v })} multiline />
-          <FormInput label="料理效果" value={dish.effect} onChange={v => setDish({ ...dish, effect: v })} multiline />
+          <FormInput label="料理描述" value={dish.description_zh} onChange={v => setDish({ ...dish, description_zh: v })} multiline effects={relatedEffects} effectMap={effectMap} />
+          <FormInput label="料理效果" value={dish.effect} onChange={v => setDish({ ...dish, effect: v })} multiline effects={relatedEffects} effectMap={effectMap} />
           <ImagePicker label="料理图片" currentImage={dish.image} onSelect={v => setDish({ ...dish, image: v })} onRemove={() => setDish({ ...dish, image: null })} />
         </EditModal>
       )}
@@ -1483,7 +1591,7 @@ function CharacterDetailContent() {
       {editNamecard && (
         <EditModal isOpen={editNamecard} onClose={() => setEditNamecard(false)} onSave={handleSaveNamecard} saving={saving} title={`名片编辑 - ${character.name_zh}`}>
           <FormInput label="名片名称" value={namecardName} onChange={setNamecardName} />
-          <FormInput label="名片简介" value={namecardDesc} onChange={setNamecardDesc} multiline />
+          <FormInput label="名片简介" value={namecardDesc} onChange={setNamecardDesc} multiline effects={relatedEffects} effectMap={effectMap} />
         </EditModal>
       )}
 
@@ -1494,7 +1602,7 @@ function CharacterDetailContent() {
             <FormInput label="故事标题" value={editStory.title_zh} onChange={v => setEditStory({ ...editStory, title_zh: v })} />
             <FormInput label="排序 (数字)" value={editStory.sort_order} onChange={v => setEditStory({ ...editStory, sort_order: Number(v) })} type="number" />
           </div>
-          <FormInput label="故事内容" value={editStory.content} onChange={v => setEditStory({ ...editStory, content: v })} multiline />
+          <FormInput label="故事内容" value={editStory.content} onChange={v => setEditStory({ ...editStory, content: v })} multiline effects={relatedEffects} effectMap={effectMap} />
         </EditModal>
       )}
 
@@ -1537,6 +1645,28 @@ function CharacterDetailContent() {
       )}
 
       {/* Lightbox */}
+
+      {/* Edit Effect Modal */}
+      {editEffect !== null && (
+        <EditModal
+          isOpen={true}
+          onClose={() => setEditEffect(null)}
+          onSave={saveEffect}
+          title={editEffect && editEffect.id ? `编辑相关效果 - ${editEffect.name}` : '添加相关效果'}
+        >
+          <FormInput label="效果名称（用于引用: [effect:名称]，支持 [color=...] [b] [i]）" value={effectForm.name}
+            onChange={v => setEffectForm({ ...effectForm, name: v })} multiline rows={2} effectMap={effectMap} />
+          <div className="mt-4">
+            <label className="block text-xs font-medium text-surface-400 mb-1.5">效果正文（支持 [color=...] [b] [i] 标记）</label>
+            <ColorTextInput
+              value={effectForm.content}
+              onChange={v => setEffectForm({ ...effectForm, content: v })}
+              placeholder="输入效果描述…" rows={6}
+            />
+          </div>
+        </EditModal>
+      )}
+
       {lightbox && (
         <Lightbox filename={lightbox.filename} label={lightbox.label} onClose={() => setLightbox(null)} />
       )}
@@ -1580,7 +1710,7 @@ function SectionCard({ icon, title, children, onAdd, onEdit, count, defaultColla
   )
 }
 
-function TalentCard({ talent, index, onEdit, onDelete }) {
+function TalentCard({ talent, index, onEdit, onDelete, effectMap }) {
   const typeInfo = TALENT_TYPES[talent.type] || TALENT_TYPES.passive
   return (
     <div className="p-4 rounded-xl bg-surface-800/50 border border-surface-700/50 hover:border-surface-600 transition-colors group">
@@ -1599,7 +1729,7 @@ function TalentCard({ talent, index, onEdit, onDelete }) {
             </span>
             <span className="text-sm font-medium">{index != null ? `${index}. ` : ''}{talent.name_zh}</span>
           </div>
-          {talent.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={talent.description_zh} /></p>}
+          {talent.description_zh && <p className="text-xs text-surface-400 leading-relaxed"><ColoredText text={talent.description_zh}  effectMap={effectMap} /></p>}
           {/* 技能数值表格 (非固有天赋) */}
           {talent.type !== 'passive' && talent.skill_table && (
             <SkillTableDisplay data={talent.skill_table} talentType={talent.type} />
@@ -2369,6 +2499,72 @@ function StoryReader({ stories, characterName, onClose, mode, onModeChange, them
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── 相关效果栏 ──
+function RelatedEffectsSection({ effects, effectMap, onAdd, onEdit, onDelete }) {
+  const [collapsed, setCollapsed] = useState(true)
+
+  function copyRef(name) {
+    navigator.clipboard.writeText(`[effect:${stripFormatting(name)}]`).then(() => {
+    }).catch(() => {})
+  }
+
+  return (
+    <div className="rounded-xl border border-surface-800 bg-surface-900/50 overflow-hidden">
+      <div
+        className="flex items-center gap-2 px-5 py-3 border-b border-surface-800 cursor-pointer select-none hover:bg-surface-800/30 transition-colors"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <ChevronDown className={`w-3.5 h-3.5 text-surface-500 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+        <Zap className="w-4 h-4 text-amber-400" />
+        <h2 className="text-sm font-semibold">相关效果</h2>
+        <span className="text-[10px] text-surface-500 ml-1">({effects.length})</span>
+        <div className="flex-1" />
+        <button
+          onClick={e => { e.stopPropagation(); onAdd() }}
+          className="p-1 rounded text-surface-400 hover:text-primary-400 hover:bg-surface-700 transition-colors"
+          title="添加相关效果"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {!collapsed && (
+        <div className="px-5 py-4 space-y-3">
+          {effects.length === 0 ? (
+            <p className="text-xs text-surface-500">暂无相关效果，点击右上角 + 添加</p>
+          ) : (
+            effects.map(ef => (
+              <div key={ef.id} className="p-3 rounded-xl bg-surface-800/50 border border-surface-700/50 group">
+                <div className="flex items-start justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <ColoredText text={ef.name} className="text-sm font-medium text-amber-400" effectMap={effectMap} />
+                    <button
+                      onClick={() => copyRef(ef.name)}
+                      className="p-0.5 rounded text-surface-500 hover:text-primary-400 transition-colors"
+                      title="复制引用标记 [effect:名称]"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                    <span className="text-[10px] text-surface-600 font-mono">[effect:{stripFormatting(ef.name)}]</span>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => onEdit(ef)} className="p-1 rounded text-surface-400 hover:text-primary-400"><Edit3 className="w-3 h-3" /></button>
+                    <button onClick={() => onDelete(ef.id)} className="p-1 rounded text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+                  </div>
+                </div>
+                {ef.content && (
+                  <div className="text-xs text-surface-400 leading-relaxed">
+                    <ColoredText text={ef.content} effectMap={effectMap} />
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }

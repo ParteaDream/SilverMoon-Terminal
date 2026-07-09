@@ -11,10 +11,16 @@ import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
 
 const RARITY_STARS = { 1: '★', 2: '★★', 3: '★★★', 4: '★★★★', 5: '★★★★★' }
+const CATEGORY_OPTIONS = [
+  { value: '武器', label: '武器' },
+  { value: '皮肤', label: '皮肤' },
+  { value: 'TPS', label: 'TPS' },
+]
 const MATERIAL_TYPE_ZH = {
   character_ascension: '角色突破', weapon_ascension: '武器突破', talent: '天赋书',
   cooking: '食材', local_specialty: '地区特产', common: '通用掉落',
   boss_drop: 'Boss掉落', weekly_boss_drop: '周本掉落', event: '活动材料',
+  valuable: '贵重物品',
 }
 
 /**
@@ -266,7 +272,7 @@ function WeaponDetailContent() {
                 <span className="text-accent-gold text-sm">{RARITY_STARS[weapon.rarity] || '★★★★'}</span>
                 {weapon.name_en && <span className="text-sm text-surface-500 font-mono">{weapon.name_en}</span>}
               </div>
-              {wt && <p className="text-sm text-surface-400 mb-3">{wt.name_zh}</p>}
+              {wt && <p className="text-sm text-surface-400 mb-3">{wt.name_zh}{weapon.category && weapon.category !== '武器' ? <span className="ml-2 text-xs text-surface-500">· {weapon.category}</span> : ''}</p>}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-surface-400">
                 <span>基础攻击力: {weapon.max_base_atk || weapon.base_atk}</span>
                 {weapon.secondary_stat && <span>副属性: {weapon.secondary_stat} {weapon.max_secondary_stat_value || weapon.secondary_stat_value}</span>}
@@ -411,6 +417,7 @@ function WeaponDetailContent() {
           <FormInput label="稀有度 (1-5)" value={form.rarity} onChange={v => setForm({ ...form, rarity: Number(v) })} type="number" />
           <FormSelect label="武器类型" value={form.weapon_type_id} onChange={v => setForm({ ...form, weapon_type_id: Number(v) })}
             options={weaponTypes.map(w => ({ value: w.id, label: w.name_zh }))} />
+          <FormSelect label="分类" value={form.category || '武器'} onChange={v => setForm({ ...form, category: v })} options={CATEGORY_OPTIONS} />
           <FormInput label="基础攻击力" value={form.base_atk} onChange={v => setForm({ ...form, base_atk: v ? Number(v) : null })} type="number" />
           <FormInput label="满级攻击力" value={form.max_base_atk} onChange={v => setForm({ ...form, max_base_atk: v ? Number(v) : null })} type="number" />
           <FormInput label="副属性名称" value={form.secondary_stat} onChange={v => setForm({ ...form, secondary_stat: v })} />

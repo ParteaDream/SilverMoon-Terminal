@@ -235,7 +235,7 @@ export default function WebsitesPage() {
   const activeDetail = activeDetailId ? websites.find(w => w.id === activeDetailId) : null
 
   return (
-    <div className="p-6 flex gap-4 h-full min-h-0">
+    <div className="pt-6 px-6 pb-0 flex gap-4 h-full min-h-0">
       {/* Left: list / gallery */}
       <div ref={scrollRef} className={`${activeDetail ? 'flex-1 min-w-[340px]' : 'flex-1'} overflow-auto`}>
       {/* List view */}
@@ -254,7 +254,7 @@ export default function WebsitesPage() {
                 key: 'url', label: '地址',
                 render: row => row.url ? (
                   <button type="button"
-                    className="text-xs text-primary-400 hover:text-primary-300 hover:underline flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0"
+                    className="text-xs text-primary-400 hover:text-primary-300 hover:underline flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0 text-left whitespace-normal break-all"
                     onClick={e => { e.stopPropagation(); window.electronAPI?.openExternal(row.url); }}
                   >
                     {row.url} <ExternalLink className="w-3 h-3" />
@@ -320,7 +320,7 @@ export default function WebsitesPage() {
               </button>
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-fade-in">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-6 animate-fade-in">
             {filtered.map((w, i) => (
               <div key={w.id + '|s' + search}
                 draggable

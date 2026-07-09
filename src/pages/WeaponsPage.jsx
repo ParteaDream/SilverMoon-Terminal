@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, memo } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
@@ -7,7 +7,22 @@ import DataTable, { useSortFilter, FilterBar, SortBar } from '../components/Data
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
-import { LayoutList, LayoutGrid, Plus, Sword, Filter, ArrowUpDown } from 'lucide-react'
+import { LayoutList, LayoutGrid, Plus, Sword, Filter, ArrowUpDown, Shield } from 'lucide-react'
+
+// 星级背景图片 URL（只计算一次）
+const RARITY_BG_URLS = {
+  1: './background/1star.webp',
+  2: './background/2star.webp',
+  3: './background/3star.webp',
+  4: './background/4star.webp',
+  5: './background/5star.webp',
+}
+const RARITY_BG_STYLES = Object.fromEntries(
+  Object.entries(RARITY_BG_URLS).map(([r, url]) => [r, { backgroundImage: `url(${url})`, backgroundSize: 'cover', backgroundPosition: 'center' }])
+)
+
+// 模块加载时预缓存星级背景图
+Object.values(RARITY_BG_URLS).forEach(url => { const img = new Image(); img.src = url })
 
 const RARITY_STARS = { 1: '★', 2: '★★', 3: '★★★', 4: '★★★★', 5: '★★★★★' }
 const RARITY_COLOR = { 1: 'text-gray-300', 2: 'text-green-400', 3: 'text-blue-400', 4: 'text-purple-400', 5: 'text-accent-gold' }
@@ -16,6 +31,12 @@ const RARITY_GRADIENT = {
   4: 'from-purple-500/15 via-purple-500/5 to-transparent',
   5: 'from-amber-400/30 via-amber-400/10 to-transparent',
 }
+const CATEGORY_OPTIONS = [
+  { value: '武器', label: '武器' },
+  { value: '皮肤', label: '皮肤' },
+  { value: 'TPS', label: 'TPS' },
+]
+
 const RARITY_BORDER = {
   3: 'border-blue-500/20',
   4: 'border-purple-500/20',
@@ -49,6 +70,7 @@ export default function WeaponsPage() {
     if (sessionStorage.getItem('_nav_backToList')) return true
     return false
   })
+  const [contextMenu, setContextMenu] = useState(null)
 
   useEffect(() => {
     const isBack = consumeBackToList()
@@ -179,7 +201,7 @@ export default function WeaponsPage() {
     push(`/weapons/${id}`)
   }
 
-  function openAdd() { setEditing(null); setForm({ id: 0, rarity: 4, base_atk: 42, sort_order: 0 }); setModalOpen(true) }
+  function openAdd() { setEditing(null); setForm({ id: 0, rarity: 4, base_atk: 42, category: '武器', sort_order: 0 }); setModalOpen(true) }
   function openEdit(row) { setEditing(row); setForm({ ...row }); setModalOpen(true) }
 
   function toggleSelect(id) {
@@ -245,7 +267,7 @@ export default function WeaponsPage() {
   )
 
   const columns = [
-    { key: 'image', label: '', width: '60px', minWidth: '60px', render: row => <WeaponThumb filename={row.simple_art || row.image} /> },
+    { key: 'image', label: '', width: '60px', minWidth: '60px', render: row => <WeaponThumb filename={row.simple_art || row.image} rarity={row.rarity} /> },
     { key: 'id', label: 'ID', width: '50px',
       render: row => <span className="text-surface-500 font-mono text-xs">{row.id}</span> },
     { key: 'rarity', label: '稀有度', width: '90px',
@@ -254,6 +276,13 @@ export default function WeaponsPage() {
     { key: 'name_zh', label: '名称', width: '180px',
       render: row => <span className="font-medium text-white hover:text-primary-400 cursor-pointer transition-colors truncate block" onClick={e => { e.stopPropagation(); navigateToDetail(row.id) }}>{row.name_zh}</span>,
       filterType: 'text' },
+    { key: 'category', label: '分类', width: '80px',
+      render: row => {
+        const catColors = { '武器': 'text-cyan-400', '皮肤': 'text-pink-400', 'TPS': 'text-amber-400' }
+        return <span className={`text-xs ${catColors[row.category] || 'text-surface-400'}`}>{row.category || '武器'}</span>
+      },
+      filterType: 'select', filterOptions: CATEGORY_OPTIONS,
+      filterValue: v => v },
     { key: 'weapon_type_id', label: '类型', width: '90px',
       render: row => <span className="text-surface-300 text-xs">{weaponTypes.find(w => w.id === row.weapon_type_id)?.name_zh || '-'}</span>,
       filterType: 'select', filterValue: v => weaponTypes.find(w => w.id === v)?.name_zh || v,
@@ -297,8 +326,9 @@ export default function WeaponsPage() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center rounded-lg bg-surface-800 border border-surface-700 p-0.5">
-            <button onClick={() => setViewMode('table')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'table' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}><LayoutList className="w-3.5 h-3.5" /></button>
-            <button onClick={() => setViewMode('gallery')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'gallery' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}><LayoutGrid className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setViewMode('table')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'table' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`} title="列表视图"><LayoutList className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setViewMode('gallery')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'gallery' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`} title="画廊视图"><LayoutGrid className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setViewMode('equipment')} className={`p-1.5 rounded-md transition-colors ${viewMode === 'equipment' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`} title="装备视图"><Shield className="w-3.5 h-3.5" /></button>
           </div>
           <SearchBar value={search} onChange={setSearch} placeholder="搜索武器名称..." />
           {/* 筛选按钮 */}
@@ -349,35 +379,45 @@ export default function WeaponsPage() {
           filters={filters} setFilter={setFilter} clearFilters={clearFilters}
           showFilters={false} filterableCols={filterableCols} filterOptions={filterOptions}
           processed={processed} activeFilterCount={activeFilterCount}
-          onEdit={openEdit} onDelete={handleDelete} onAdd={null} searchBar={null}
+          onEdit={null} onDelete={null} onAdd={null} searchBar={null}
           selectable selectedIds={selected} onToggleSelect={toggleSelect} onToggleSelectAll={toggleSelectAll}
-          onRowClick={row => navigateToDetail(row.id)} itemIdKey="id" />
+          onRowClick={row => navigateToDetail(row.id)} onRowContextMenu={(e, row) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, weapon: row }) }} itemIdKey="id" />
+      ) : viewMode === 'equipment' ? (
+        <div className="grid grid-cols-5 sm:grid-cols-7 md:grid-cols-9 lg:grid-cols-11 xl:grid-cols-13 2xl:grid-cols-16 gap-1">
+          {processed.map(w => (
+            <WeaponEquipCard
+              key={w.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
+              weapon={w}
+              weaponTypes={weaponTypes}
+              rarityStars={RARITY_STARS}
+              rarityColor={RARITY_COLOR}
+              bgStyle={RARITY_BG_STYLES[w.rarity || 5]}
+              onNavigate={navigateToDetail}
+              onContextMenu={(e, weapon) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, weapon }) }}
+            />
+          ))}
+          {processed.length === 0 && (
+            <div className="col-span-full py-16 text-center text-surface-500 text-sm">
+              {weapons.length === 0 ? '暂无武器数据' : '没有匹配筛选条件的结果'}
+            </div>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-10 gap-2">
-          {processed.map(w => {
-            const gradient = RARITY_GRADIENT[w.rarity] || ''
-            const borderCls = RARITY_BORDER[w.rarity] || 'border-surface-700'
-            return (
-              <div key={w.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')} data-item-id={w.id} onClick={() => navigateToDetail(w.id)}
-                className={`group relative rounded-xl overflow-hidden border ${borderCls} bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer`}
-              >
-                {/* Rarity gradient background */}
-                {gradient && (
-                  <div className={`absolute inset-0 bg-gradient-to-b ${gradient} pointer-events-none`} />
-                )}
-                <div className="relative aspect-[3/4] bg-surface-700/50 flex items-center justify-center p-0">
-                  {w.image ? <WeaponThumb filename={w.image} large /> : <Sword className="w-10 h-10 text-surface-500" />}
-                </div>
-                <div className="relative p-3">
-                  <p className="text-xs font-semibold text-white truncate">{w.name_zh}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className={`text-[10px] ${RARITY_COLOR[w.rarity] || 'text-surface-400'}`}>{RARITY_STARS[w.rarity]}</span>
-                    <span className="text-[10px] text-surface-500">{weaponTypes.find(t => t.id === w.weapon_type_id)?.name_zh || ''}</span>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+          {processed.map(w => (
+            <WeaponGalleryCard
+              key={w.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
+              weapon={w}
+              weaponTypes={weaponTypes}
+              gradient={RARITY_GRADIENT[w.rarity] || ''}
+              borderCls={RARITY_BORDER[w.rarity] || 'border-surface-700'}
+              rarityStars={RARITY_STARS}
+              rarityColor={RARITY_COLOR}
+              bgStyle={RARITY_BG_STYLES[w.rarity || 5]}
+              onNavigate={navigateToDetail}
+              onContextMenu={(e, weapon) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, weapon }) }}
+            />
+          ))}
           {processed.length === 0 && (
             <div className="col-span-full py-16 text-center text-surface-500 text-sm">
               {weapons.length === 0 ? '暂无武器数据' : '没有匹配筛选条件的结果'}
@@ -393,6 +433,7 @@ export default function WeaponsPage() {
           <FormInput label="英文名" value={form.name_en} onChange={v => setForm({ ...form, name_en: v })} />
           <FormInput label="稀有度 (1-5)" value={form.rarity} onChange={v => setForm({ ...form, rarity: Number(v) })} type="number" />
           <FormSelect label="武器类型" value={form.weapon_type_id} onChange={v => setForm({ ...form, weapon_type_id: Number(v) })} options={weaponTypes.map(w => ({ value: w.id, label: w.name_zh }))} />
+          <FormSelect label="分类" value={form.category || '武器'} onChange={v => setForm({ ...form, category: v })} options={CATEGORY_OPTIONS} />
           <FormInput label="基础攻击力 (Lv1)" value={form.base_atk} onChange={v => setForm({ ...form, base_atk: Number(v) })} type="number" />
           <FormInput label="最大基础攻击力 (Lv90)" value={form.max_base_atk} onChange={v => setForm({ ...form, max_base_atk: v ? Number(v) : null })} type="number" />
           <FormInput label="副属性名称" value={form.secondary_stat} onChange={v => setForm({ ...form, secondary_stat: v })} />
@@ -408,22 +449,90 @@ export default function WeaponsPage() {
           <ImagePicker label="装备图" currentImage={form.simple_art} onSelect={v => setForm({ ...form, simple_art: v })} onRemove={() => setForm({ ...form, simple_art: null })} />
         </div>
       </EditModal>
+
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <div className="fixed z-[300] w-40 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in"
+          style={{ left: Math.min(contextMenu.x, window.innerWidth - 170), top: Math.min(contextMenu.y, window.innerHeight - 100) }}
+          onClick={e => e.stopPropagation()}>
+          <button onClick={() => { openEdit(contextMenu.weapon); setContextMenu(null) }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-surface-300 hover:bg-white/10 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            编辑
+          </button>
+          <button onClick={() => { if (window.confirm(`确认删除武器「${contextMenu.weapon.name_zh}」？此操作不可撤销。`)) handleDelete(contextMenu.weapon); setContextMenu(null) }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+            删除
+          </button>
+        </div>
+      )}
+      {contextMenu && <div className="fixed inset-0 z-[299]" onClick={() => setContextMenu(null)} />}
     </div>
   )
 }
 
-function WeaponThumb({ filename, large }) {
+function WeaponThumb({ filename, rarity }) {
   const { ref, src } = useLazyImage(filename)
-  if (large) {
-    return (
-      <div ref={ref} className="w-full h-full flex items-center justify-center overflow-hidden">
-        {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <Sword className="w-10 h-10 text-surface-500" />}
-      </div>
-    )
-  }
+  const bgStyle = RARITY_BG_STYLES[rarity || 5]
   return (
-    <div ref={ref} className="w-12 h-12 rounded-lg overflow-hidden shrink-0 bg-surface-700 flex items-center justify-center">
-      {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <Sword className="w-6 h-6 text-surface-500" />}
+    <div ref={ref} className="w-10 h-10 rounded-lg overflow-hidden shrink-0 flex items-center justify-center" style={bgStyle}>
+      {src ? <img src={src} alt="" className="w-7 h-7 object-contain drop-shadow-md" /> : <Sword className="w-5 h-5 text-surface-500" />}
     </div>
   )
 }
+
+function WeaponThumbLarge({ filename, bgStyle }) {
+  const { ref, src } = useLazyImage(filename)
+  return (
+    <div ref={ref} className="w-full h-full flex items-center justify-center">
+      {src ? <img src={src} alt="" className="max-w-[85%] max-h-[85%] object-contain drop-shadow-md" /> : null}
+    </div>
+  )
+}
+
+// React.memo 画廊卡片
+const WeaponGalleryCard = memo(function WeaponGalleryCard({ weapon, weaponTypes, gradient, borderCls, rarityStars, rarityColor, bgStyle, onNavigate, onContextMenu }) {
+  return (
+    <div data-item-id={weapon.id} onClick={() => onNavigate(weapon.id)}
+      onContextMenu={(e) => onContextMenu(e, weapon)}
+      className={`group relative rounded-xl overflow-hidden border ${borderCls} bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer`}
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 250px' }}>
+      {gradient && <div className={`absolute inset-0 bg-gradient-to-b ${gradient} pointer-events-none`} />}
+      <div className="relative aspect-[3/4] bg-surface-700/50 flex items-center justify-center" style={bgStyle}>
+        {weapon.image ? <WeaponThumbLarge filename={weapon.image} bgStyle={bgStyle} /> : <Sword className="w-10 h-10 text-surface-500" />}
+      </div>
+      <div className="relative p-3">
+        <p className="text-xs font-semibold text-white truncate">{weapon.name_zh}</p>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className={`text-[10px] ${rarityColor[weapon.rarity] || 'text-surface-400'}`}>{rarityStars[weapon.rarity]}</span>
+          <span className="text-[10px] text-surface-500">{weaponTypes.find(t => t.id === weapon.weapon_type_id)?.name_zh || ''}</span>
+          {weapon.category && weapon.category !== '武器' && <span className="text-[10px] text-surface-500">· {weapon.category}</span>}
+        </div>
+      </div>
+    </div>
+  )
+})
+
+// React.memo 装备视图卡片
+const WeaponEquipCard = memo(function WeaponEquipCard({ weapon, weaponTypes, rarityStars, rarityColor, bgStyle, onNavigate, onContextMenu }) {
+  return (
+    <div data-item-id={weapon.id} onClick={() => onNavigate(weapon.id)}
+      onContextMenu={(e) => onContextMenu(e, weapon)}
+      className="group relative rounded-lg overflow-hidden border border-surface-700/50 bg-surface-800/50 hover:border-primary-500/50 hover:scale-105 transition-all duration-200 cursor-pointer"
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 100px' }}>
+      <div className="aspect-square relative flex items-center justify-center p-1.5" style={bgStyle}>
+        {(weapon.simple_art || weapon.image)
+          ? <WeaponThumbLarge filename={weapon.simple_art || weapon.image} bgStyle={bgStyle} />
+          : <Sword className="w-8 h-8 text-surface-500" />}
+      </div>
+      <div className="px-2 pb-2">
+        <p className="text-[10px] font-semibold text-white truncate leading-tight">{weapon.name_zh}</p>
+        <div className="flex items-center gap-1 mt-0.5">
+          <span className={`text-[9px] ${rarityColor[weapon.rarity] || 'text-surface-400'}`}>{rarityStars[weapon.rarity]}</span>
+          <span className="text-[9px] text-surface-500">{weaponTypes.find(t => t.id === weapon.weapon_type_id)?.name_zh || ''}</span>
+        </div>
+      </div>
+    </div>
+  )
+})

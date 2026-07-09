@@ -1,13 +1,29 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, memo } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
-import DataTable, { useSortFilter, SortBar } from '../components/DataTable'
+import DataTable, { useSortFilter, SortBar, FilterBar } from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
-import { LayoutList, LayoutGrid, Plus, Package, ArrowUpDown } from 'lucide-react'
+import { LayoutList, LayoutGrid, Plus, Package, ArrowUpDown, Filter } from 'lucide-react'
+
+// 星级背景图片 URL（只计算一次，避免每条记录重复拼接字符串和创建 style 对象）
+const RARITY_BG_URLS = {
+  1: './background/1star.webp',
+  2: './background/2star.webp',
+  3: './background/3star.webp',
+  4: './background/4star.webp',
+  5: './background/5star.webp',
+}
+const RARITY_BG_STYLES = Object.fromEntries(
+  Object.entries(RARITY_BG_URLS).map(([r, url]) => [r, { backgroundImage: `url(${url})`, backgroundSize: 'cover', backgroundPosition: 'center' }])
+)
+RARITY_BG_STYLES[0] = RARITY_BG_STYLES[1] // fallback
+
+// 模块加载时预缓存 5 张星级背景图，避免首屏白底闪动
+Object.values(RARITY_BG_URLS).forEach(url => { const img = new Image(); img.src = url })
 
 const RARITY_STARS = { 1: '★', 2: '★★', 3: '★★★', 4: '★★★★', 5: '★★★★★' }
 const RARITY_COLOR = { 1: 'text-gray-300', 2: 'text-green-400', 3: 'text-blue-400', 4: 'text-purple-400', 5: 'text-accent-gold' }
@@ -16,6 +32,7 @@ const MATERIAL_TYPES = {
   character_ascension: '角色突破', weapon_ascension: '武器突破', talent: '天赋书',
   cooking: '食材', local_specialty: '地区特产', common: '通用掉落',
   boss_drop: 'Boss掉落', weekly_boss_drop: '周本掉落', event: '活动材料',
+  valuable: '贵重物品',
 }
 
 // 数据库中存在中英文混用的 type 值，统一映射为英文 key
@@ -53,6 +70,7 @@ export default function MaterialsPage() {
     if (sessionStorage.getItem('_nav_backToList')) return true
     return false
   })
+  const [contextMenu, setContextMenu] = useState(null)
   // 用 ref 保持最新状态
   const stateRef = useRef({ viewMode, search, sortKeys: [], filters: {} })
   stateRef.current = { viewMode, search }
@@ -252,7 +270,7 @@ export default function MaterialsPage() {
   }, [selected, materials])
 
   const columns = [
-    { key: 'image', label: '', width: '64px', render: row => <MatThumb filename={row.image} /> },
+    { key: 'image', label: '', width: '64px', render: row => <MatThumb filename={row.image} rarity={row.rarity} /> },
     { key: 'id', label: 'ID', width: '60px',
       render: row => <span className="text-xs text-surface-400 font-mono">{row.id}</span>,
       filterType: 'text' },
@@ -304,9 +322,31 @@ export default function MaterialsPage() {
           >
             <ArrowUpDown className="w-3.5 h-3.5" />
           </button>
+          {/* Filter toggle button */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs transition-colors flex-shrink-0
+              ${showFilters || activeFilterCount > 0
+                ? 'bg-primary-500/10 text-primary-400 border border-primary-500/20'
+                : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800 border border-transparent'
+              }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            筛选
+            {activeFilterCount > 0 && (
+              <span className="w-4 h-4 rounded-full bg-primary-500 text-[10px] font-bold text-white flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
           <button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-2 bg-primary-600 hover:bg-primary-500 rounded-lg text-xs font-medium text-white transition-colors"><Plus className="w-3.5 h-3.5" />添加</button>
         </div>
       </div>
+
+      {/* Filter bar */}
+      {showFilters && filterableCols.length > 0 && (
+        <FilterBar {...{ filterableCols, filters, setFilter, clearFilters, filterOptions, activeFilterCount }} />
+      )}
 
       {/* Sort bar */}
       <SortBar sortKeys={sortKeys} columns={columns}
@@ -318,28 +358,34 @@ export default function MaterialsPage() {
           filters={filters} setFilter={setFilter} clearFilters={clearFilters}
           showFilters={false} filterableCols={filterableCols} filterOptions={filterOptions}
           processed={processed} activeFilterCount={activeFilterCount}
-          onEdit={openEdit} onDelete={handleDelete} onAdd={null} searchBar={null}
+          onEdit={null} onDelete={null} onAdd={null} searchBar={null}
           selectable
           selectedIds={selected}
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
           onBulkDelete={handleBulkDelete}
-          onRowClick={row => navigateToDetail(row.id)} itemIdKey="id"
+          onRowClick={row => navigateToDetail(row.id)} onRowContextMenu={(e, row) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, mat: row }) }} itemIdKey="id"
         />
       ) : (
-        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9 2xl:grid-cols-12 gap-1.5">
+        <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 xl:grid-cols-14 2xl:grid-cols-16 gap-1">
           {processed.map(m => (
-            <div key={m.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')} data-item-id={m.id} onClick={() => navigateToDetail(m.id)} className="group relative rounded-xl overflow-hidden border border-surface-700 bg-surface-800/50 hover:border-primary-500/50 hover:scale-[1.02] transition-all duration-200 cursor-pointer">
-              <div className="aspect-[3/4] bg-surface-700 flex items-center justify-center">
-                {m.image ? <MatThumb filename={m.image} large /> : <Package className="w-10 h-10 text-surface-500" />}
-              </div>
-              <div className="p-2">
-                <p className="text-xs font-semibold text-white truncate">{m.name_zh}</p>
-                <p className={`text-[10px] ${RARITY_COLOR[m.rarity] || 'text-surface-400'}`}>{RARITY_STARS[m.rarity]}{' '}{MATERIAL_TYPES[m.type] || m.type}</p>
-              </div>
-            </div>
+            <MatGalleryCard
+              key={m.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
+              mat={m}
+              rarityStars={RARITY_STARS}
+              rarityColor={RARITY_COLOR}
+              bgStyle={RARITY_BG_STYLES[m.rarity || 1]}
+              onNavigate={navigateToDetail}
+              onContextMenu={(e, mat) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, mat }) }}
+            />
           ))}
+          {processed.length === 0 && (
+            <div className="col-span-full py-16 text-center text-surface-500 text-sm">
+              {materials.length === 0 ? '暂无材料数据' : '没有匹配筛选条件的结果'}
+            </div>
+          )}
         </div>
+      )}
       )}
 
       <EditModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSave={handleSave} title={editing ? `编辑材料 - ${editing.name_zh}` : '添加材料'}>
@@ -357,22 +403,65 @@ export default function MaterialsPage() {
         </div>
         <ImagePicker label="材料图片" currentImage={form.image} onSelect={v => setForm({ ...form, image: v })} onRemove={() => setForm({ ...form, image: null })} />
       </EditModal>
+
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <div className="fixed z-[300] w-40 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in"
+          style={{ left: Math.min(contextMenu.x, window.innerWidth - 170), top: Math.min(contextMenu.y, window.innerHeight - 100) }}
+          onClick={e => e.stopPropagation()}>
+          <button onClick={() => { openEdit(contextMenu.mat); setContextMenu(null) }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-surface-300 hover:bg-white/10 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            编辑
+          </button>
+          <button onClick={() => { if (window.confirm(`确认删除材料「${contextMenu.mat.name_zh}」？此操作不可撤销。`)) handleDelete(contextMenu.mat); setContextMenu(null) }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+            删除
+          </button>
+        </div>
+      )}
+      {contextMenu && <div className="fixed inset-0 z-[299]" onClick={() => setContextMenu(null)} />}
     </div>
   )
 }
 
-function MatThumb({ filename, large }) {
+// ── 辅助组件 ──
+
+function MatThumb({ filename, rarity }) {
   const { ref, src } = useLazyImage(filename)
-  if (large) {
-    return (
-      <div ref={ref} className="w-full h-full flex items-center justify-center overflow-hidden">
-        {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <Package className="w-10 h-10 text-surface-500" />}
-      </div>
-    )
-  }
+  const bgStyle = RARITY_BG_STYLES[rarity || 1]
   return (
-    <div ref={ref} className="w-8 h-8 rounded overflow-hidden shrink-0 bg-surface-700 flex items-center justify-center">
-      {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <Package className="w-4 h-4 text-surface-500" />}
+    <div ref={ref} className="w-10 h-10 rounded-lg overflow-hidden shrink-0 flex items-center justify-center" style={bgStyle}>
+      {src ? <img src={src} alt="" className="w-7 h-7 object-contain drop-shadow-md" /> : <Package className="w-5 h-5 text-surface-500" />}
     </div>
   )
 }
+
+function MatThumbGallery({ filename }) {
+  const { ref, src } = useLazyImage(filename)
+  return (
+    <div ref={ref} className="w-full h-full flex items-center justify-center">
+      {src ? <img src={src} alt="" className="max-w-[85%] max-h-[85%] object-contain drop-shadow-md" /> : null}
+    </div>
+  )
+}
+
+// React.memo 画廊卡片 — 先检查 rarity 变化（最可能改变），再深层比较，避免筛选/排序变化时的全量重渲染
+const MatGalleryCard = memo(function MatGalleryCard({ mat, rarityStars, rarityColor, bgStyle, onNavigate, onContextMenu }) {
+  return (
+    <div data-item-id={mat.id} onClick={() => onNavigate(mat.id)}
+      onContextMenu={(e) => onContextMenu(e, mat)}
+      className="group relative rounded-lg overflow-hidden border border-surface-700/50 bg-surface-800/50 hover:border-primary-500/50 hover:scale-105 transition-all duration-200 cursor-pointer"
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 90px' }}>
+      <div className="aspect-square relative flex items-center justify-center p-1.5" style={bgStyle}>
+        {mat.image ? <MatThumbGallery filename={mat.image} /> : <Package className="w-6 h-6 text-surface-500" />}
+      </div>
+      <div className="px-1.5 pb-1.5">
+        <p className="text-[10px] font-semibold text-white truncate leading-tight">{mat.name_zh}</p>
+        <p className={`text-[9px] ${rarityColor[mat.rarity] || 'text-surface-400'}`}>{rarityStars[mat.rarity]}</p>
+      </div>
+    </div>
+  )
+})
+

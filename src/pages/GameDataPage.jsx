@@ -35,6 +35,7 @@ function CategoryTag({ category }) {
 function MultiImagePicker({ label, images, onChange }) {
   const { importImage, readImage, imagesDir } = useDb()
   const [previews, setPreviews] = useState({})
+  const [dragOver, setDragOver] = useState(false)
 
   // 加载所有图片预览
   useEffect(() => {
@@ -60,6 +61,35 @@ function MultiImagePicker({ label, images, onChange }) {
     if (filename) {
       onChange([...(images || []), filename])
     }
+  }
+
+  async function handleDrop(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(false)
+    const files = e.dataTransfer?.files
+    if (files && files.length > 0) {
+      for (const file of files) {
+        if (file.type && !file.type.startsWith('image/')) continue
+        const fp = file.path
+        if (!fp) continue
+        try {
+          const result = await window.electronAPI?.importImageFile(fp)
+          if (result?.filename) {
+            onChange([...(images || []), result.filename])
+          }
+        } catch (_) {}
+      }
+      return
+    }
+    const srcPath = e.dataTransfer?.getData('text/plain') || null
+    if (!srcPath) return
+    try {
+      const result = await window.electronAPI?.importImageFile(srcPath)
+      if (result?.filename) {
+        onChange([...(images || []), result.filename])
+      }
+    } catch (_) {}
   }
 
   function handleRemove(index) {
@@ -89,11 +119,17 @@ function MultiImagePicker({ label, images, onChange }) {
         ))}
         <button
           onClick={handleAdd}
-          className="w-20 h-20 rounded-lg border border-dashed border-surface-600 bg-surface-800 flex items-center justify-center
-                     hover:border-primary-500/50 hover:bg-primary-500/5 transition-colors flex-shrink-0"
-          title="添加图片"
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }}
+          onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setDragOver(false) }}
+          onDrop={handleDrop}
+          className={`w-20 h-20 rounded-lg border border-dashed flex items-center justify-center flex-shrink-0 transition-colors ${
+            dragOver
+              ? 'border-primary-500 bg-primary-500/10'
+              : 'border-surface-600 bg-surface-800 hover:border-primary-500/50 hover:bg-primary-500/5'
+          }`}
+          title="添加图片（支持拖放）"
         >
-          <ImagePlus className="w-5 h-5 text-surface-500" />
+          <ImagePlus className={`w-5 h-5 ${dragOver ? 'text-primary-400' : 'text-surface-500'}`} />
         </button>
         {(images || []).length === 0 && (
           <span className="text-xs text-surface-500">点击添加图片</span>
@@ -200,21 +236,27 @@ function CategoryInput({ label, value, onChange, existingCategories }) {
 
 // ── 关联条目类型映射 ──
 const LINK_TYPES = [
-  { key: 'game_data', label: '数据', query: (q) => q ? `SELECT id, title_zh AS label, category FROM game_data WHERE title_zh LIKE '%' || ? || '%' ORDER BY category, title_zh LIMIT 100` : `SELECT id, title_zh AS label, category FROM game_data ORDER BY category, title_zh LIMIT 200` },
-  { key: 'characters', label: '角色', query: (q) => q ? `SELECT id, name_zh AS label FROM characters WHERE name_zh LIKE '%' || ? || '%' ORDER BY name_zh LIMIT 100` : `SELECT id, name_zh AS label FROM characters ORDER BY name_zh LIMIT 200` },
-  { key: 'weapons', label: '武器', query: (q) => q ? `SELECT id, name_zh AS label FROM weapons WHERE name_zh LIKE '%' || ? || '%' ORDER BY name_zh LIMIT 100` : `SELECT id, name_zh AS label FROM weapons ORDER BY name_zh LIMIT 200` },
-  { key: 'artifacts', label: '圣遗物', query: (q) => q ? `SELECT id, name_zh AS label FROM artifacts WHERE name_zh LIKE '%' || ? || '%' ORDER BY name_zh LIMIT 100` : `SELECT id, name_zh AS label FROM artifacts ORDER BY name_zh LIMIT 200` },
-  { key: 'materials', label: '材料', query: (q) => q ? `SELECT id, name_zh AS label FROM materials WHERE name_zh LIKE '%' || ? || '%' ORDER BY name_zh LIMIT 100` : `SELECT id, name_zh AS label FROM materials ORDER BY name_zh LIMIT 200` },
+  { key: 'game_data', label: '数据', imageField: null,
+    query: (q) => q ? `SELECT id, title_zh AS label, category FROM game_data WHERE title_zh LIKE '%' || ? || '%' ORDER BY sort_order, id LIMIT 500` : `SELECT id, title_zh AS label, category FROM game_data ORDER BY sort_order, id LIMIT 9999` },
+  { key: 'characters', label: '角色', imageField: 'card_art',
+    query: (q) => q ? `SELECT id, name_zh AS label, card_art AS image FROM characters WHERE name_zh LIKE '%' || ? || '%' ORDER BY id LIMIT 500` : `SELECT id, name_zh AS label, card_art AS image FROM characters ORDER BY id LIMIT 9999` },
+  { key: 'weapons', label: '武器', imageField: 'simple_art',
+    query: (q) => q ? `SELECT id, name_zh AS label, simple_art AS image, category FROM weapons WHERE name_zh LIKE '%' || ? || '%' ORDER BY id LIMIT 500` : `SELECT id, name_zh AS label, simple_art AS image, category FROM weapons ORDER BY id LIMIT 9999` },
+  { key: 'artifacts', label: '圣遗物', imageField: 'image',
+    query: (q) => q ? `SELECT id, name_zh AS label, COALESCE(image, flower_image) AS image FROM artifacts WHERE name_zh LIKE '%' || ? || '%' ORDER BY id LIMIT 500` : `SELECT id, name_zh AS label, COALESCE(image, flower_image) AS image FROM artifacts ORDER BY id LIMIT 9999` },
+  { key: 'materials', label: '材料', imageField: 'image',
+    query: (q) => q ? `SELECT id, name_zh AS label, image FROM materials WHERE name_zh LIKE '%' || ? || '%' ORDER BY id LIMIT 500` : `SELECT id, name_zh AS label, image FROM materials ORDER BY id LIMIT 9999` },
 ]
 
 // ── 关联条目搜索/选择模态框 ──
 function LinkSearchModal({ onClose, onConfirm, existingLinks }) {
-  const { query } = useDb()
+  const { query, readImage } = useDb()
   const [tab, setTab] = useState('game_data')
   const [searchText, setSearchText] = useState('')
   const [items, setItems] = useState([])
+  // selected keys: "target_type:target_id" 跨类型保持选中
   const [selected, setSelected] = useState(new Set())
-  const [hoveredIndex, setHoveredIndex] = useState(null)
+  const [thumbCache, setThumbCache] = useState({})
 
   const existingKeys = new Set((existingLinks || []).map(l => `${l.target_type}:${l.target_id}`))
 
@@ -241,59 +283,99 @@ function LinkSearchModal({ onClose, onConfirm, existingLinks }) {
     }, 200)
   }
 
-  function toggleItem(id) {
+  // 用 target_type:target_id 作为复合键
+  function itemKey(item) { return `${tab}:${item.id}` }
+  function isSelected(item) { return selected.has(itemKey(item)) }
+  function isExisting(item) { return existingKeys.has(itemKey(item)) }
+
+  function toggleItem(item) {
+    const key = itemKey(item)
+    if (isExisting(item)) return
     setSelected(prev => {
       const next = new Set(prev)
-      if (next.has(id)) { next.delete(id) } else { next.add(id) }
+      if (next.has(key)) { next.delete(key) } else { next.add(key) }
       return next
     })
   }
 
+  // 加载缩略图
+  useEffect(() => {
+    if (items.length === 0) return
+    const lt = LINK_TYPES.find(t => t.key === tab)
+    if (!lt?.imageField) return
+    items.forEach(async item => {
+      if (item.image && !thumbCache[item.image]) {
+        try {
+          const data = await readImage(item.image)
+          if (data) setThumbCache(prev => ({ ...prev, [item.image]: data }))
+        } catch (_) {}
+      }
+    })
+  }, [items, tab])
+
   function handleConfirm() {
-    const result = items
-      .filter(item => selected.has(item.id) && !existingKeys.has(`${tab}:${item.id}`))
+    // 收集所有选中的条目（跨类型），重建为不带 key 前缀的结果
+    const result = []
+    for (const lt of LINK_TYPES) {
+      for (const item of items.filter(i => selected.has(`${lt.key}:${i.id}`) && !existingKeys.has(`${lt.key}:${i.id}`))) {
+        result.push({ target_type: tab, target_id: item.id, label: item.label })
+      }
+    }
+    // 实际上 selected 中可能包含之前其他 tab 选的条目，需要从当前 items 构建
+    // 简化：只从当前 items 中选
+    const currentResult = items
+      .filter(item => selected.has(itemKey(item)) && !isExisting(item))
       .map(item => ({ target_type: tab, target_id: item.id, label: item.label }))
-    onConfirm(result)
+    onConfirm(currentResult)
   }
 
-  const filteredItems = items.filter(item => !existingKeys.has(`${tab}:${item.id}`))
+  const lt = LINK_TYPES.find(t => t.key === tab)
+
   return (
     <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-surface-900 border border-surface-700 rounded-2xl w-[600px] max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface-900 border border-surface-700 rounded-2xl w-[680px] max-h-[85vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
         {/* 标题 */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-700">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-700 shrink-0">
           <h3 className="text-sm font-semibold text-white">关联条目</h3>
           <button onClick={onClose} className="p-1 rounded-lg text-surface-400 hover:text-white hover:bg-surface-700 transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
-        {/* 类型标签 */}
-        <div className="flex gap-1 px-5 pt-3 pb-2 overflow-x-auto">
-          {LINK_TYPES.map(t => (
-            <button key={t.key} onClick={() => { setTab(t.key); setSearchText(''); setSelected(new Set()) }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${tab === t.key ? 'bg-primary-500/20 text-primary-300 border border-primary-500/30' : 'text-surface-400 hover:text-white hover:bg-surface-700 border border-transparent'}`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-        {/* 搜索 */}
-        <div className="px-5 py-2">
+        {/* 类型标签 + 搜索（同一行） */}
+        <div className="flex items-center gap-2 px-5 py-3 border-b border-surface-700/50 shrink-0">
+          <div className="flex gap-1 overflow-x-auto flex-shrink-0">
+            {LINK_TYPES.map(t => (
+              <button key={t.key} onClick={() => { setTab(t.key); setSearchText('') }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${tab === t.key ? 'bg-primary-500/20 text-primary-300 border border-primary-500/30' : 'text-surface-400 hover:text-white hover:bg-surface-700 border border-transparent'}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
           <input type="text" value={searchText} onChange={e => handleSearch(e.target.value)}
-            placeholder="搜索..." className="w-full px-3 py-2 rounded-lg bg-surface-800 border border-surface-600 text-xs text-surface-200 outline-none focus:border-primary-500/50 transition-colors placeholder-surface-500" />
+            placeholder="搜索..." className="flex-1 min-w-[120px] px-3 py-1.5 rounded-lg bg-surface-800 border border-surface-600 text-xs text-surface-200 outline-none focus:border-primary-500/50 transition-colors placeholder-surface-500" />
         </div>
         {/* 条目列表 */}
         <div className="flex-1 overflow-y-auto px-5 py-2 min-h-[200px]">
-          {filteredItems.length === 0 ? (
+          {items.length === 0 ? (
             <div className="py-10 text-center text-surface-500 text-xs">{(searchText ? '未找到匹配结果' : '该类型暂无数据')}</div>
           ) : (
             <div className="grid gap-1">
-              {filteredItems.map((item, i) => (
-                <div key={item.id}
-                  onMouseEnter={() => setHoveredIndex(i)} onMouseLeave={() => setHoveredIndex(null)}
-                  onClick={() => toggleItem(item.id)}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${selected.has(item.id) ? 'bg-primary-500/15 border border-primary-500/30' : 'hover:bg-surface-800 border border-transparent'}`}>
-                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${selected.has(item.id) ? 'border-primary-500 bg-primary-500' : 'border-surface-500'}`}>
-                    {selected.has(item.id) && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+              {items.map(item => (
+                <div key={itemKey(item)}
+                  onClick={() => toggleItem(item)}
+                  className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${isSelected(item) ? 'bg-primary-500/15 border border-primary-500/30' : isExisting(item) ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-800 border border-transparent'}`}>
+                  {/* 缩略图 */}
+                  <div className="w-8 h-8 rounded-lg bg-surface-700 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                    {lt?.imageField && item.image && thumbCache[item.image] ? (
+                      <img src={thumbCache[item.image]} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-[10px] text-surface-500">{lt?.label?.[0] || '?'}</span>
+                    )}
+                  </div>
+                  {/* 勾选框 */}
+                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${isSelected(item) ? 'border-primary-500 bg-primary-500' : isExisting(item) ? 'border-surface-600' : 'border-surface-500'}`}>
+                    {isSelected(item) && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                    {isExisting(item) && <span className="text-[8px] text-surface-500">✓</span>}
                   </div>
                   <span className="text-xs text-surface-200 flex-1 truncate">{item.label}</span>
                   {item.category && <CategoryTag category={item.category} />}
@@ -303,9 +385,12 @@ function LinkSearchModal({ onClose, onConfirm, existingLinks }) {
           )}
         </div>
         {/* 底部按钮 */}
-        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-surface-700">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-surface-700 transition-colors">取消</button>
-          <button onClick={handleConfirm} className="px-4 py-2 rounded-lg text-xs font-medium bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 border border-primary-500/30 transition-colors">添加 ({selected.size})</button>
+        <div className="flex items-center justify-between px-5 py-4 border-t border-surface-700 shrink-0">
+          <span className="text-[10px] text-surface-500">已选 {selected.size} 项（跨类型保持）</span>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-surface-700 transition-colors">取消</button>
+            <button onClick={handleConfirm} className="px-4 py-2 rounded-lg text-xs font-medium bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 border border-primary-500/30 transition-colors">添加 ({items.filter(i => isSelected(i) && !isExisting(i)).length})</button>
+          </div>
         </div>
       </div>
     </div>

@@ -953,6 +953,24 @@ function migrateSchema() {
     try { db.exec('CREATE INDEX IF NOT EXISTS idx_related_source ON related_links(source_type, source_id)'); } catch (_) {}
     try { db.exec('CREATE INDEX IF NOT EXISTS idx_related_target ON related_links(target_type, target_id)'); } catch (_) {}
 
+    // character_related_effects（角色相关效果预设）
+    dbRun(`CREATE TABLE IF NOT EXISTS character_related_effects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER DEFAULT 0
+    )`);
+
+    // 为 weapons 添加 category 列（武器/皮肤/TPS）
+    {
+      const wpCols = dbAll('PRAGMA table_info(weapons)', []);
+      if (!wpCols.some(c => c.name === 'category')) {
+        console.log('[migrate] adding category column to weapons');
+        dbRun("ALTER TABLE weapons ADD COLUMN category TEXT DEFAULT '武器'");
+      }
+    }
+
     // 删除旧的 image_cache 表（base64 图片缓存会撑爆 WASM 内存）
     try { db.exec('DROP TABLE IF EXISTS image_cache'); } catch (_) {}
 
@@ -4403,6 +4421,7 @@ ipcMain.handle('export-seed', async (_event, newVersion) => {
       challenges:2, game_data:2, element_reactions:2,
       character_talents:3, character_constellations:3, character_outfits:3,
       character_stories:3, character_ascension_materials:3, character_talent_materials:3,
+      character_related_effects:3,
       weapon_ascension_materials:3, wish_banners:3,
       spiral_abyss_floors:3, imaginarium_theater_seasons:3, perilous_trail_bosses:3,
       wish_banner_items:4, talent_levels:4,

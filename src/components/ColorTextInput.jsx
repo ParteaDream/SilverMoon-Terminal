@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Eraser, Bold, Italic, GripHorizontal, Eye, EyeOff, StickyNote, X } from 'lucide-react'
+import { Eraser, Bold, Italic, GripHorizontal, Eye, EyeOff, StickyNote, X, Zap } from 'lucide-react'
 import ColorPicker from './ColorPicker'
+import { expandEffectRefs } from './ColoredText'
 import {
   PRESET_COLORS, wrapWithColor, unwrapColor,
   wrapWithBold, wrapWithItalic, parseColorMarkup,
   wrapWithNote, unwrapNote, getNoteAtPosition,
-  markupToHtml, htmlToMarkup, stripUnknownFormats,
+  markupToHtml, htmlToMarkup, stripUnknownFormats, stripFormatting,
   SETTINGS_ELEM_ORDER, ELEM_NAME_TO_ID, ELEM_ID_TO_NAME, ELEM_ID_TO_SETTINGS_INDEX,
 } from '../utils/colorMarkup'
 
@@ -21,6 +22,8 @@ export default function ColorTextInput({
   placeholder = '',
   rows = 8,
   className = '',
+  effects,
+  effectMap,
   ...props
 }) {
   const textareaRef = useRef(null)
@@ -42,6 +45,8 @@ export default function ColorTextInput({
   const noteDragging = useRef(false)
   const [colors, setColors] = useState(PRESET_COLORS)
   const [elementIcons, setElementIcons] = useState({})
+  const [effectsOpen, setEffectsOpen] = useState(false)
+  const effectsRef = useRef(null)
 
   // 加载自定义元素颜色和图标
   useEffect(() => {
@@ -590,7 +595,8 @@ export default function ColorTextInput({
     if (!value) return placeholder
       ? <span className="text-surface-500">{placeholder}</span>
       : null
-    const parsed = parseColorMarkup(value)
+    const expanded = expandEffectRefs(value, effectMap)
+    const parsed = parseColorMarkup(expanded)
     if (typeof parsed === 'string') return parsed
     if (Array.isArray(parsed)) {
       return parsed.map((el, i) =>
@@ -609,13 +615,14 @@ export default function ColorTextInput({
   // 渲染附注内容（支持 {id} 元素图标标记）
   function renderNotePreviewContent(text) {
     if (!text) return null
+    const expanded = expandEffectRefs(text, effectMap)
     const regex = /\{(\d+)\}/g
     const parts = []
     let lastIdx = 0
     let match
     while ((match = regex.exec(text)) !== null) {
       if (match.index > lastIdx) {
-        parts.push(...[].concat(parseColorMarkup(text.slice(lastIdx, match.index))))
+        parts.push(...[].concat(parseColorMarkup(expanded.slice(lastIdx, match.index))))
       }
       const elemId = parseInt(match[1])
       const name = ELEM_ID_TO_NAME[elemId] || ''
@@ -632,7 +639,7 @@ export default function ColorTextInput({
       lastIdx = match.index + match[0].length
     }
     if (lastIdx < text.length) {
-      parts.push(...[].concat(parseColorMarkup(text.slice(lastIdx))))
+      parts.push(...[].concat(parseColorMarkup(expanded.slice(lastIdx))))
     }
     return parts.length === 1 ? parts[0] : parts
   }
@@ -730,6 +737,74 @@ export default function ColorTextInput({
         >
           <StickyNote className="w-3.5 h-3.5" />
         </button>
+
+        {/* 插入相关效果 */}
+        {effects && effects.length > 0 && (
+          <div className="relative" ref={effectsRef}>
+            <button
+              type="button"
+              onClick={() => setEffectsOpen(!effectsOpen)}
+              disabled={preview}
+              className={`p-1.5 rounded transition-colors text-[11px] font-medium ${
+                preview
+                  ? 'text-surface-600 cursor-not-allowed'
+                  : 'text-amber-400 hover:text-amber-300 hover:bg-surface-700'
+              }`}
+              title="插入相关效果"
+            >
+              <Zap className="w-3.5 h-3.5" />
+            </button>
+            {effectsOpen && (
+              <div className="absolute top-full left-0 mt-1 w-56 max-h-48 overflow-y-auto bg-surface-800 border border-surface-600 rounded-lg shadow-xl z-50">
+                {effects.map(ef => {
+                  const plainName = stripFormatting(ef.name)
+                  const tag = `[effect:${plainName}]`
+                  return (
+                    <button
+                      key={ef.id || plainName}
+                      type="button"
+                      onClick={() => {
+                        if (activePane.current === 'left') {
+                          const ref = textareaRef.current
+                          if (ref) {
+                            const start = ref.selectionStart
+                            const end = ref.selectionEnd
+                            const newVal = value.slice(0, start) + tag + value.slice(end)
+                            onChangeRef.current(newVal)
+                            setTimeout(() => {
+                              ref.focus()
+                              ref.setSelectionRange(start + tag.length, start + tag.length)
+                            }, 0)
+                          }
+                        } else {
+                          // 右侧所见即所得编辑区：直接插入文本
+                          const s = window.getSelection()
+                          if (s && s.rangeCount > 0) {
+                            const range = s.getRangeAt(0)
+                            range.deleteContents()
+                            range.insertNode(document.createTextNode(tag))
+                            range.collapse(false)
+                            s.removeAllRanges()
+                            s.addRange(range)
+                            // 同步回 value
+                            if (richRef.current) {
+                              onChangeRef.current(htmlToMarkup(richRef.current))
+                            }
+                          }
+                        }
+                        setEffectsOpen(false)
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs text-surface-300 hover:bg-surface-700 transition-colors border-b border-surface-700/50 last:border-b-0"
+                    >
+                      <div className="truncate">{plainName}</div>
+                      <div className="text-[10px] text-surface-500 font-mono truncate">{tag}</div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="w-px h-5 bg-surface-600 mx-0.5" />
 
@@ -947,6 +1022,44 @@ export default function ColorTextInput({
                 className="p-1 rounded text-surface-300 hover:text-red-400 hover:bg-surface-700 transition-colors" title="清除颜色">
                 <Eraser className="w-3 h-3" />
               </button>
+              <div className="w-px h-4 bg-surface-600 mx-0.5" />
+              {/* 插入相关效果（附注工具栏） */}
+              {effects && effects.length > 0 && (
+                <div className="relative" ref={effectsRef}>
+                  <button type="button" onClick={() => setEffectsOpen(!effectsOpen)}
+                    className="p-1 rounded text-amber-400 hover:text-amber-300 hover:bg-surface-700 transition-colors" title="插入相关效果">
+                    <Zap className="w-3 h-3" />
+                  </button>
+                  {effectsOpen && (
+                    <div className="absolute top-full left-0 mt-1 w-48 max-h-36 overflow-y-auto bg-surface-800 border border-surface-600 rounded-lg shadow-xl z-50">
+                      {effects.map(ef => {
+                        const plainName = stripFormatting(ef.name)
+                        return (
+                          <button key={ef.id || plainName} type="button"
+                            onClick={() => {
+                              const ref = noteTextareaRef.current
+                              if (ref) {
+                                const start = ref.selectionStart
+                                const end = ref.selectionEnd
+                                const tag = `[effect:${plainName}]`
+                                const newVal = noteContent.slice(0, start) + tag + noteContent.slice(end)
+                                setNoteContent(newVal)
+                                setTimeout(() => {
+                                  ref.focus()
+                                  ref.setSelectionRange(start + tag.length, start + tag.length)
+                                }, 0)
+                              }
+                              setEffectsOpen(false)
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-xs text-surface-300 hover:bg-surface-700 transition-colors truncate">
+                            {plainName}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="w-px h-4 bg-surface-600 mx-0.5" />
               {/* 元素图标 */}
               {colors.slice(0, 7).map(({ label, color, icon }, i) => {
