@@ -1674,22 +1674,20 @@ function VersionInfoModule() {
     } catch (_) {}
   }
 
-  // 加载持久化的版本标签
+  // 加载持久化的版本标签（从 package.json 读取，属软件自身信息）
   async function loadVersionTag() {
     try {
-      if (window.electronAPI?.getUserConfig) {
-        const r = await window.electronAPI.getUserConfig()
-        if (r?.success && r.config) {
-          const saved = r.config.appVersionTag
-          if (saved) {
-            if (saved === 'beta') {
-              setVersionTag('beta')
-              setTagMode('preset')
-            } else {
-              setVersionTag(saved)
-              setCustomTag(saved)
-              setTagMode('custom')
-            }
+      if (window.electronAPI?.getAppVersionTag) {
+        const r = await window.electronAPI.getAppVersionTag()
+        if (r?.success && r.tag) {
+          const saved = r.tag
+          if (saved === 'beta') {
+            setVersionTag('beta')
+            setTagMode('preset')
+          } else {
+            setVersionTag(saved)
+            setCustomTag(saved)
+            setTagMode('custom')
           }
         }
       }
@@ -1698,12 +1696,12 @@ function VersionInfoModule() {
     setTagLoaded(true)
   }
 
-  // 保存版本标签
+  // 保存版本标签（写入 package.json，属软件自身信息）
   async function saveVersionTag(tag) {
     setVersionTag(tag)
     try {
-      if (window.electronAPI?.setUserConfig) {
-        await window.electronAPI.setUserConfig('appVersionTag', tag)
+      if (window.electronAPI?.setAppVersionTag) {
+        await window.electronAPI.setAppVersionTag(tag)
       }
     } catch (_) {}
   }

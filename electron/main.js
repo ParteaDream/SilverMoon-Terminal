@@ -1273,6 +1273,46 @@ ipcMain.handle('get-app-version', () => {
   return { success: true, version: getAppVersion() };
 });
 
+// ── 应用版本标签（软件自身信息，存于 package.json，非 user.json）──
+function getAppVersionTag() {
+  try {
+    const pkgPath = path.join(__dirname, '..', 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      return pkg.versionTag || '';
+    }
+  } catch (_) {}
+  return '';
+}
+
+function setAppVersionTag(tag) {
+  try {
+    const pkgPath = path.join(__dirname, '..', 'package.json');
+    const raw = fs.readFileSync(pkgPath, 'utf-8');
+    const pkg = JSON.parse(raw);
+    if (tag) {
+      pkg.versionTag = tag;
+    } else {
+      delete pkg.versionTag;
+    }
+    // 保留原始缩进风格
+    const indent = raw.match(/^\s+/m)?.[0]?.length ? raw.match(/^(\s+)/m)[1].length : 2;
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+ipcMain.handle('get-app-version-tag', () => {
+  return { success: true, tag: getAppVersionTag() };
+});
+
+ipcMain.handle('set-app-version-tag', (_event, tag) => {
+  const ok = setAppVersionTag(tag);
+  return { success: ok };
+});
+
 ipcMain.handle('get-data-version', () => {
   return { success: true, version: readSeedVersion() };
 });

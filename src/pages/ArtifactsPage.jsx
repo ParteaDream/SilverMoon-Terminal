@@ -24,6 +24,10 @@ RARITY_BG_STYLES[0] = RARITY_BG_STYLES[1] // fallback
 // 模块加载时预缓存星级背景图
 Object.values(RARITY_BG_URLS).forEach(url => { const img = new Image(); img.src = url })
 
+// 模块级数据缓存 — 返回列表时命中缓存避免重新查询 SQLite，增删改时失效
+let _cachedArtifacts = null
+function _invalidateArtifactsCache() { _cachedArtifacts = null }
+
 const RARITY_STARS = { 1: '★', 2: '★★', 3: '★★★', 4: '★★★★', 5: '★★★★★' }
 const RARITY_COLOR = { 1: 'text-gray-300', 2: 'text-green-400', 3: 'text-blue-400', 4: 'text-purple-400', 5: 'text-accent-gold' }
 
@@ -163,8 +167,10 @@ export default function ArtifactsPage() {
   }, [savePage])
 
   async function loadData() {
+    if (_cachedArtifacts) { setArtifacts(_cachedArtifacts); return }
     const result = await query('SELECT * FROM artifacts ORDER BY id')
-    setArtifacts(result.data || [])
+    _cachedArtifacts = result.data || []
+    setArtifacts(_cachedArtifacts)
   }
 
   // 同步选中圣遗物到 DevToolbar
@@ -211,13 +217,13 @@ export default function ArtifactsPage() {
       const keys = Object.keys(form)
       await query(`INSERT INTO artifacts (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, keys.map(k => form[k]))
     }
-    setModalOpen(false); loadData()
+    setModalOpen(false); _invalidateArtifactsCache(); loadData()
   }
 
   async function handleDelete(row) {
     if (!confirm(`确定删除圣遗物「${row.name_zh}」？`)) return
     await query('DELETE FROM artifacts WHERE id = ?', [row.id])
-    loadData()
+    _invalidateArtifactsCache(); loadData()
   }
 
   const filtered = artifacts.filter(a =>

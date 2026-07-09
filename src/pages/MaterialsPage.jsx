@@ -45,6 +45,10 @@ function normalizeType(type) {
   return TYPE_CN_TO_EN[type] || type
 }
 
+// 模块级数据缓存 — 返回列表时命中缓存避免重新查询 SQLite，增删改时失效
+let _cachedMaterials = null
+function _invalidateMaterialsCache() { _cachedMaterials = null }
+
 export default function MaterialsPage() {
   const { query } = useDb()
   const { restorePage, savePage, push, consumeBackToList } = useNav()
@@ -183,8 +187,10 @@ export default function MaterialsPage() {
   }, [savePage])
 
   async function loadData() {
+    if (_cachedMaterials) { setMaterials(_cachedMaterials); return }
     const result = await query('SELECT * FROM materials ORDER BY id')
     const data = (result.data || []).map(r => ({ ...r, type: normalizeType(r.type) }))
+    _cachedMaterials = data
     setMaterials(data)
   }
 
@@ -224,13 +230,13 @@ export default function MaterialsPage() {
       const keys = Object.keys(form)
       await query(`INSERT INTO materials (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, keys.map(k => form[k]))
     }
-    setModalOpen(false); loadData()
+    setModalOpen(false); _invalidateMaterialsCache(); loadData()
   }
 
   async function handleDelete(row) {
     if (!confirm(`确定删除材料「${row.name_zh}」？`)) return
     await query('DELETE FROM materials WHERE id = ?', [row.id])
-    loadData()
+    _invalidateMaterialsCache(); loadData()
   }
 
   function toggleSelect(id) {
@@ -256,7 +262,7 @@ export default function MaterialsPage() {
     const ids = [...selected]
     await query(`DELETE FROM materials WHERE id IN (${ids.map(() => '?').join(',')})`, ids)
     setSelected(new Set())
-    loadData()
+    _invalidateMaterialsCache(); loadData()
   }
 
   const filtered = materials.filter(m =>
@@ -385,7 +391,6 @@ export default function MaterialsPage() {
             </div>
           )}
         </div>
-      )}
       )}
 
       <EditModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSave={handleSave} title={editing ? `编辑材料 - ${editing.name_zh}` : '添加材料'}>

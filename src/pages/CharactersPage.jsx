@@ -53,6 +53,10 @@ function ElementIcon({ elId, className = 'w-4 h-4', elemIcons }) {
   return <span className={`${className} inline-flex items-center justify-center rounded text-[10px] font-bold ${ELEMENT_COLORS[elId] || 'text-surface-400'} bg-surface-800`} title={name}>{name}</span>
 }
 
+// 模块级数据缓存 — 返回列表时命中缓存避免重新查询 SQLite，增删改时失效
+let _cachedCharsRaw = null
+function _invalidateCharsCache() { _cachedCharsRaw = null }
+
 export default function CharactersPage() {
   const { query, readImage } = useDb()
   const { savePage, restorePage, push, consumeBackToList } = useNav()
@@ -187,6 +191,14 @@ export default function CharactersPage() {
   }, [savePage])
 
   async function loadData() {
+    if (_cachedCharsRaw) {
+      setCharacters(_cachedCharsRaw.characters)
+      setElements(_cachedCharsRaw.elements)
+      setWeaponTypes(_cachedCharsRaw.weaponTypes)
+      setRegions(_cachedCharsRaw.regions)
+      if (_cachedCharsRaw.elemIcons) setElemIcons(_cachedCharsRaw.elemIcons)
+      return
+    }
     try {
       const [chars, elems, wtypes, regs, fits, settingsRes] = await Promise.all([
         query('SELECT * FROM characters ORDER BY id'),
@@ -220,6 +232,13 @@ export default function CharactersPage() {
       // 附加 displayCardArt 计算属性
       for (const c of charsData) {
         c._displayCardArt = outfitAvatarMap[c.id] || c.card_art
+      }
+      _cachedCharsRaw = {
+        characters: charsData,
+        elements: elems.data || [],
+        weaponTypes: wtypes.data || [],
+        regions: regs.data || [],
+        elemIcons: null,
       }
       setCharacters(charsData)
       setElements(elems.data || [])
@@ -255,6 +274,7 @@ export default function CharactersPage() {
             }
             return null
           }))
+          _cachedCharsRaw.elemIcons = loaded
           setElemIcons(loaded)
         }
       } catch (_) {}
@@ -317,7 +337,7 @@ export default function CharactersPage() {
         )
       }
       setModalOpen(false)
-      loadData()
+      _invalidateCharsCache(); loadData()
     } catch (e) {
       console.error('Save failed:', e)
       alert('保存失败: ' + (e.message || '未知错误'))
@@ -329,7 +349,7 @@ export default function CharactersPage() {
   async function handleDelete(row) {
     if (!confirm(`确定删除角色「${row.name_zh}」？`)) return
     await query('DELETE FROM characters WHERE id = ?', [row.id])
-    loadData()
+    _invalidateCharsCache(); loadData()
   }
 
   function toggleSelect(id) {
@@ -355,7 +375,7 @@ export default function CharactersPage() {
     const ids = [...selected]
     await query(`DELETE FROM characters WHERE id IN (${ids.map(() => '?').join(',')})`, ids)
     setSelected(new Set())
-    loadData()
+    _invalidateCharsCache(); loadData()
   }
 
   // 同步选中角色到 DevToolbar

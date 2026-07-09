@@ -45,11 +45,15 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "icon": "assets/icon.icns"
@@ -58,11 +62,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico"
@@ -89,5 +97,6 @@
       "releaseType": "release",
       "vPrefixedTagName": true
     }
-  }
+  },
+  "versionTag": "beta"
 }

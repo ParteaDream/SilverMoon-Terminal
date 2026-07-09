@@ -43,6 +43,10 @@ const RARITY_BORDER = {
   5: 'border-amber-400/30',
 }
 
+// 模块级数据缓存 — 返回列表时命中缓存避免重新查询 SQLite，增删改时失效
+let _cachedWeapons = null
+function _invalidateWeaponsCache() { _cachedWeapons = null }
+
 export default function WeaponsPage() {
   const { query } = useDb()
   const { restorePage, savePage, push, consumeBackToList } = useNav()
@@ -182,10 +186,12 @@ export default function WeaponsPage() {
   }, [savePage])
 
   async function loadData() {
+    if (_cachedWeapons) { const [wps, wtypes] = _cachedWeapons; setWeapons(wps); setWeaponTypes(wtypes); return }
     const [wps, wtypes] = await Promise.all([
       query('SELECT * FROM weapons ORDER BY id'),
       query('SELECT * FROM weapon_types'),
     ])
+    _cachedWeapons = [wps.data || [], wtypes.data || []]
     setWeapons(wps.data || [])
     setWeaponTypes(wtypes.data || [])
   }
@@ -246,7 +252,7 @@ export default function WeaponsPage() {
         const keys = Object.keys(form)
         await query(`INSERT INTO weapons (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, keys.map(k => form[k]))
       }
-      setModalOpen(false); loadData()
+      setModalOpen(false); _invalidateWeaponsCache(); loadData()
     } catch (e) {
       console.error('Save failed:', e)
       alert('保存失败: ' + (e.message || '未知错误'))
@@ -258,7 +264,7 @@ export default function WeaponsPage() {
   async function handleDelete(row) {
     if (!confirm(`确定删除武器「${row.name_zh}」？`)) return
     await query('DELETE FROM weapons WHERE id = ?', [row.id])
-    loadData()
+    _invalidateWeaponsCache(); loadData()
   }
 
   // Search bar filter (applied before column filters)

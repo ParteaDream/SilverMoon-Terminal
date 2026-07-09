@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadPageStates: () => ipcRenderer.invoke('load-page-states'),
   savePageStates: (states) => ipcRenderer.invoke('save-page-states', states),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getAppVersionTag: () => ipcRenderer.invoke('get-app-version-tag'),
+  setAppVersionTag: (tag) => ipcRenderer.invoke('set-app-version-tag', tag),
   getDataVersion: () => ipcRenderer.invoke('get-data-version'),
   listImagePacks: () => ipcRenderer.invoke('list-image-packs'),
   setActiveImagePack: (packName) => ipcRenderer.invoke('set-active-image-pack', packName),
