@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { autoUpdater } = require('electron-updater');
 const { shell } = require('electron');
 const { getDownloadManager, PACK_DOWNLOAD_URLS, GITHUB_ARCHIVE_URLS, loadState, resolveJsDelivrVersion, generateManifestForDir } = require('./download-manager');
@@ -541,6 +542,8 @@ function ensureUserDbSchema() {
       created_at TEXT DEFAULT (datetime('now', 'localtime'))
     )`);
     try { userDb.exec('CREATE INDEX IF NOT EXISTS idx_related_source_user ON related_links(source_type, source_id)'); } catch (_) {}
+    // 世界树：原神爬取数据归档表
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS genshin_accounts (uid TEXT PRIMARY KEY, server TEXT NOT NULL, data_json TEXT NOT NULL, nickname TEXT, level INTEGER, avatar_url TEXT, updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
   } catch (e) {
     console.error('[ensureUserDbSchema] error:', e.message);
   }
@@ -5828,3 +5831,678 @@ ipcMain.handle('cleanup-scrape-window', async () => {
   destroyScrapeWindow();
   return { success: true };
 });
+
+// ═══════════════════════════════════════════════════════════
+// 世界树 — 原神数据爬取（米游社 API）
+// ═══════════════════════════════════════════════════════════
+
+// ── DS 签名生成（匹配 Snap Hutao XRpc: SaltType.X4, Gen2, 2.95.1）──
+const HOYOLAB_SALT_X4 = 'xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs'
+const HOYOLAB_SALT_PROD = 'JwYDpKvLj6MrMqqYU6jTKF17KNO2PXoS'
+const HOYOLAB_APP_VERSION = '2.95.1'
+const HOYOLAB_DEVICE_ID = crypto.randomUUID()
+
+function generateDS(query = '', body = '', salt = HOYOLAB_SALT_X4, includeChars = false) {
+  const t = Math.floor(Date.now() / 1000)
+  let r
+  if (includeChars) {
+    // PROD salt: 6-char lowercase+number random string (matching Core.Random.GetLowerAndNumberString(6))
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+    r = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("")
+  } else {
+    r = Math.floor(Math.random() * 100001 + 100000)
+    if (r === 100000) r = 642367
+  }
+  const main = `salt=${salt}&t=${t}&r=${r}&b=${body}&q=${query}`
+  const ds = crypto.createHash('md5').update(main).digest('hex')
+  return `${t},${r},${ds}`
+}
+
+function getHoyolabHeaders(query = '', body = '') {
+  return {
+    'x-rpc-app_version': HOYOLAB_APP_VERSION,
+    'x-rpc-client_type': '5',
+    'User-Agent': `Mozilla/5.0 (Linux; Android 9; Unspecified Device) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/39.0.0.0 Mobile Safari/537.36 miHoYoBBS/${HOYOLAB_APP_VERSION}`,
+    'DS': generateDS(query, body),
+    'Referer': 'https://webstatic.mihoyo.com/app/community-game-records/index.html?v=6',
+    'Origin': 'https://webstatic.mihoyo.com',
+  }
+}
+
+
+// ── 世界树：一键登录 + 爬取 ──
+let _genshinCookies = null
+const QRCODE = require("qrcode")
+// 53 位随机设备 ID（匹配胡桃 HoyolabOptions.DeviceId53，小写字母+数字）
+const HOYOLAB_DEVICE_ID_53 = Array.from({ length: 53 }, () => {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+  return chars[Math.floor(Math.random() * chars.length)]
+}).join("")
+
+ipcMain.handle("genshin-login-and-crawl", async () => {
+  const outputDir = path.join(require("os").homedir(), "Downloads")
+
+  // Step 1: QR 码登录（使用 HoyoPlay 启动器 API，获取 .mihoyo.com 域 cookies）
+  // 匹配胡桃 HoyoPlayPassportClient + XRpc5 配置
+  // XRpc5 必需 headers: User-Agent=HYPContainer, x-rpc-app_id=ddxf5dufpuyo, x-rpc-client_type=3
+  const cookies = await new Promise(async (resolve, reject) => {
+    try {
+      // Step 1a: 创建 QR 登录
+      const qrResp = await fetch("https://passport-api.mihoyo.com/account/ma-cn-passport/app/createQRLogin", {
+        method: "POST",
+        headers: {
+          "User-Agent": "HYPContainer/1.1.4.133",
+          "x-rpc-app_id": "ddxf5dufpuyo",
+          "x-rpc-client_type": "3",
+          "x-rpc-device_id": HOYOLAB_DEVICE_ID_53,
+          "Content-Type": "application/json",
+        },
+        body: "{}"
+      })
+      const qrData = await qrResp.json()
+      if (qrData.retcode !== 0) { reject(new Error("生成二维码失败: " + (qrData.message || qrData.retcode))); return }
+      const ticket = qrData.data.ticket
+      const qrUrl = qrData.data.url
+      console.log("[genshin] QR ticket:", ticket)
+      console.log("[genshin] QR url:", qrUrl)
+
+      // 本地生成 QR 码
+      const qrDataUrl = await QRCODE.toDataURL(qrUrl, { width: 200, margin: 1, color: { dark: "#000", light: "#fff" } })
+
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+        body{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;
+        margin:0;background:#1a1a2e;color:#eee;font-family:sans-serif}
+        #qrcode{background:white;padding:16px;border-radius:12px;margin:16px}
+        #qrcode img{display:block;width:200px;height:200px}
+        h3{margin:0 0 8px;color:#aaa;font-weight:400}
+        .hint{font-size:13px;color:#888;margin-top:12px;text-align:center}
+      </style></head><body>
+        <h3>请使用米游社 App 扫描二维码</h3>
+        <div id="qrcode"><img src="${qrDataUrl}" alt="QR"/></div>
+        <p class="hint">打开米游社App → 我的 → 右上角扫一扫</p>
+      </body></html>`
+
+      const loginWin = new BrowserWindow({
+        width: 430, height: 580,
+        title: "请用米游社App扫码登录",
+        webPreferences: { nodeIntegration: false, contextIsolation: true }
+      })
+      loginWin.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html))
+
+      // Step 1b: 轮询扫码状态
+      let polled = false
+      const pollTimer = setInterval(async () => {
+        if (loginWin.isDestroyed()) { clearInterval(pollTimer); return }
+        if (polled) return
+        try {
+          const statusResp = await fetch("https://passport-api.mihoyo.com/account/ma-cn-passport/app/queryQRLoginStatus", {
+            method: "POST",
+            headers: {
+              "User-Agent": "HYPContainer/1.1.4.133",
+              "x-rpc-app_id": "ddxf5dufpuyo",
+              "x-rpc-client_type": "3",
+              "x-rpc-device_id": HOYOLAB_DEVICE_ID_53,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ ticket })
+          })
+          const statusData = await statusResp.json()
+          // 匹配胡桃: status=Confirmed, tokens 非空
+          if (statusData.retcode === 0 && statusData.data?.status === "Confirmed" && statusData.data?.tokens?.length > 0) {
+            polled = true; clearInterval(pollTimer)
+            console.log("[genshin] QR confirmed, tokens:", statusData.data.tokens.length)
+            // 匹配胡桃 Cookie.FromQrLoginResult:
+            // stoken = tokens[token_type=1].token (直接是值，如 "v2_...")
+            // stuid = user_info.aid, mid = user_info.mid
+            const stokenToken = statusData.data.tokens.find(t => t.token_type === 1)
+            if (!stokenToken) { reject(new Error("未获取到 stoken")); return }
+            const stoken = stokenToken.token
+            const userInfo = statusData.data.user_info || {}
+            const stuid = userInfo.aid || ""
+            const mid = userInfo.mid || ""
+            console.log("[genshin] stoken:", stoken.slice(0, 16) + "...", "stuid:", stuid, "mid:", mid)
+            loginWin.close()
+            resolve({ stoken, stuid, mid })
+          }
+        } catch (_) {}
+      }, 3000)
+      loginWin.on("closed", () => { clearInterval(pollTimer); if (!polled) reject(new Error("扫码窗口被关闭")) })
+    } catch (e) { reject(e) }
+  }).catch(e => ({ error: e.message }))
+
+  if (cookies.error) return { success: false, error: cookies.error }
+  if (!cookies.stoken) return { success: false, error: "登录失败：未能获取 stoken" }
+
+  // Step 1c: stoken 兑换 cookie_token + ltoken（匹配胡桃 PassportClient）
+  // stoken cookie 格式: mid=xxx;stoken=xxx;stuid=xxx (Cookie.ToString() via SortedDictionary, sorted by key)
+  const stokenStr = `mid=${cookies.mid};stoken=${cookies.stoken};stuid=${cookies.stuid}`
+  let cookieToken = "", ltoken = "", accountId = cookies.stuid  // stuid IS account_id
+  try {
+    // getCookieAccountInfoBySToken
+    const ctResp = await fetch("https://passport-api.mihoyo.com/account/auth/api/getCookieAccountInfoBySToken", {
+      method: "GET",
+      headers: {
+        "Cookie": stokenStr,
+        "User-Agent": "Mozilla/5.0 (Linux; Android 15) Mobile miHoYoBBS/2.95.1",
+        "x-rpc-app_version": "2.95.1", "x-rpc-client_type": "5",
+        "DS": generateDS("", "", HOYOLAB_SALT_PROD, true),
+      }
+    })
+    const ctData = await ctResp.json()
+    if (ctData.retcode === 0) {
+      const accountId = ctData.data?.uid  // uid IS account_id (胡桃 UidCookieToken.uid)
+      cookieToken = `cookie_token=${ctData.data?.cookie_token};account_id=${accountId}`
+      console.log("[genshin] cookie_token obtained:", JSON.stringify(ctData.data).slice(0, 120))
+    } else { console.log("[genshin] cookie_token failed:", ctData.retcode, ctData.message) }
+
+    // getLTokenBySToken (ltoken response has no ltuid field; use same uid as ltuid)
+    const ltResp = await fetch("https://passport-api.mihoyo.com/account/auth/api/getLTokenBySToken", {
+      method: "GET",
+      headers: {
+        "Cookie": stokenStr,
+        "User-Agent": "Mozilla/5.0 (Linux; Android 15) Mobile miHoYoBBS/2.95.1",
+        "x-rpc-app_version": "2.95.1", "x-rpc-client_type": "5",
+        "DS": generateDS("", "", HOYOLAB_SALT_PROD, true),
+      }
+    })
+    const ltData = await ltResp.json()
+    if (ltData.retcode === 0) {
+      // ltoken + same uid as ltuid (胡桃 LTokenWrapper 只有 ltoken 字段)
+      ltoken = `ltoken=${ltData.data?.ltoken};ltuid=${accountId}`
+      console.log("[genshin] ltoken obtained:", JSON.stringify(ltData.data).slice(0, 120))
+    } else { console.log("[genshin] ltoken failed:", ltData.retcode, ltData.message) }
+  } catch (e) { console.log("[genshin] stoken exchange error:", e.message) }
+
+  if (!cookieToken || !ltoken) return { success: false, error: "stoken 兑换 cookie 失败" }
+  const finalCookieStr = [cookieToken, ltoken, stokenStr].join(";")
+  _genshinCookies = { cookieStr: finalCookieStr, stokenObj: cookies }
+
+  // Step 2 + 3: Bind + Crawl
+  // 获取设备指纹 — 优先复用已有的指纹（每次新指纹会触发 5003 或设备提醒）
+  let deviceFp, deviceId, seedId, bbsDeviceId
+  try {
+    const udb = ensureUserDb()
+    if (udb) {
+      const fpStmt = udb.prepare("SELECT data_json FROM genshin_accounts WHERE uid = ?")
+      fpStmt.bind([String(uid)])
+      if (fpStmt.step()) {
+        const oldRow = fpStmt.getAsObject()
+        const oldData = JSON.parse(oldRow.data_json || '{}')
+        // 复用已有设备指纹和标识（避免每次扫码触发新设备提醒）
+        const meta = oldData._meta || {}
+        deviceFp = meta.device_fp
+        deviceId = meta.device_id
+        seedId = meta.seed_id
+        bbsDeviceId = meta.bbs_device_id
+        if (deviceFp) console.log("[genshin] reusing existing device_fp:", deviceFp.slice(0, 8) + "...")
+        if (deviceId) console.log("[genshin] reusing existing device_id:", deviceId.slice(0, 8) + "...")
+      }
+      fpStmt.free()
+    }
+  } catch (_) {}
+  if (!deviceFp) deviceFp = crypto.randomBytes(7).toString("hex").slice(0, 13)  // fallback: 13 hex chars
+  // 尝试从 API 获取/刷新指纹
+  try {
+    if (!deviceId) deviceId = crypto.randomBytes(8).toString("hex")  // 16 hex chars
+    if (!seedId) seedId = crypto.randomUUID()
+    if (!bbsDeviceId) bbsDeviceId = crypto.randomUUID().replace(/-/g, "")
+    const extFields = JSON.stringify({
+      proxyStatus: 0, isRoot: 0, romCapacity: "512",
+      deviceName: "XiaoMi13", productName: "redmi_k70",
+      romRemain: "512", hostname: "dg02-pool03-kvm87",
+      screenSize: "1440x2905", isTablet: 0, aaid: "",
+      model: "XiaoMi13", brand: "XiaoMi", hardware: "qcom",
+      deviceType: "OP5913L1", devId: "REL", serialNumber: "unknown",
+      sdCapacity: 512215, buildTime: "1693626947000",
+      buildUser: "android-build", simState: 5, ramRemain: "239814",
+      appUpdateTimeDiff: 1702604034482,
+      deviceInfo: "XiaoMi/redmi_k70/OP5913L1:13/SKQ1.221119.001/T.118e6c7-5aa23-73911:user/release-keys",
+      vaid: "", buildType: "user", sdkVersion: "34",
+      ui_mode: "UI_MODE_TYPE_NORMAL", isMockLocation: 0,
+      cpuType: "arm64-v8a", isAirMode: 0, ringMode: 2,
+      chargeStatus: 1, manufacturer: "XiaoMi", emulatorStatus: 0,
+      appMemory: "512", osVersion: "14", vendor: "unknown",
+      accelerometer: "1.4883357x7.1712894x6.2847486", sdRemain: 239600,
+      buildTags: "release-keys", packageName: "com.mihoyo.hyperion",
+      networkType: "WiFi", oaid: "", debugStatus: 1,
+      ramCapacity: "469679", magnetometer: "20.081251x-27.487501x2.1937501",
+      display: "redmi_k70_13.1.0.181(CN01)", appInstallTimeDiff: 1688455751496,
+      packageVersion: "2.20.1", gyroscope: "0.030226856x0.014647375x0.010652636",
+      batteryStatus: 100, hasKeyboard: 0, board: "taro",
+    })
+    const fpBody = JSON.stringify({
+      device_id: deviceId,
+      bbs_device_id: bbsDeviceId,
+      seed_id: seedId,
+      seed_time: String(Date.now()),
+      platform: "2",
+      device_fp: deviceFp,
+      app_name: "bbs_cn",
+      ext_fields: extFields,
+    })
+    const fpResp = await fetch("https://public-data-api.mihoyo.com/device-fp/api/getFp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: fpBody,
+    })
+    const fpText = await fpResp.text()
+    console.log("[genshin] device_fp API status:", fpResp.status, "body:", fpText.slice(0, 100))
+    try {
+      const fpData = JSON.parse(fpText)
+      if (fpData?.data?.device_fp) {
+        deviceFp = fpData.data.device_fp
+        console.log("[genshin] device_fp obtained:", deviceFp.slice(0, 8) + "...")
+      }
+    } catch (_) {}
+  } catch (e) { console.log("[genshin] device_fp fetch failed:", e.message, e.cause) }
+
+  const hd = (ds, post) => ({
+    "Accept": "application/json",
+    "x-rpc-app_version": HOYOLAB_APP_VERSION,
+    "x-rpc-client_type": "5",
+    "x-rpc-device_id": HOYOLAB_DEVICE_ID_53,
+    "x-rpc-device_fp": deviceFp,
+    "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
+    "DS": ds,
+    "Referer": "https://webstatic.mihoyo.com/app/community-game-records/index.html?v=6",
+    "Cookie": finalCookieStr,
+    "X-Requested-With": "com.mihoyo.hyperion",
+    ...(post ? { "Content-Type": "application/json" } : {}),
+  })
+
+  // geetest 验证辅助函数（匹配胡桃 CardClient + RetryIf1034Async）
+  async function solveGeetest(cookieStr, challengePath) {
+    // Step 1: createVerification
+    const createUrl = "https://api-takumi-record.mihoyo.com/game_record/app/card/wapi/createVerification?is_high=true"
+    const cvResp = await fetch(createUrl, {
+      headers: {
+        "Cookie": cookieStr,
+        "x-rpc-challenge_game": "2",
+        "x-rpc-challenge_path": challengePath,
+        "DS": generateDS("is_high=true", ""),
+        "x-rpc-app_version": HOYOLAB_APP_VERSION, "x-rpc-client_type": "5",
+        "x-rpc-device_id": HOYOLAB_DEVICE_ID_53, "x-rpc-device_fp": deviceFp,
+        "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
+      }
+    })
+    const cvData = await cvResp.json()
+    console.log("[genshin] createVerification retcode:", cvData.retcode)
+    if (cvData.retcode !== 0) return null
+
+    const { gt, challenge, new_captcha } = cvData.data || {}
+    if (!gt || !challenge) { console.log("[genshin] geetest: no gt/challenge"); return null }
+
+    // Step 2: 在 BrowserWindow 中显示极验滑块（匹配胡桃 GeetestWebView2ContentProvider）
+    const geetestHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      body{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;
+      margin:0;background:#1a1a2e;color:#eee;font-family:sans-serif}
+      h3{margin:0 0 20px;color:#aaa;font-weight:400;font-size:15px}
+    </style></head><body>
+      <h3>请完成安全验证</h3>
+      <div id="captcha"></div>
+      <script src="https://static.geetest.com/static/js/gt.0.5.2.js"></script>
+      <script>
+        window.geetestDone = null;
+        initGeetest({
+          protocol: "https://",
+          gt: "${gt}",
+          challenge: "${challenge}",
+          new_captcha: true,
+          product: "bind",
+          api_server: "api.geetest.com"
+        }, function(captchaObj) {
+          captchaObj.appendTo("#captcha");
+          captchaObj.onReady(function() { captchaObj.verify(); });
+          captchaObj.onSuccess(function() {
+            var result = captchaObj.getValidate();
+            window.geetestDone = JSON.stringify(result);
+          });
+          captchaObj.onError(function(e) {
+            window.geetestDone = JSON.stringify({error: e.message || 'captcha error'});
+          });
+        });
+      </script>
+    </body></html>`
+
+    return new Promise((resolve) => {
+      const gw = new BrowserWindow({
+        width: 400, height: 430,
+        title: "安全验证",
+        webPreferences: { nodeIntegration: false, contextIsolation: true }
+      })
+      gw.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(geetestHtml))
+      const checkTimer = setInterval(async () => {
+        if (gw.isDestroyed()) { clearInterval(checkTimer); resolve(null); return }
+        try {
+          const result = await gw.webContents.executeJavaScript("window.geetestDone")
+          if (result) {
+            clearInterval(checkTimer)
+            const parsed = JSON.parse(result)
+            if (parsed.error) { console.log("[genshin] geetest error:", parsed.error); gw.close(); resolve(null); return }
+            console.log("[genshin] geetest completed, geetest_validate:", parsed.geetest_validate?.slice(0, 20) + "...")
+            // Step 3: verifyVerification
+            const vvBody = JSON.stringify({ geetest_challenge: parsed.geetest_challenge, geetest_validate: parsed.geetest_validate, geetest_seccode: parsed.geetest_seccode })
+            const vvResp = await fetch("https://api-takumi-record.mihoyo.com/game_record/app/card/wapi/verifyVerification", {
+              method: "POST",
+              headers: {
+                "Cookie": cookieStr,
+                "Content-Type": "application/json",
+                "x-rpc-challenge_game": "2",
+                "x-rpc-challenge_path": challengePath,
+                "DS": generateDS("", vvBody),
+                "x-rpc-app_version": HOYOLAB_APP_VERSION, "x-rpc-client_type": "5",
+                "x-rpc-device_id": HOYOLAB_DEVICE_ID_53, "x-rpc-device_fp": deviceFp,
+                "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
+              },
+              body: vvBody
+            })
+            const vvData = await vvResp.json()
+            const challengeFromHeader = vvResp.headers.get("x-rpc-challenge")
+            const challengeFromBody = vvData?.data?.challenge || vvData?.challenge
+            const challengeHeader = challengeFromHeader || challengeFromBody
+            console.log("[genshin] verifyVerification retcode:", vvData.retcode, "header:", !!challengeFromHeader, "body:", !!challengeFromBody)
+            gw.close()
+            resolve(challengeHeader ? { challenge: challengeHeader, validate: parsed.geetest_validate } : null)
+          }
+        } catch (_) {}
+      }, 1000)
+      gw.on("closed", () => { clearInterval(checkTimer); resolve(null) })
+    })
+  }
+
+  let uid, server
+  // 匹配胡桃 BindingClient.GetUserGameRolesByCookieAsync:
+  // HttpClientConfiguration.Default (无 DS!), CookieType.LToken only
+  try {
+    const r = await fetch(`https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn`, {
+      headers: { "Cookie": ltoken }
+    })
+    const d = await r.json()
+    console.log("[genshin] getUserGameRolesByStoken retcode:", d.retcode, "msg:", d.message, "listLen:", d.data?.list?.length)
+    if (d.retcode === 0 && d.data?.list?.length > 0) { uid = d.data.list[0].game_uid; server = d.data.list[0].region }
+  } catch (e) { console.log("[genshin] getUserGameRolesByStoken error:", e.message) }
+  if (!uid) return { success: false, error: "未找到绑定的原神账号" }
+
+  const results = {}, BASE = "https://api-takumi-record.mihoyo.com/game_record/app/genshin/api"
+  const ts = new Date().toISOString().replace(/[:.]/g, "-"), pf = `genshin_${uid}_${ts}`
+  // 读取用户配置：世界树测试开关（控制是否保存 JSON 到 Downloads）
+  let saveJson = false
+  try {
+    const config = _getUserConfigCache()
+    if (config?.worldTreeTest) saveJson = true
+  } catch (_) {}
+  const maybeSave = (fp, data) => { if (saveJson) fs.writeFileSync(fp, data) }
+  const crawl = async (key, url, postBody, retryOn1034 = true) => {
+    try {
+      // 查询参数按字母序排列（DS 签名要求，匹配胡桃 DataSignOptions）
+      const qsParts = [];
+      if (!postBody) {
+        qsParts.push(`role_id=${uid}`, `server=${server}`);
+        if (key === "spiralAbyss") qsParts.push("schedule_type=1");
+        if (key === "spiralAbyssPrev") qsParts.push("schedule_type=2");
+      }
+      const qs = qsParts.sort().join("&");
+      const body = postBody ? JSON.stringify(postBody, Object.keys(postBody).sort()) : ""
+      const ds = generateDS(qs, body)
+      const doFetch = (extraHeaders = {}) => fetch(postBody ? url : `${url}?${qs}`, {
+        method: postBody ? "POST" : "GET",
+        headers: { ...hd(ds, !!postBody), ...extraHeaders },
+        ...(postBody ? { body } : {})
+      })
+      const r = await doFetch()
+      const d = await r.json()
+
+      // 5003: 当前设备指纹不被信任 → 换新指纹重试（可能转为 1034）
+      if (d.retcode === 5003) {
+        console.log(`[genshin] ${key}: retcode=5003, refreshing device_fp and retrying...`)
+        try {
+          const newDeviceId = crypto.randomBytes(8).toString("hex")
+          const newSeedId = crypto.randomUUID()
+          const newFpResp = await fetch("https://public-data-api.mihoyo.com/device-fp/api/getFp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              device_id: newDeviceId, bbs_device_id: crypto.randomUUID().replace(/-/g, ""),
+              seed_id: newSeedId, seed_time: String(Date.now()), platform: "2",
+              device_fp: crypto.randomBytes(7).toString("hex").slice(0, 13),
+              app_name: "bbs_cn",
+              ext_fields: JSON.stringify({ proxyStatus:0, isRoot:0, romCapacity:"512", deviceName:"XiaoMi13", productName:"redmi_k70", romRemain:"512", hostname:"dg02-pool03-kvm87", screenSize:"1440x2905", isTablet:0, aaid:"", model:"XiaoMi13", brand:"XiaoMi", hardware:"qcom", deviceType:"OP5913L1", devId:"REL", serialNumber:"unknown", sdCapacity:512215, buildTime:"1693626947000", buildUser:"android-build", simState:5, ramRemain:"239814", appUpdateTimeDiff:1702604034482, deviceInfo:"XiaoMi/redmi_k70/OP5913L1:13/SKQ1.221119.001/T.118e6c7-5aa23-73911:user/release-keys", vaid:"", buildType:"user", sdkVersion:"34", ui_mode:"UI_MODE_TYPE_NORMAL", isMockLocation:0, cpuType:"arm64-v8a", isAirMode:0, ringMode:2, chargeStatus:1, manufacturer:"XiaoMi", emulatorStatus:0, appMemory:"512", osVersion:"14", vendor:"unknown", accelerometer:"1.4883357x7.1712894x6.2847486", sdRemain:239600, buildTags:"release-keys", packageName:"com.mihoyo.hyperion", networkType:"WiFi", oaid:"", debugStatus:1, ramCapacity:"469679", magnetometer:"20.081251x-27.487501x2.1937501", display:"redmi_k70_13.1.0.181(CN01)", appInstallTimeDiff:1688455751496, packageVersion:"2.20.1", gyroscope:"0.030226856x0.014647375x0.010652636", batteryStatus:100, hasKeyboard:0, board:"taro" }),
+            })
+          })
+          const newFpData = await newFpResp.json()
+          if (newFpData?.data?.device_fp) {
+            deviceFp = newFpData.data.device_fp
+            console.log(`[genshin] new device_fp obtained: ${deviceFp.slice(0,8)}..., retrying ${key}...`)
+            const ds2 = generateDS(qs, body)
+            const hd2 = (ds, post) => ({
+              "Accept": "application/json",
+              "x-rpc-app_version": HOYOLAB_APP_VERSION,
+              "x-rpc-client_type": "5",
+              "x-rpc-device_id": HOYOLAB_DEVICE_ID_53,
+              "x-rpc-device_fp": deviceFp,
+              "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
+              "DS": ds,
+              "Referer": "https://webstatic.mihoyo.com/app/community-game-records/index.html?v=6",
+              "Cookie": finalCookieStr,
+              "X-Requested-With": "com.mihoyo.hyperion",
+              ...(post ? { "Content-Type": "application/json" } : {}),
+            })
+            const r2 = await fetch(postBody ? url : `${url}?${qs}`, {
+              method: postBody ? "POST" : "GET",
+              headers: hd2(ds2, !!postBody),
+              ...(postBody ? { body } : {})
+            })
+            const d2 = await r2.json()
+            results[key] = d2
+            maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d2, null, 2))
+            console.log(`[genshin] ${key}: retcode=${d2.retcode} (after new device_fp)`)
+            if (d2.retcode === 1034 && retryOn1034) {
+              console.log(`[genshin] ${key}: 1034 after device_fp refresh, starting geetest...`)
+              const pathMap = { index: "index", dailyNote: "dailyNote", characters: "character/list", spiralAbyss: "spiralAbyss", roleBasicInfo: "roleBasicInfo" }
+              const challengePath = `/game_record/app/genshin/api/${pathMap[key] || key}`
+              const geetestResult = await solveGeetest(finalCookieStr, challengePath)
+              if (geetestResult) {
+                const r3 = await fetch(postBody ? url : `${url}?${qs}`, {
+                  method: postBody ? "POST" : "GET",
+                  headers: { ...hd2(ds2, !!postBody), "x-rpc-challenge": geetestResult.challenge, "x-rpc-validate": geetestResult.validate, "x-rpc-seccode": geetestResult.validate + "|jordan" },
+                  ...(postBody ? { body } : {})
+                })
+                const d3 = await r3.json()
+                results[key] = d3
+                maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d3, null, 2))
+                console.log(`[genshin] ${key}: retcode=${d3.retcode} (after geetest + new fp)`)
+              }
+            }
+            return
+          }
+        } catch (e) { console.log(`[genshin] ${key}: device_fp refresh failed:`, e.message) }
+        // 如果换指纹也没用，保存原始 5003 结果
+        results[key] = d
+        maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d, null, 2))
+        console.log(`[genshin] ${key}: retcode=${d.retcode} (persisted)`)
+        return
+      }
+
+      // 1034: 需要极验验证（匹配胡桃 RetryIf1034Async）
+      if (d.retcode === 1034 && retryOn1034) {
+        console.log(`[genshin] ${key}: 1034, starting geetest...`)
+        // 端点路径映射（匹配胡桃 CardVerificationHeaders）
+        const pathMap = { index: "index", dailyNote: "dailyNote", characters: "character/list", spiralAbyss: "spiralAbyss", roleBasicInfo: "roleBasicInfo" }
+        const challengePath = `/game_record/app/genshin/api/${pathMap[key] || key}`
+        const geetestResult = await solveGeetest(finalCookieStr, challengePath)
+        if (geetestResult) {
+          console.log(`[genshin] ${key}: retrying with challenge...`)
+          const r2 = await doFetch({
+            "x-rpc-challenge": geetestResult.challenge,
+            "x-rpc-validate": geetestResult.validate,
+            "x-rpc-seccode": geetestResult.validate + "|jordan",
+          })
+          const d2 = await r2.json()
+          results[key] = d2
+          maybeSave(path.join(outputDir, `${pf}_${key}.json`), JSON.stringify(d2, null, 2))
+          console.log(`[genshin] ${key}: retcode=${d2.retcode} (after geetest)`)
+          return
+        }
+        console.log(`[genshin] ${key}: geetest failed, saving original 1034 result`)
+      }
+
+      results[key] = d
+      maybeSave(path.join(outputDir, `${pf}_${key}.json`), JSON.stringify(d, null, 2))
+      console.log(`[genshin] ${key}: retcode=${d.retcode}`)
+    } catch (e) { results[key] = { error: e.message } }
+  }
+  await crawl("index", `${BASE}/index`)
+  await crawl("dailyNote", `${BASE}/dailyNote`)
+  await crawl("characters", `${BASE}/character/list`, { role_id: String(uid), server, sort_type: 1 })
+  await crawl("spiralAbyss", `${BASE}/spiralAbyss`)
+  await crawl("spiralAbyssPrev", `${BASE}/spiralAbyss`)
+  await crawl("roleBasicInfo", `${BASE}/roleBasicInfo`)
+  // 额外接口（匹配胡桃 GameRecordClient）
+  await crawl("actCalendar", `${BASE}/act_calendar`, { role_id: String(uid), server })
+  await crawl("roleCombat", `${BASE}/role_combat`)  // 幻想真境剧诗
+  await crawl("hardChallenge", `${BASE}/hard_challenge`)  // 幽境危战
+  // 角色详细数据（圣遗物+面板），获取所有角色数据（参考胡桃传参，API 支持一次传入全部角色）
+  const allCharacterIds = (results.characters?.data?.list || []).map(c => c.id)
+  if (allCharacterIds.length > 0) {
+    await crawl("characterDetail", `${BASE}/character/detail`,
+      { role_id: String(uid), server, character_ids: allCharacterIds, sort_type: 1 })
+  }
+
+  const summary = {}
+  for (const [k, v] of Object.entries(results)) { summary[k] = v.retcode !== undefined ? { retcode: v.retcode } : { error: v.error } }
+
+  // 保存爬取数据到 user.db — 保存所有成功端点的数据，失败的不覆盖
+  // 防止爬取失败（1034/5003）覆盖已有数据
+  const hasValidData = Object.values(results).some(v => v?.retcode === 0)
+  if (hasValidData) {
+    try {
+      const db = ensureUserDb()
+      if (db) {
+        // 加载旧数据，只合并成功的响应 — 从旧数据开始，只覆盖成功的新数据
+        let merged = { ...results, _meta: results._meta }
+        try {
+          const oldStmt = db.prepare("SELECT data_json FROM genshin_accounts WHERE uid = ?")
+          oldStmt.bind([String(uid)])
+          if (oldStmt.step()) {
+            const oldRow = oldStmt.getAsObject()
+            const oldData = JSON.parse(oldRow.data_json || '{}')
+            oldStmt.free()
+            // 从旧数据开始，只替换成功的新端点
+            merged = oldData
+            for (const [k, v] of Object.entries(results)) {
+              if (v?.retcode === 0) merged[k] = v  // 新数据成功 → 更新
+            }
+            if (oldData._meta) merged._meta = oldData._meta
+          } else { oldStmt.free() }
+        } catch (_) {}
+        // 保存当前设备标识到 _meta 供下次复用
+        if (!merged._meta) merged._meta = {}
+        merged._meta.device_fp = deviceFp
+        merged._meta.device_id = deviceId
+        merged._meta.seed_id = seedId
+        merged._meta.bbs_device_id = bbsDeviceId
+
+        const nickname = merged.index?.data?.role?.nickname || merged.roleBasicInfo?.data?.nickname || ''
+        const level = merged.index?.data?.role?.level || merged.roleBasicInfo?.data?.level || 0
+        const dataJson = JSON.stringify(merged)
+        const stmt = db.prepare(`INSERT OR REPLACE INTO genshin_accounts (uid, server, data_json, nickname, level, updated_at)
+          VALUES (?, ?, ?, ?, ?, datetime('now','localtime'))`)
+        stmt.bind([String(uid), server, dataJson, nickname, level])
+        stmt.step(); stmt.free()
+        userDbSave()
+        console.log("[genshin] data saved to user.db for UID", uid, "- valid endpoints:", Object.entries(merged).filter(([_,v]) => v?.retcode === 0).map(([k])=>k).join(','))
+      }
+    } catch (e) { console.log("[genshin] user.db save failed:", e.message) }
+  } else {
+    console.log("[genshin] no valid data from any endpoint, skipping save")
+  }
+
+  return { success: true, uid, server, outputDir, summary, data: results }
+})
+
+ipcMain.handle("genshin-logout", () => { _genshinCookies = null; return { success: true } })
+
+// ── 世界树：账号数据 CRUD ──
+ipcMain.handle("genshin-list-accounts", () => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: true, accounts: [] }
+    const stmt = udb.prepare("SELECT uid, server, nickname, level, updated_at FROM genshin_accounts ORDER BY updated_at DESC")
+    const accounts = []; while (stmt.step()) accounts.push(stmt.getAsObject()); stmt.free()
+    return { success: true, accounts }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
+ipcMain.handle("genshin-get-account", (_event, uid) => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: false, error: "user.db 未初始化" }
+    const stmt = udb.prepare("SELECT * FROM genshin_accounts WHERE uid = ?")
+    stmt.bind([String(uid)])
+    if (stmt.step()) {
+      const row = stmt.getAsObject()
+      row.data = JSON.parse(row.data_json || '{}')
+      stmt.free()
+      return { success: true, account: row }
+    }
+    stmt.free()
+    return { success: false, error: "账号不存在" }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
+ipcMain.handle("genshin-delete-account", (_event, uid) => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: false, error: "user.db 未初始化" }
+    const stmt = udb.prepare("DELETE FROM genshin_accounts WHERE uid = ?")
+    stmt.bind([String(uid)]); stmt.step(); stmt.free()
+    userDbSave()
+    return { success: true }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
+// ── 世界树：刷新实时便笺 ──
+ipcMain.handle("genshin-refetch-daily", async (_event, uid) => {
+  try {
+    // 重新读取账号获取 cookie
+    const udb = ensureUserDb()
+    if (!udb) return { success: false, error: "user.db 未初始化" }
+    const accStmt = udb.prepare("SELECT data_json FROM genshin_accounts WHERE uid = ?")
+    accStmt.bind([String(uid)])
+    if (!accStmt.step()) { accStmt.free(); return { success: false, error: "账号不存在" } }
+    const row = accStmt.getAsObject(); accStmt.free()
+    const data = JSON.parse(row.data_json || '{}')
+    const crawlData = data.index?.data
+    if (!crawlData?.role) return { success: false, error: "无角色数据" }
+
+    // 构建 cookie 并重新抓取 dailyNote
+    const results = {}
+    const hdGen = (serverVal, uidVal) => (ds, post) => ({
+      "Accept": "application/json",
+      "x-rpc-app_version": HOYOLAB_APP_VERSION,
+      "x-rpc-client_type": "5",
+      "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
+      "DS": ds,
+      "Referer": "https://webstatic.mihoyo.com/app/community-game-records/index.html?v=6",
+      "x-rpc-device_fp": "38d81a46da198",
+      ...(!_genshinCookies ? {} : { "Cookie": _genshinCookies.cookieStr || "" }),
+      ...(post ? { "Content-Type": "application/json" } : {}),
+    })
+    const BASE = "https://api-takumi-record.mihoyo.com/game_record/app/genshin/api"
+    const uidNum = String(uid)
+    const serverVal = crawlData.role.region === "天空岛" ? "cn_gf01" : "cn_qd01"
+    const qsDaily = `role_id=${uidNum}&server=${serverVal}`
+    const dsDaily = generateDS(qsDaily, "")
+    const rDaily = await fetch(`${BASE}/dailyNote?${qsDaily}`, { headers: hdGen(serverVal, uidNum)(dsDaily, false) })
+    const dDaily = await rDaily.json()
+    if (dDaily.retcode !== 0) return { success: false, error: `API 返回 ${dDaily.retcode}` }
+
+    // 更新数据
+    data.dailyNote = dDaily
+    const updateStmt = udb.prepare("UPDATE genshin_accounts SET data_json = ?, updated_at = datetime('now','localtime') WHERE uid = ?")
+    updateStmt.bind([JSON.stringify(data), String(uid)]); updateStmt.step(); updateStmt.free()
+    userDbSave()
+    return { success: true, daily: dDaily.data }
+  } catch (e) { return { success: false, error: e.message } }
+})
+

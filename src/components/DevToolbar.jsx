@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import {
   Database, Download, Upload, Trash2, X, Bug, History, Wrench,
-  Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock
+  Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock, Globe
 } from 'lucide-react'
 
 // ─── 备份列表弹窗 ───
@@ -524,6 +524,20 @@ export default function DevToolbar() {
   const isArtifactPage = location.pathname.startsWith('/artifacts')
   const isArtifactDetailPage = location.pathname.startsWith('/artifacts/') && !!artifactDetailId
   const isWishPage = location.pathname.startsWith('/wishes')
+
+  // ── 世界树测试状态 ──
+  const [genshinStep, setGenshinStep] = useState(null)
+  const [genshinResult, setGenshinResult] = useState('')
+  const [worldTreeTest, setWorldTreeTest] = useState(false)
+
+  useEffect(() => {
+    window.electronAPI?.getUserConfig?.().then(config => { if (config?.worldTreeTest != null) setWorldTreeTest(config.worldTreeTest) }).catch(() => {})
+  }, [])
+
+  const toggleWorldTreeTest = useCallback(async (v) => {
+    setWorldTreeTest(v)
+    await window.electronAPI?.setUserConfig?.('worldTreeTest', v).catch(() => {})
+  }, [])
 
   // Listen for character selection from CharactersPage (via custom event)
   useEffect(() => {
@@ -2351,6 +2365,21 @@ export default function DevToolbar() {
             )}
           </>
         )}
+
+        {/* 世界树测试开关 */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-surface-400">世界树测试</span>
+          <button
+            onClick={() => toggleWorldTreeTest(!worldTreeTest)}
+            className={`relative w-9 h-5 rounded-full transition-colors ${
+              worldTreeTest ? 'bg-primary-500' : 'bg-surface-600'
+            }`}
+          >
+            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+              worldTreeTest ? 'left-[18px]' : 'left-0.5'
+            }`} />
+          </button>
+        </div>
 
       </div>
 

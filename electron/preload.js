@@ -113,6 +113,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   undoAppIcon: () => ipcRenderer.invoke('undo-app-icon'),
   clearAppCache: () => ipcRenderer.invoke('clear-app-cache'),
   getCacheSize: () => ipcRenderer.invoke('get-cache-size'),
+
+  // 世界树 — 原神数据爬取（一键登录+爬取）
+  genshinLoginAndCrawl: () => ipcRenderer.invoke('genshin-login-and-crawl'),
+  genshinLogout: () => ipcRenderer.invoke('genshin-logout'),
+  genshinListAccounts: () => ipcRenderer.invoke('genshin-list-accounts'),
+  genshinGetAccount: (uid) => ipcRenderer.invoke('genshin-get-account', uid),
+  genshinDeleteAccount: (uid) => ipcRenderer.invoke('genshin-delete-account', uid),
+  genshinRefetchDaily: (uid) => ipcRenderer.invoke('genshin-refetch-daily', uid),
+
   onUpdateStatus: (callback) => {
     ipcRenderer.on('update-status', (_e, status) => callback(status));
     return () => ipcRenderer.removeAllListeners('update-status');

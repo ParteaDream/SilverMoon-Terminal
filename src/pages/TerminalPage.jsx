@@ -5,6 +5,7 @@ import { APPS } from '../components/TerminalDock'
 import TrainCalc from '../components/TrainCalc'
 import BetaMemo from '../components/BetaMemo'
 import DragonSnake from '../components/DragonSnake'
+import WorldTree from '../components/WorldTree'
 import {
   X, Minus, Square, Copy, Monitor, ChevronLeft,
   FolderOpen, LayoutList, LayoutGrid,
@@ -387,7 +388,7 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
           <div className="w-16" />
         </div>
         <div className="flex-1 overflow-auto">
-          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
+          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.id === 'worldtree' ? <WorldTree /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
         </div>
         {!fullscreen && (
           <>

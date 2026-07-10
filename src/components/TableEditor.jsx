@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Plus, Trash2, GripVertical } from 'lucide-react'
 
 /**
@@ -7,6 +7,7 @@ import { Plus, Trash2, GripVertical } from 'lucide-react'
  */
 export default function TableEditor({ data, onChange }) {
   const tables = data || []
+  const dragRef = useRef({ from: -1, over: -1 })
 
   function updateTable(ti, patch) {
     const next = tables.map((t, i) => i === ti ? { ...t, ...patch } : t)
@@ -19,6 +20,31 @@ export default function TableEditor({ data, onChange }) {
 
   function addTable() {
     onChange([...tables, { title: '', headers: ['列1', '列2'], rows: [['', '']] }])
+  }
+
+  // ── 拖拽排序 ──
+  function handleDragStart(e, i) {
+    dragRef.current.from = i
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(i))
+    e.currentTarget.closest('.table-drag-target')?.classList.add('opacity-50')
+  }
+  function handleDragOver(e, i) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    dragRef.current.over = i
+  }
+  function handleDragEnd(e) {
+    const from = dragRef.current.from
+    const to = dragRef.current.over
+    e.currentTarget.closest('.table-drag-target')?.classList.remove('opacity-50')
+    if (from >= 0 && to >= 0 && from !== to) {
+      const next = [...tables]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      onChange(next)
+    }
+    dragRef.current = { from: -1, over: -1 }
   }
 
   function updateCell(ti, ri, ci, value) {
@@ -126,10 +152,19 @@ export default function TableEditor({ data, onChange }) {
   return (
     <div className="space-y-4">
       {tables.map((table, ti) => (
-        <div key={ti} className="border border-surface-700 rounded-lg overflow-hidden">
-          {/* 表头：标题 + 操作 */}
+        <div key={ti} className="border border-surface-700 rounded-lg overflow-hidden table-drag-target">
+          {/* 表头：标题 + 拖拽手柄 + 删除 */}
           <div className="flex items-center gap-2 px-3 py-2 bg-surface-800/50 border-b border-surface-700">
-            <GripVertical className="w-3.5 h-3.5 text-surface-600 flex-shrink-0" />
+            <div
+              draggable
+              onDragStart={(e) => handleDragStart(e, ti)}
+              onDragOver={(e) => handleDragOver(e, ti)}
+              onDragEnd={handleDragEnd}
+              className="cursor-grab active:cursor-grabbing p-0.5 hover:text-surface-300 text-surface-600"
+              title="拖动排序"
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </div>
             <input
               type="text"
               value={table.title}
