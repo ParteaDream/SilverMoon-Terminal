@@ -6,11 +6,12 @@ import TrainCalc from '../components/TrainCalc'
 import BetaMemo from '../components/BetaMemo'
 import DragonSnake from '../components/DragonSnake'
 import WorldTree from '../components/WorldTree'
+import Album from '../components/Album'
 import {
   X, Minus, Square, Copy, Monitor, ChevronLeft,
   FolderOpen, LayoutList, LayoutGrid,
   Upload, PaintBucket, Settings,
-  File, FileText, Image, Database, Code, Search
+  File, FileText, Image, Database, Code, Search, Images
 } from 'lucide-react'
 
 const GRID_CELL = 110
@@ -388,7 +389,7 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
           <div className="w-16" />
         </div>
         <div className="flex-1 overflow-auto">
-          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.id === 'worldtree' ? <WorldTree /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
+          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.id === 'worldtree' ? <WorldTree /> : app.id === 'album' ? <Album /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
         </div>
         {!fullscreen && (
           <>

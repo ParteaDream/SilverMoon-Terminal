@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage, session, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const url = require('url');
 const { autoUpdater } = require('electron-updater');
 const { shell } = require('electron');
 const { getDownloadManager, PACK_DOWNLOAD_URLS, GITHUB_ARCHIVE_URLS, loadState, resolveJsDelivrVersion, generateManifestForDir } = require('./download-manager');
@@ -1098,6 +1099,13 @@ function createWindow() {
 
 // ── 应用启动 ──
 app.whenReady().then(async () => {
+  // 注册本地媒体协议（绕过 HTTP→file:// 跨域限制，用于视频播放）
+  protocol.handle('local-media', (request) => {
+    const rawPath = decodeURIComponent(request.url.slice('local-media://'.length));
+    const fileUrl = url.pathToFileURL(rawPath).toString();
+    return net.fetch(fileUrl);
+  });
+
   // 关闭 Chromium Autofill（Electron 不支持，避免终端报 Autofill.enable 错误）
   app.commandLine.appendSwitch('disable-features', 'Autofill');
 
@@ -1193,6 +1201,46 @@ ipcMain.handle('get-config', () => ({
   dbPopulated: dbDir ? isDbPopulated() : false,
   engineError: null,
 }));
+
+// ── 选择相册文件夹（切片辖域·鸽）──
+ipcMain.handle('select-album-folder', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择相册文件夹',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+    return { success: true, path: result.filePaths[0] };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 读取/保存相册标签文件（image_tag.json）──
+ipcMain.handle('read-album-tags', () => {
+  try {
+    const cfg = loadUserConfig();
+    const p = cfg?.albumFolderPath ? path.join(cfg.albumFolderPath, 'image_tag.json') : null;
+    if (!p || !fs.existsSync(p)) return { success: true, data: {} };
+    return { success: true, data: JSON.parse(fs.readFileSync(p, 'utf-8')) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('save-album-tags', (_event, data) => {
+  try {
+    const cfg = loadUserConfig();
+    const p = cfg?.albumFolderPath ? path.join(cfg.albumFolderPath, 'image_tag.json') : null;
+    if (!p) return { error: '无相册路径' };
+    fs.writeFileSync(p, JSON.stringify(data, null, 2));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 
 ipcMain.handle('get-db-path', () => {
   try {
@@ -2305,7 +2353,7 @@ ipcMain.handle('read-image', async (_event, filename, maxWidth) => {
 
 // ── 图片 base64 内容 LRU 缓存（避免重复读盘+编码）──
 const _imageContentCache = new Map();
-const _IMAGE_CACHE_MAX = 200;
+const _IMAGE_CACHE_MAX = 500;
 function getCachedImage(fp) {
   const entry = _imageContentCache.get(fp);
   if (entry) {
@@ -2325,10 +2373,65 @@ function setCachedImage(fp, data) {
   _imageContentCache.set(fp, data);
 }
 
+// ── 缩略图生成并发锁（防止大量并发 createThumbnailFromPath 阻塞主进程事件循环）──
+// nativeImage.createThumbnailFromPath 返回 Promise，但其内部的 PNG 编码 + base64
+// 编码仍在主线程执行，过多并发会导致窗口拖动/点击/hover 事件延迟响应。
+const _thumbnailSemaphore = { count: 0, max: 2, queue: [] };
+function _acquireThumbnailSlot() {
+  return new Promise(resolve => {
+    if (_thumbnailSemaphore.count < _thumbnailSemaphore.max) {
+      _thumbnailSemaphore.count++;
+      resolve();
+    } else {
+      _thumbnailSemaphore.queue.push(resolve);
+    }
+  });
+}
+function _releaseThumbnailSlot() {
+  _thumbnailSemaphore.count--;
+  const next = _thumbnailSemaphore.queue.shift();
+  if (next) { _thumbnailSemaphore.count++; next(); }
+}
+
+// ── 缩略图生成（受并发信号量保护，返回 PNG Buffer）──
+async function generateThumbnailBuffer(fp, maxWidth) {
+  await _acquireThumbnailSlot();
+  try {
+    // 不使用 createThumbnailFromPath（Electron 31 中 height:0 可能失效）
+    // 改用 createFromPath + resize 手动缩放
+    const img = nativeImage.createFromPath(fp);
+    if (!img || img.isEmpty()) return null;
+
+    const sz = img.getSize();
+    if (sz.width === 0 || sz.height === 0) return null;
+
+    // 等比缩放
+    let targetW = maxWidth;
+    let targetH = Math.round(sz.height * (maxWidth / sz.width));
+
+    // 竖长图：用高度约束防止缩略图过大
+    const maxH = maxWidth * 3;
+    if (targetH > maxH) {
+      targetH = maxH;
+      targetW = Math.round(sz.width * (maxH / sz.height));
+    }
+
+    const resized = img.resize({ width: targetW, height: targetH });
+    if (resized && !resized.isEmpty()) return resized.toPNG();
+
+    // 256 降级
+    const fallback = img.resize({ width: 256, height: Math.round(sz.height * (256 / sz.width)) });
+    if (fallback && !fallback.isEmpty()) return fallback.toPNG();
+
+    return null;
+  } catch (_) { return null; }
+  finally { _releaseThumbnailSlot(); }
+}
+
 // 通用图片文件读取（供 read-image 和 read-user-image 复用）
-// 使用异步 fs.promises 避免阻塞主进程（防止拖动窗口卡顿）
+// saveAsPath: 可选，若提供则将缩略图 PNG 写入该路径（用于 [Thumbnail] 缓存）
 const fsPromises = fs.promises;
-async function readImageFile(fp, maxWidth) {
+async function readImageFile(fp, maxWidth, saveAsPath) {
   // 命中缓存直接返回（注意：如果 maxWidth 不同，缓存 key 也不同）
   const cacheKey = maxWidth ? `${fp}::w${maxWidth}` : fp;
   const cached = getCachedImage(cacheKey);
@@ -2345,34 +2448,35 @@ async function readImageFile(fp, maxWidth) {
       setCachedImage(cacheKey, svgResult);
       return { success: true, data: svgResult };
     }
-    // 二进制图片 — 如需缩放则使用 nativeImage 异步缩略图
+    // 二进制图片 — 如需缩放则使用 generateThumbnailBuffer
     if (maxWidth && maxWidth > 0) {
-      // 尝试多次创建缩略图（降级尺寸），确保总能返回可用结果
-      const sizes = [maxWidth, Math.floor(maxWidth / 2), 512, 256];
-      for (const w of sizes) {
-        try {
-          const thumb = await nativeImage.createThumbnailFromPath(fp, { width: w, height: 0 });
-          if (thumb && !thumb.isEmpty()) {
-            const sz = thumb.getSize();
-            if (sz.height > w * 3) {
-              // 竖长图改高度约束
-              const hthumb = await nativeImage.createThumbnailFromPath(fp, { width: 0, height: w * 3 });
-              if (hthumb && !hthumb.isEmpty()) {
-                const buf = hthumb.toPNG();
-                const r = `data:image/png;base64,${buf.toString('base64')}`;
-                setCachedImage(cacheKey, r);
-                return { success: true, data: r };
-              }
-            }
-            const buf = thumb.toPNG();
-            const r = `data:image/png;base64,${buf.toString('base64')}`;
-            setCachedImage(cacheKey, r);
-            return { success: true, data: r };
-          }
-        } catch (_) { /* 尝试下一尺寸 */ }
+      // 对 JPEG/WebP 源文件走"直读"路径：浏览器解码缩放比 nativeImage 快得多
+      const headBytes = head.subarray(0, Math.min(bytesRead, 4));
+      const isJpeg = headBytes[0] === 0xFF && headBytes[1] === 0xD8;
+      const isWebp = headBytes[0] === 0x52 && headBytes[1] === 0x49;
+      if (isJpeg || isWebp) {
+        const stat = await handle.stat();
+        if (stat.size < 5 * 1024 * 1024) {  // < 5MB 直接给浏览器，跳过 nativeImage
+          const rawCacheKey = maxWidth ? `${fp}::w${maxWidth}::raw` : fp;
+          const rawCached = getCachedImage(rawCacheKey);
+          if (rawCached) return { success: true, data: rawCached };
+          const rawBuf = await fsPromises.readFile(fp);
+          const mime = isJpeg ? 'image/jpeg' : 'image/webp';
+          const r = `data:${mime};base64,${rawBuf.toString('base64')}`;
+          setCachedImage(rawCacheKey, r);
+          return { success: true, data: r };
+        }
       }
-      // 所有尺寸都失败 → 不返回错误，降级为读取原图（无缩放）
-      // fall through to read original file below
+      const buf = await generateThumbnailBuffer(fp, maxWidth);
+      if (buf) {
+        // [Thumbnail] 缓存：保存到磁盘
+        if (saveAsPath) {
+          try { await fsPromises.writeFile(saveAsPath, buf); } catch (_) {}
+        }
+        const r = `data:image/png;base64,${buf.toString('base64')}`;
+        setCachedImage(cacheKey, r);
+        return { success: true, data: r };
+      }
     }
     // 无需缩放，直接读取原始文件
     const binData = await fsPromises.readFile(fp);
@@ -4858,18 +4962,23 @@ ipcMain.handle('open-folder', (_event, folderPath) => {
   } catch (e) { return { error: e.message }; }
 });
 
-// ── 列出指定目录的文件 ──
-ipcMain.handle('list-directory', (_event, dirPath) => {
+// ── 列出指定目录的文件（异步版本 — 避免 fs.readdirSync/statSync 阻塞主进程）──
+ipcMain.handle('list-directory', async (_event, dirPath) => {
   try {
-    if (!dirPath || !fs.existsSync(dirPath)) return { error: '路径不存在' };
-    const names = fs.readdirSync(dirPath);
-    const files = [];
-    for (const name of names) {
-      try {
+    if (!dirPath) return { error: '路径不存在' };
+    try { await fsPromises.access(dirPath); } catch (_) { return { error: '路径不存在' }; }
+    const names = await fsPromises.readdir(dirPath);
+    // 批量 stat（Promise.all）— 不阻塞事件循环
+    const results = await Promise.allSettled(
+      names.map(async (name) => {
         const fp = path.join(dirPath, name);
-        const stat = fs.statSync(fp);
-        files.push({ name, size: stat.size, isDirectory: stat.isDirectory(), mtime: stat.mtime.toISOString() });
-      } catch (_) { /* skip protected files (e.g. System Volume Information on Windows) */ }
+        const stat = await fsPromises.stat(fp);
+        return { name, size: stat.size, isDirectory: stat.isDirectory(), mtime: stat.mtime.toISOString() };
+      })
+    );
+    const files = [];
+    for (const r of results) {
+      if (r.status === 'fulfilled') files.push(r.value);
     }
     return { success: true, files };
   } catch (e) { return { error: e.message }; }
@@ -4885,13 +4994,239 @@ ipcMain.handle('open-file', (_event, filePath) => {
 });
 
 // ── 读取文件预览（图片缩略图）──
-ipcMain.handle('read-file-preview', async (_event, filePath) => {
+ipcMain.handle('read-file-preview', async (_event, filePath, maxWidth) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) return { error: '文件不存在' };
     const ext = path.extname(filePath).toLowerCase();
-    const imgExts = ['.jpg','.jpeg','.png','.webp','.gif','.svg','.bmp'];
+    const imgExts = ['.jpg','.jpeg','.png','.webp','.gif','.svg','.bmp','.avif','.heic','.heif'];
     if (!imgExts.includes(ext)) return { success: true, data: null };
-    return await readImageFile(filePath);
+    return await readImageFile(filePath, maxWidth);
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 生成封面缩略图并缓存到磁盘（[Thumbnail] 前缀文件）──
+ipcMain.handle('save-cover-thumbnail', async (_event, sourcePath, maxWidth, savePath) => {
+  try {
+    if (!sourcePath || !fs.existsSync(sourcePath)) return { error: '源文件不存在' };
+    return await readImageFile(sourcePath, maxWidth, savePath);
+  } catch (e) { return { error: e.message }; }
+});
+
+// ═══════════════════════════════════════════════
+// photo_index 索引系统
+// 目录结构: <root>/photo_index/
+//   manifest.json     — 目录清单（替代 list-directory）
+//   thumbs/           — 缩略图（镜像原目录结构）
+//     <relPath>/<name>.png      — 图片缩略图 300px
+//     <relPath>/__cover__.png   — 相簿封面 400px
+// ═══════════════════════════════════════════════
+const PHOTO_INDEX_DIR = 'photo_index';
+const PHOTO_INDEX_THUMBS = 'thumbs';
+const IMG_EXTS_MAIN = new Set(['.jpg','.jpeg','.png','.webp','.gif','.svg','.bmp','.avif','.heic','.heif']);
+
+function isImageExt(ext) { return IMG_EXTS_MAIN.has(ext.toLowerCase()); }
+
+// 全量扫描 + 生成缩略图 + 写 manifest
+async function scanAlbumIndex(rootPath) {
+  const indexDir = path.join(rootPath, PHOTO_INDEX_DIR);
+  const thumbsDir = path.join(indexDir, PHOTO_INDEX_THUMBS);
+  await fsPromises.mkdir(thumbsDir, { recursive: true });
+
+  const manifest = { v: 1, root: rootPath, scannedAt: Date.now(), entries: {} };
+  const ICON_PFX = '[icon]';
+
+  // 递归遍历
+  async function walk(relPath) {
+    const absPath = relPath ? path.join(rootPath, relPath) : rootPath;
+    let names;
+    try { names = await fsPromises.readdir(absPath); } catch (_) { return; }
+
+    const folders = [];
+    const images = [];
+    const covCandidates = []; // { name, absPath } for album cover selection
+
+    for (const name of names) {
+      if (name === PHOTO_INDEX_DIR) continue;
+      if (name.startsWith('.')) continue;
+
+      const itemAbs = path.join(absPath, name);
+      let stat;
+      try { stat = await fsPromises.stat(itemAbs); } catch (_) { continue; }
+
+      if (stat.isDirectory()) {
+        folders.push(name);
+        await walk(relPath ? path.join(relPath, name) : name);
+      } else {
+        const ext = path.extname(name);
+        if (!isImageExt(ext)) continue;
+        // 生成缩略图文件路径
+        const thumbRel = path.join(PHOTO_INDEX_THUMBS, relPath || '', name + '.png');
+        const thumbAbs = path.join(indexDir, thumbRel);
+
+        // 增量：若缩略图比源文件新则跳过
+        let needRegen = true;
+        try {
+          const ts = await fsPromises.stat(thumbAbs);
+          if (ts.mtime >= stat.mtime) needRegen = false;
+        } catch (_) {}
+
+        if (needRegen) {
+          try {
+            await fsPromises.mkdir(path.dirname(thumbAbs), { recursive: true });
+            const buf = await generateThumbnailBuffer(itemAbs, 300);
+            if (buf) {
+              await fsPromises.writeFile(thumbAbs, buf);
+            } else {
+              // 缩略图生成失败（不支持的格式等）→ 降级：直接复制原文件作为缩略图
+              try {
+                const raw = await fsPromises.readFile(itemAbs);
+                await fsPromises.writeFile(thumbAbs, raw);
+                console.log('[photo_index] fallback copy:', thumbRel);
+              } catch (e2) { console.error('[photo_index] fallback copy error:', itemAbs, e2.message); }
+            }
+          } catch (e) { console.error('[photo_index] thumbnail gen error:', itemAbs, e.message); }
+        }
+
+        images.push({
+          name,
+          size: stat.size,
+          mtime: stat.mtime.toISOString(),
+          thumb: thumbRel
+        });
+
+        // 收集封底候选（排除 [icon] 前缀）
+        if (!name.startsWith(ICON_PFX)) {
+          covCandidates.push({ name, absPath: itemAbs });
+        } else {
+          // [icon] 图片也生成缩略图（作为 icon 封面用）
+          // 已经在 images 中，thumb 也已生成
+        }
+      }
+    }
+
+    // 生成相簿封面 (仅子目录，根目录跳过)
+    if (relPath) {
+      let coverThumb = null;
+      // 1) [icon] 优先
+      const iconImg = images.find(img => img.name.startsWith(ICON_PFX));
+      if (iconImg) {
+        // 为 [icon] 生成 400px 封面缩略图
+        const iconAbs = path.join(rootPath, relPath, iconImg.name);
+        const coverRel = path.join(PHOTO_INDEX_THUMBS, relPath, '__cover__.png');
+        const coverAbs = path.join(indexDir, coverRel);
+        try {
+          await fsPromises.mkdir(path.dirname(coverAbs), { recursive: true });
+          const buf = await generateThumbnailBuffer(iconAbs, 400);
+          if (buf) {
+            await fsPromises.writeFile(coverAbs, buf); coverThumb = coverRel;
+            console.log('[photo_index] cover (icon):', coverRel);
+          } else {
+            // 降级：直接复制 [icon] 原文件作为封面
+            try { await fsPromises.copyFile(iconAbs, coverAbs); coverThumb = coverRel; console.log('[photo_index] cover fallback (icon):', coverRel); } catch (e2) { console.error('[photo_index] cover fallback error (icon):', iconAbs, e2.message); }
+          }
+        } catch (e) { console.error('[photo_index] cover gen error (icon):', iconAbs, e.message); }
+      } else if (covCandidates.length > 0) {
+        // 2) 从候选中随机选一张
+        const pick = covCandidates[Math.floor(Math.random() * covCandidates.length)];
+        const coverRel = path.join(PHOTO_INDEX_THUMBS, relPath, '__cover__.png');
+        const coverAbs = path.join(indexDir, coverRel);
+        try {
+          await fsPromises.mkdir(path.dirname(coverAbs), { recursive: true });
+          const buf = await generateThumbnailBuffer(pick.absPath, 400);
+          if (buf) {
+            await fsPromises.writeFile(coverAbs, buf); coverThumb = coverRel;
+            console.log('[photo_index] cover (random):', coverRel);
+          } else {
+            // 降级：直接复制原文件作为封面
+            try { await fsPromises.copyFile(pick.absPath, coverAbs); coverThumb = coverRel; console.log('[photo_index] cover fallback (random):', coverRel); } catch (e2) { console.error('[photo_index] cover fallback error:', pick.absPath, e2.message); }
+          }
+        } catch (e) { console.error('[photo_index] cover gen error:', pick.absPath, e.message); }
+      }
+      manifest.entries[relPath] = { folders, images, cover: coverThumb };
+    } else {
+      manifest.entries[''] = { folders, images, cover: null };
+    }
+  }
+
+  console.log('[photo_index] scan start:', rootPath);
+  await walk('');
+  console.log('[photo_index] scan complete, total entries:', Object.keys(manifest.entries).length);
+
+  // 清理孤立缩略图：删除 thumbs/ 下不在 manifest 中的文件
+  const validThumbs = new Set();
+  // validThumbs 存相对于 thumbsDir 的路径（不含 thumbs/ 前缀），与 cleanOrphanThumbs 的迭代路径一致
+  const thumbsPrefix = PHOTO_INDEX_THUMBS + path.sep;
+  for (const entry of Object.values(manifest.entries)) {
+    for (const img of entry.images) {
+      validThumbs.add(img.thumb.startsWith(thumbsPrefix) ? img.thumb.slice(thumbsPrefix.length) : img.thumb);
+    }
+    if (entry.cover) {
+      validThumbs.add(entry.cover.startsWith(thumbsPrefix) ? entry.cover.slice(thumbsPrefix.length) : entry.cover);
+    }
+  }
+  async function cleanOrphanThumbs(relDir) {
+    const absDir = path.join(thumbsDir, relDir || '');
+    let names;
+    try { names = await fsPromises.readdir(absDir); } catch (_) { return; }
+    for (const name of names) {
+      const rel = relDir ? path.join(relDir, name) : name;
+      const abs = path.join(thumbsDir, rel);
+      try {
+        const s = await fsPromises.stat(abs);
+        if (s.isDirectory()) { await cleanOrphanThumbs(rel); }
+        else if (!validThumbs.has(rel)) { await fsPromises.unlink(abs); }
+      } catch (_) {}
+    }
+  }
+  await cleanOrphanThumbs('');
+
+  // 写 manifest
+  await fsPromises.writeFile(
+    path.join(indexDir, 'manifest.json'),
+    JSON.stringify(manifest, null, 2)
+  );
+
+  // 统计
+  let totalImages = 0;
+  for (const e of Object.values(manifest.entries)) totalImages += e.images.length;
+  const totalAlbums = Object.keys(manifest.entries).filter(k => k !== '').length;
+
+  return { success: true, totalImages, totalAlbums, scannedAt: manifest.scannedAt };
+}
+
+// ── IPC: 触发全量扫描与索引构建 ──
+ipcMain.handle('scan-album-index', async (_event, rootPath) => {
+  try {
+    if (!rootPath || !fs.existsSync(rootPath)) return { error: '路径不存在' };
+    return await scanAlbumIndex(rootPath);
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── IPC: 读取索引清单 ──
+ipcMain.handle('read-album-manifest', async (_event, rootPath) => {
+  try {
+    const manifestPath = path.join(rootPath, PHOTO_INDEX_DIR, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) return { error: '索引尚未构建' };
+    const raw = await fsPromises.readFile(manifestPath, 'utf-8');
+    return { success: true, manifest: JSON.parse(raw) };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── IPC: 读取索引中的缩略图（返回 base64，自动检测 MIME 类型）──
+ipcMain.handle('read-index-thumb', async (_event, rootPath, thumbRelPath) => {
+  try {
+    const absPath = path.join(rootPath, PHOTO_INDEX_DIR, thumbRelPath);
+    if (!fs.existsSync(absPath)) return { error: '缩略图不存在' };
+    const buf = await fsPromises.readFile(absPath);
+    // 从文件头检测实际 MIME 类型（降级回退的文件可能不是 PNG）
+    let mime = 'image/png';
+    if (buf.length >= 4) {
+      if (buf[0] === 0xFF && buf[1] === 0xD8) mime = 'image/jpeg';
+      else if (buf[0] === 0x89 && buf[1] === 0x50) mime = 'image/png';
+      else if (buf[0] === 0x52 && buf[1] === 0x49) mime = 'image/webp';
+      else if (buf[0] === 0x47 && buf[1] === 0x49) mime = 'image/gif';
+    }
+    return { success: true, data: `data:${mime};base64,${buf.toString('base64')}` };
   } catch (e) { return { error: e.message }; }
 });
 

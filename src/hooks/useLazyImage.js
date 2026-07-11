@@ -11,15 +11,32 @@ export function bumpLazyRevision() {
 }
 
 // ── MutationObserver（DOM 重排时 bump revision）──
+// 窗口缩放期间抑制 revision 更新，避免海量懒加载实例同时重评估
 let _observerStarted = false
 let _observerTimer = null
+let _resizing = false
+let _resizeTimer = null
 
 function startMutationObserver() {
   if (_observerStarted) return
   _observerStarted = true
   const main = document.querySelector('main')
   if (!main) { setTimeout(startMutationObserver, 500); return }
+
+  // 窗口缩放检测：缩放期间抑制 MutationObserver 的 revision bump
+  window.addEventListener('resize', () => {
+    _resizing = true
+    clearTimeout(_resizeTimer)
+    _resizeTimer = setTimeout(() => {
+      _resizing = false
+      // 缩放结束后统一 bump 一次
+      _globalRevision++
+      for (const fn of _revisionListeners) fn(_globalRevision)
+    }, 250)
+  })
+
   const observer = new MutationObserver(() => {
+    if (_resizing) return  // 缩放期间跳过
     if (_observerTimer) clearTimeout(_observerTimer)
     _observerTimer = setTimeout(() => {
       _globalRevision++

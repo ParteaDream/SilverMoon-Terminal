@@ -436,8 +436,8 @@ button:where(:not([class*="hover:"])):hover:not(:disabled) {
   animation: sidebarTextFadeIn 0.15s ease-out 0.15s both;
 }
 
-/* 图片淡入：针对通过 readImage 动态加载的 base64 图片 */
-img[src^="data:image/"] {
+/* 图片淡入：针对通过 readImage 动态加载的 base64 图片，但相册缩略图跳过 */
+img[src^="data:image/"]:not(.no-fade-in) {
   animation: fadeIn 0.3s ease-out;
 }
 

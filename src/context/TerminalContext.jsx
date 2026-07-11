@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { Calculator, FileText, FolderOpen, Settings2, Swords, Globe } from 'lucide-react'
+import { Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images } from 'lucide-react'
 
 const TerminalContext = createContext(null)
 
@@ -9,6 +9,7 @@ const APP_REGISTRY = {
   betamemo: { icon: FileText, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
   dragonsnake: { icon: Swords, color: 'from-emerald-700 to-teal-400', iconClass: 'text-white drop-shadow-md' },
   worldtree: { icon: Globe, color: 'from-green-600 to-emerald-400', iconClass: 'text-white drop-shadow-sm' },
+  album: { icon: Images, color: 'from-pink-500 to-rose-600', iconClass: 'text-white drop-shadow-md' },
   resources: { icon: FolderOpen, color: 'from-blue-500 to-sky-300', iconClass: 'text-white drop-shadow-md' },
   customize: { icon: Settings2, color: 'from-purple-500 to-pink-400', iconClass: 'text-white drop-shadow-md' },
 }
@@ -20,12 +21,13 @@ function getDefaultPosition(index, appId) {
   const isMemo = appId === 'betamemo'
   const isSnake = appId === 'dragonsnake'
   const isWorldTree = appId === 'worldtree'
+  const isAlbum = appId === 'album'
   const isCustomize = appId === 'customize'
   return {
     left: sidebarW + 30 + index * 30,
     top: 50 + index * 30,
-    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : isWorldTree ? 700 : isCustomize ? 560 : 600,
-    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 660 : isWorldTree ? 580 : isCustomize ? 520 : 420,
+    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : isWorldTree ? 700 : isAlbum ? 860 : isCustomize ? 560 : 600,
+    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 660 : isWorldTree ? 580 : isAlbum ? 620 : isCustomize ? 520 : 420,
   }
 }
 

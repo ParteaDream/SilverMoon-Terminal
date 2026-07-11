@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { useTerminal } from '../context/TerminalContext'
 import { useDb } from '../context/DbContext'
 import {
-  Calculator, FileText, FolderOpen, Settings2, Play, X, Swords, Globe
+  Calculator, FileText, FolderOpen, Settings2, Play, X, Swords, Globe, Images
 } from 'lucide-react'
 
 /** 应用程序注册表 — 终端板块的权威定义 */
@@ -12,6 +12,7 @@ export const APPS = [
   { id: 'betamemo', name: 'Beta备忘录', icon: FileText, placeholder: false, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
   { id: 'dragonsnake', name: '非完备证明', icon: Swords, placeholder: false, color: 'from-emerald-700 to-teal-400', iconClass: 'text-white drop-shadow-md' },
   { id: 'worldtree', name: '世界树', icon: Globe, placeholder: false, color: 'from-green-600 to-emerald-400', iconClass: 'text-white drop-shadow-sm' },
+  { id: 'album', name: '切片辖域·鸽', icon: Images, placeholder: false, color: 'from-pink-500 to-rose-600', iconClass: 'text-white drop-shadow-md' },
 ]
 
 export const SYS_TOOLS = [
