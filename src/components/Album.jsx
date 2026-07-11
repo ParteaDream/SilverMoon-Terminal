@@ -1259,7 +1259,7 @@ function TagFilterDropdown({ activeTag, tagDefs, onSelect, onClose }) {
   const ref = useRef(null)
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h) }, [onClose])
   return (
-    <div ref={ref} ref={tagMenuRef} className="absolute right-0 top-full mt-1 w-40 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl z-30 animate-scale-in">
+    <div ref={ref} className="absolute right-0 top-full mt-1 w-40 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl z-30 animate-scale-in">
       <button onClick={() => onSelect(null)} className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-white/5 ${!activeTag ? 'text-white' : 'text-surface-400'}`}><Filter className="w-3 h-3" />全部</button>
       <div className="border-t border-white/5 my-1" />
       <button onClick={() => onSelect('favorite')} className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-white/5 ${activeTag === 'favorite' ? 'text-white' : 'text-surface-400'}`}><Heart className="w-3 h-3 text-rose-400" />{FAVORITE_TAG.name}</button>
