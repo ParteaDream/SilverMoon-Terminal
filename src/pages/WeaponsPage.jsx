@@ -79,6 +79,8 @@ export default function WeaponsPage() {
   useEffect(() => {
     const isBack = consumeBackToList()
     if (isBack) {
+      // 从详情页返回，模块缓存可能已过期，强制刷新
+      _invalidateWeaponsCache()
       // 同步预设 scrollY 消除置顶闪烁
       const cached = loadPageStateSync('weapons')
       if (cached?.scrollY > 0) {

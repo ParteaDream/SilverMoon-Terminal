@@ -524,6 +524,7 @@ export default function DevToolbar() {
   const isArtifactPage = location.pathname.startsWith('/artifacts')
   const isArtifactDetailPage = location.pathname.startsWith('/artifacts/') && !!artifactDetailId
   const isWishPage = location.pathname.startsWith('/wishes')
+  const isTerminalPage = location.pathname === '/terminal'
 
   // ── 世界树测试状态 ──
   const [genshinStep, setGenshinStep] = useState(null)
@@ -2366,7 +2367,8 @@ export default function DevToolbar() {
           </>
         )}
 
-        {/* 世界树测试开关 */}
+        {isTerminalPage && (
+        /* 世界树测试开关 */
         <div className="flex items-center gap-2">
           <span className="text-xs text-surface-400">世界树测试</span>
           <button
@@ -2380,6 +2382,7 @@ export default function DevToolbar() {
             }`} />
           </button>
         </div>
+        )}
 
       </div>
 

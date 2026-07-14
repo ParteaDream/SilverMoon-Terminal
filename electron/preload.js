@@ -129,6 +129,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   genshinDeleteAccount: (uid) => ipcRenderer.invoke('genshin-delete-account', uid),
   genshinRefetchDaily: (uid) => ipcRenderer.invoke('genshin-refetch-daily', uid),
 
+  // RateFetcher：角色技能倍率导出
+  fetchRateCharData: (charId) => ipcRenderer.invoke('fetch-rate-char-data', charId),
+  saveRateCsv: (options) => ipcRenderer.invoke('save-rate-csv', options),
+  getRateDefaultOutput: () => ipcRenderer.invoke('get-rate-default-output'),
+  selectOutputFolder: () => ipcRenderer.invoke('select-output-folder'),
+
   onUpdateStatus: (callback) => {
     ipcRenderer.on('update-status', (_e, status) => callback(status));
     return () => ipcRenderer.removeAllListeners('update-status');

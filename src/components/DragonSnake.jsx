@@ -41,14 +41,17 @@ const KEY_TO_DIR = { w: 'up', a: 'left', s: 'down', d: 'right' }
 
 function createInitialSnake() {
   return [
-    { x: 9, y: 7 },
     { x: 8, y: 7 },
     { x: 7, y: 7 },
+    { x: 6, y: 7 },
   ]
 }
 
-function randomFood(snake) {
+function randomFood(snake, extraOccupied = []) {
   const occupied = new Set(snake.map(s => `${s.x},${s.y}`))
+  for (const pos of extraOccupied) {
+    occupied.add(`${pos.x},${pos.y}`)
+  }
   const free = []
   for (let x = 0; x < GRID_SIZE; x++) {
     for (let y = 0; y < GRID_SIZE; y++) {
@@ -57,6 +60,13 @@ function randomFood(snake) {
   }
   if (free.length === 0) return null
   return free[Math.floor(Math.random() * free.length)]
+}
+
+function initFoods(snake) {
+  const food1 = randomFood(snake)
+  if (!food1) return []
+  const food2 = randomFood(snake, [food1])
+  return food2 ? [food1, food2] : [food1]
 }
 
 // ═══════════════════════════════════════
@@ -142,19 +152,22 @@ export default function DragonSnake() {
     ctx.clip()
 
     // 食物
-    const food = foodRef.current
-    if (food) {
-      const fx = BORDER + food.x * CELL_SIZE
-      const fy = BORDER + food.y * CELL_SIZE
-      if (ready && imgs.food) {
-        ctx.drawImage(imgs.food, fx, fy, CELL_SIZE, CELL_SIZE)
-      } else {
-        const fcx = fx + CELL_SIZE / 2
-        const fcy = fy + CELL_SIZE / 2
-        ctx.fillStyle = '#ffdd57'
-        ctx.beginPath()
-        ctx.arc(fcx, fcy, CELL_SIZE * 0.35, 0, Math.PI * 2)
-        ctx.fill()
+    const foods = foodRef.current
+    if (foods && foods.length > 0) {
+      for (const food of foods) {
+        if (!food) continue
+        const fx = BORDER + food.x * CELL_SIZE
+        const fy = BORDER + food.y * CELL_SIZE
+        if (ready && imgs.food) {
+          ctx.drawImage(imgs.food, fx, fy, CELL_SIZE, CELL_SIZE)
+        } else {
+          const fcx = fx + CELL_SIZE / 2
+          const fcy = fy + CELL_SIZE / 2
+          ctx.fillStyle = '#ffdd57'
+          ctx.beginPath()
+          ctx.arc(fcx, fcy, CELL_SIZE * 0.35, 0, Math.PI * 2)
+          ctx.fill()
+        }
       }
     }
 
@@ -306,8 +319,16 @@ export default function DragonSnake() {
       return die()
     }
 
-    // 碰自己
-    const willGrow = foodRef.current && newHead.x === foodRef.current.x && newHead.y === foodRef.current.y
+    // 碰自己 & 食物检测
+    const foods = foodRef.current || []
+    let eatenIndex = -1
+    for (let i = 0; i < foods.length; i++) {
+      if (newHead.x === foods[i].x && newHead.y === foods[i].y) {
+        eatenIndex = i
+        break
+      }
+    }
+    const willGrow = eatenIndex >= 0
     const checkLen = willGrow ? snake.length : snake.length - 1
     for (let i = 0; i < checkLen; i++) {
       if (snake[i].x === newHead.x && snake[i].y === newHead.y) {
@@ -341,7 +362,12 @@ export default function DragonSnake() {
       const newScore = scoreRef.current + 1
       setScore(newScore)
       scoreRef.current = newScore
-      foodRef.current = randomFood(newSnake)
+
+      // 移除被吃的食物，补充一个新食物（保持场上共 2 个）
+      const remaining = foods.filter((_, i) => i !== eatenIndex)
+      const extra = randomFood(newSnake, remaining)
+      foodRef.current = extra ? [...remaining, extra] : remaining
+
       const speed = Math.max(60, 150 - newScore * 2)
       startTick(speed)
     }
@@ -402,7 +428,7 @@ export default function DragonSnake() {
     snakeRef.current = createInitialSnake()
     directionRef.current = 'right'
     nextDirRef.current = 'right'
-    foodRef.current = randomFood(snakeRef.current)
+    foodRef.current = initFoods(snakeRef.current)
     tailDirRef.current = 'left'
     setScore(0)
     scoreRef.current = 0
@@ -524,7 +550,7 @@ export default function DragonSnake() {
 
   // ── 初始绘制 ──
   useEffect(() => {
-    foodRef.current = randomFood(snakeRef.current)
+    foodRef.current = initFoods(snakeRef.current)
     tailDirRef.current = 'left'
     drawFrame()
   }, [drawFrame])

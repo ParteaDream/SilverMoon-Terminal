@@ -98,6 +98,8 @@ export default function CharactersPage() {
     const isBack = consumeBackToList()
     if (isBack) {
       (async () => {
+        // 从详情页返回，模块缓存可能已过期，强制刷新
+        _invalidateCharsCache()
         restoringScroll.current = true
         setEntering(true)
         // 数据加载 + DOM 提交后再恢复状态和滚轮

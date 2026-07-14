@@ -98,6 +98,5 @@
       "releaseType": "release",
       "vPrefixedTagName": true
     }
-  },
-  "versionTag": "beta"
+  }
 }

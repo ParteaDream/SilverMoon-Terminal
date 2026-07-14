@@ -4043,6 +4043,57 @@ ipcMain.handle('get-character-list', async () => {
   }
 });
 
+// ── RateFetcher：获取角色技能倍率数据 ──
+ipcMain.handle('fetch-rate-char-data', async (_event, charId) => {
+  try {
+    const version = await getDataVersion();
+    const data = await fetchJson(`https://static.nanoka.cc/gi/${version}/zh/character/${charId}.json`);
+    return { success: true, data };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('save-rate-csv', async (_event, { dirPath, filename, content }) => {
+  try {
+    if (!dirPath) throw new Error('输出目录未指定');
+    const dir = dirPath;
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, filename);
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true, filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// 默认输出目录：数据库目录下的 output 文件夹
+ipcMain.handle('get-rate-default-output', () => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    return { success: true, path: path.join(dbDir, 'output') };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('select-output-folder', async () => {
+  try {
+    const { BrowserWindow, dialog } = require('electron');
+    const win = BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择输出文件夹',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+    return { success: true, path: result.filePaths[0] };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // ── 下载图片（从本地 HomDGCat 服务器）──
 const IMAGE_SERVER = 'http://localhost:2601';
 

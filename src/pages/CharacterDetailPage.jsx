@@ -9,7 +9,7 @@ import { useImageDrag } from '../hooks/useImageDrag'
 import { useDetailScroll } from '../hooks/useDetailState'
 import {
   ArrowLeft, Star, Edit3, Plus, Trash2, Image, ChevronDown, ChevronRight, X,
-  Zap, BookOpen, Crown, Sparkles, User, Info, MapPin, Calendar, Sword, Shirt, UtensilsCrossed, FileText, FlaskConical, Upload, CheckCircle2, Copy
+  Zap, BookOpen, Crown, Sparkles, User, Info, MapPin, Calendar, Sword, Shirt, UtensilsCrossed, FileText, FlaskConical, Upload, CheckCircle2, Copy, GripVertical
 } from 'lucide-react'
 import EditModal, { FormInput, FormSelect, SearchSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
@@ -656,6 +656,19 @@ function CharacterDetailContent() {
       alert('删除失败: ' + (e.message || '未知错误'))
     }
   }
+  // ── 拖拽排序相关效果 ──
+  async function handleReorderEffect(reorderedEffects) {
+    try {
+      for (let i = 0; i < reorderedEffects.length; i++) {
+        await query('UPDATE character_related_effects SET sort_order = ? WHERE id = ?',
+          [i + 1, reorderedEffects[i].id])
+      }
+      await loadAll()
+    } catch (e) {
+      console.error('Reorder effects failed:', e)
+      alert('排序失败: ' + (e.message || '未知错误'))
+    }
+  }
 
   // ── Loading / not found ──
   if (loading) {
@@ -956,6 +969,7 @@ function CharacterDetailContent() {
             onAdd={() => { setEditEffect({}); setEffectForm({ name: '', content: '' }) }}
             onEdit={(ef) => { setEditEffect(ef); setEffectForm({ name: ef.name, content: ef.content }) }}
             onDelete={deleteEffect}
+            onReorder={handleReorderEffect}
           />
         </div>
 
@@ -1224,6 +1238,7 @@ function CharacterDetailContent() {
             onAdd={() => { setEditEffect({}); setEffectForm({ name: '', content: '' }) }}
             onEdit={(ef) => { setEditEffect(ef); setEffectForm({ name: ef.name, content: ef.content }) }}
             onDelete={deleteEffect}
+            onReorder={handleReorderEffect}
           />
         </div>
 
@@ -2503,13 +2518,56 @@ function StoryReader({ stories, characterName, onClose, mode, onModeChange, them
   )
 }
 
-// ── 相关效果栏 ──
-function RelatedEffectsSection({ effects, effectMap, onAdd, onEdit, onDelete }) {
+// ── 相关效果栏（支持拖拽排序）──
+function RelatedEffectsSection({ effects, effectMap, onAdd, onEdit, onDelete, onReorder }) {
   const [collapsed, setCollapsed] = useState(true)
+  const [dragIndex, setDragIndex] = useState(null)
+  const [overIndex, setOverIndex] = useState(null)
 
   function copyRef(name) {
     navigator.clipboard.writeText(`[effect:${stripFormatting(name)}]`).then(() => {
     }).catch(() => {})
+  }
+
+  function handleDragStart(e, index) {
+    setDragIndex(index)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(index))
+    e.currentTarget.classList.add('opacity-40')
+  }
+
+  function handleDragOver(e, index) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragIndex !== index) {
+      setOverIndex(index)
+    }
+  }
+
+  function handleDragLeave() {
+    setOverIndex(null)
+  }
+
+  function handleDrop(e, dropIndex) {
+    e.preventDefault()
+    const fromIndex = dragIndex
+    if (fromIndex == null || fromIndex === dropIndex) {
+      setDragIndex(null)
+      setOverIndex(null)
+      return
+    }
+    const reordered = [...effects]
+    const [moved] = reordered.splice(fromIndex, 1)
+    reordered.splice(dropIndex, 0, moved)
+    setDragIndex(null)
+    setOverIndex(null)
+    onReorder?.(reordered)
+  }
+
+  function handleDragEnd(e) {
+    e.currentTarget.classList.remove('opacity-40')
+    setDragIndex(null)
+    setOverIndex(null)
   }
 
   return (
@@ -2536,32 +2594,54 @@ function RelatedEffectsSection({ effects, effectMap, onAdd, onEdit, onDelete }) 
           {effects.length === 0 ? (
             <p className="text-xs text-surface-500">暂无相关效果，点击右上角 + 添加</p>
           ) : (
-            effects.map(ef => (
-              <div key={ef.id} className="p-3 rounded-xl bg-surface-800/50 border border-surface-700/50 group">
-                <div className="flex items-start justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <ColoredText text={ef.name} className="text-sm font-medium text-amber-400" effectMap={effectMap} />
-                    <button
-                      onClick={() => copyRef(ef.name)}
-                      className="p-0.5 rounded text-surface-500 hover:text-primary-400 transition-colors"
-                      title="复制引用标记 [effect:名称]"
-                    >
-                      <Copy className="w-3 h-3" />
-                    </button>
-                    <span className="text-[10px] text-surface-600 font-mono">[effect:{stripFormatting(ef.name)}]</span>
+            effects.map((ef, index) => {
+              const isDragOver = overIndex === index && dragIndex !== index
+              return (
+                <div
+                  key={ef.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, index)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, index)}
+                  onDragEnd={handleDragEnd}
+                  className={`p-3 rounded-xl bg-surface-800/50 border group transition-all ${
+                    isDragOver
+                      ? 'border-primary-400 border-2 -translate-y-0.5 shadow-lg shadow-primary-500/10'
+                      : 'border-surface-700/50 hover:border-surface-600'
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-1">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {/* 拖拽手柄 */}
+                      <span
+                        className="cursor-grab active:cursor-grabbing text-surface-500 hover:text-surface-300 transition-colors flex-shrink-0"
+                      >
+                        <GripVertical className="w-3.5 h-3.5" />
+                      </span>
+                      <ColoredText text={ef.name} className="text-sm font-medium text-amber-400 truncate" effectMap={effectMap} />
+                      <button
+                        onClick={() => copyRef(ef.name)}
+                        className="p-0.5 rounded text-surface-500 hover:text-primary-400 transition-colors flex-shrink-0"
+                        title="复制引用标记 [effect:名称]"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                      <span className="text-[10px] text-surface-600 font-mono hidden sm:inline truncate">[effect:{stripFormatting(ef.name)}]</span>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2">
+                      <button onClick={() => onEdit(ef)} className="p-1 rounded text-surface-400 hover:text-primary-400"><Edit3 className="w-3 h-3" /></button>
+                      <button onClick={() => onDelete(ef.id)} className="p-1 rounded text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => onEdit(ef)} className="p-1 rounded text-surface-400 hover:text-primary-400"><Edit3 className="w-3 h-3" /></button>
-                    <button onClick={() => onDelete(ef.id)} className="p-1 rounded text-surface-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
-                  </div>
+                  {ef.content && (
+                    <div className="text-xs text-surface-400 leading-relaxed ml-5">
+                      <ColoredText text={ef.content} effectMap={effectMap} />
+                    </div>
+                  )}
                 </div>
-                {ef.content && (
-                  <div className="text-xs text-surface-400 leading-relaxed">
-                    <ColoredText text={ef.content} effectMap={effectMap} />
-                  </div>
-                )}
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       )}
