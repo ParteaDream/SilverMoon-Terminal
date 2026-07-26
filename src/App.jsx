@@ -22,6 +22,7 @@ import WebsitesPage from './pages/WebsitesPage'
 import TerminalPage from './pages/TerminalPage'
 import SettingsPage from './pages/SettingsPage'
 import ChangelogPage from './pages/ChangelogPage'
+import { setIgnoredColors } from './utils/colorMarkup'
 import { TerminalProvider, useTerminal } from './context/TerminalContext'
 import { TerminalWindow } from './pages/TerminalPage'
 import TerminalDock from './components/TerminalDock'
@@ -42,6 +43,18 @@ export default function App() {
     if ('scrollRestoration' in history) {
       history.scrollRestoration = 'manual'
     }
+  }, [])
+
+  // 初始化时加载字体颜色忽略配置
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.electronAPI?.getUserConfig()
+        if (res?.config?.ignoredFontColors && Array.isArray(res.config.ignoredFontColors)) {
+          setIgnoredColors(res.config.ignoredFontColors)
+        }
+      } catch (_) {}
+    })()
   }, [])
 
   // 监听主滚动容器，控制返回顶部按钮显隐
@@ -164,7 +177,7 @@ export default function App() {
 }
 
 function GlobalWindows() {
-  const { runningApps, closeApp, updateAppState, bringToFront } = useTerminal()
+  const { runningApps, closeApp, updateAppState, bringToFront, clearSelection } = useTerminal()
   const location = useLocation()
   return runningApps.map(app => {
     const page = app.state?.showOnPage || '/terminal'
@@ -181,6 +194,7 @@ function GlobalWindows() {
         onHide={() => updateAppState(app.id, { hidden: true })}
         onUpdateState={(partial) => updateAppState(app.id, partial)}
         onFocus={() => bringToFront(app.id)}
+        onClearSelection={clearSelection}
       />
     )
   })

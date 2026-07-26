@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useTerminal } from '../context/TerminalContext'
 import { APPS } from '../components/TerminalDock'
@@ -8,6 +9,10 @@ import DragonSnake from '../components/DragonSnake'
 import WorldTree from '../components/WorldTree'
 import Album from '../components/Album'
 import RateFetcher from '../components/RateFetcher'
+import NorthlandBank from '../components/NorthlandBank'
+import GachaStation from '../components/GachaStation'
+import MemoryHub from '../components/MemoryHub'
+import Hourglass from '../components/Hourglass'
 import {
   X, Minus, Square, Copy, Monitor, ChevronLeft,
   FolderOpen, LayoutList, LayoutGrid,
@@ -20,7 +25,7 @@ const GRID_CELL = 110
 // ═══════════════════════════════════════════════
 // 桌面图标组件（自由拖拽 + 松手对齐网格）
 // ═══════════════════════════════════════════════
-function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occupiedCells, gridCols }) {
+function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occupiedCells, gridCols, isSelected, onDragStart, onDragMove, groupDragOffset }) {
   const [dragging, setDragging] = useState(false)
   const [dragPos, setDragPos] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
@@ -50,12 +55,14 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
   const handleMouseDown = useCallback((e) => {
     if (e.button !== 0) return
     e.preventDefault()
+    e.stopPropagation()
+    onDragStart?.(app.id, e.clientX, e.clientY)
     dragStartPos.current = { x: e.clientX, y: e.clientY }
     const rect = iconRef.current.getBoundingClientRect()
     dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
     setDragging(true)
     setDragPos({ x: e.clientX, y: e.clientY })
-  }, [])
+  }, [onDragStart])
 
   const handleClick = useCallback((e) => {
     e.stopPropagation()
@@ -70,6 +77,7 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
 
     const handleMove = (e) => {
       setDragPos({ x: e.clientX, y: e.clientY })
+      onDragMove?.(app.id, e.clientX, e.clientY)
     }
 
     const handleUp = () => {
@@ -110,12 +118,13 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
       window.removeEventListener('mousemove', handleMove)
       window.removeEventListener('mouseup', handleUp)
     }
-  }, [dragging, app.id, onDragEnd, gridRef, dragPos, occupiedCells])
+  }, [dragging, app.id, onDragEnd, onDragMove, gridRef, dragPos, occupiedCells])
 
   const { col = 0, row = 0 } = position || {}
   const AppIcon = app.icon
 
   // 拖拽中跟随鼠标，否则使用网格位置
+  const hasGroupOffset = !dragging && isSelected && groupDragOffset
   const style = dragging && dragPos && gridRef.current
     ? {
         left: dragPos.x - gridRef.current.getBoundingClientRect().left - dragOffset.current.x,
@@ -125,10 +134,10 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
         zIndex: 50,
       }
     : {
-        left: col * GRID_CELL + (GRID_CELL - 80) / 2,
-        top: row * GRID_CELL + 8,
+        left: col * GRID_CELL + (GRID_CELL - 80) / 2 + (hasGroupOffset ? groupDragOffset.dx : 0),
+        top: row * GRID_CELL + 8 + (hasGroupOffset ? groupDragOffset.dy : 0),
         width: 80,
-        transition: !settled ? 'none' : 'left 0.15s ease, top 0.15s ease',
+        transition: hasGroupOffset ? 'none' : (!settled ? 'none' : 'left 0.15s ease, top 0.15s ease'),
         zIndex: 1,
       }
 
@@ -142,9 +151,10 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
       onClick={handleClick}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY }) }}
     >
-      <div className={`w-16 h-16 rounded-2xl border border-white/20 flex items-center justify-center bg-gradient-to-br ${app.color || 'from-white/10 to-white/5'} backdrop-blur-sm
-        group-hover:scale-105 group-hover:shadow-lg group-hover:border-white/30 transition-all duration-150
-        ${dragging ? 'scale-110 shadow-xl' : ''}`}
+      <div className={`w-16 h-16 rounded-2xl border flex items-center justify-center bg-gradient-to-br ${app.color || 'from-white/10 to-white/5'} backdrop-blur-sm
+        group-hover:scale-105 group-hover:shadow-lg transition-all duration-150
+        ${dragging ? 'scale-110 shadow-xl' : ''}
+        ${isSelected ? 'border-blue-400/80 ring-2 ring-blue-400/40 shadow-blue-500/20 shadow-lg' : 'border-white/20 group-hover:border-white/30'}`}
       >
         <AppIcon className={`w-8 h-8 ${app.iconClass || 'text-white drop-shadow-md'}`} />
       </div>
@@ -197,7 +207,7 @@ function TrafficLights({ onClose, onHide, onFullscreen, isFullscreen }) {
 // ═══════════════════════════════════════════════
 // 应用窗口组件
 // ═══════════════════════════════════════════════
-export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onFocus, zIndex, pageVisible }) {
+export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onFocus, zIndex, pageVisible, onClearSelection }) {
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
   const windowRef = useRef(null)
@@ -246,17 +256,21 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
 
   const handleTitleMouseDown = useCallback((e) => {
     if (e.button !== 0) return
+    onClearSelection?.()
     e.preventDefault()
     setDragging(true)
     dragStart.current = { x: e.clientX, y: e.clientY, left, top, width, height }
     onFocus?.()
-  }, [left, top, width, height, onFocus])
+  }, [left, top, width, height, onFocus, onClearSelection])
+
+  const onUpdateStateRef = useRef(onUpdateState)
+  useEffect(() => { onUpdateStateRef.current = onUpdateState }, [onUpdateState])
 
   const handleTitleDoubleClick = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
-    onUpdateState({ fullscreen: !fullscreen })
-  }, [fullscreen, onUpdateState])
+    onUpdateStateRef.current({ fullscreen: !fullscreen })
+  }, [fullscreen])
 
   // 全屏时拖拽标题栏 → 移动整个 Electron 窗口（IPC 手动拖拽，避免 drag-region 拦截双击）
   const fullscreenDragRef = useRef(null)
@@ -273,6 +287,7 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
 
   const handleFullscreenTitleMouseDown = useCallback((e) => {
     if (e.button !== 0) return
+    onClearSelection?.()
     e.preventDefault()
     e.stopPropagation()
     const startX = e.screenX, startY = e.screenY
@@ -302,7 +317,7 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, [])
+  }, [onClearSelection])
 
   const handleWindowClick = useCallback((e) => { onFocus?.() }, [onFocus])
 
@@ -318,7 +333,7 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
       if (dragging) {
         const dx = e.clientX - dragStart.current.x
         const dy = e.clientY - dragStart.current.y
-        onUpdateState({ left: dragStart.current.left + dx, top: dragStart.current.top + dy })
+        onUpdateStateRef.current({ left: dragStart.current.left + dx, top: dragStart.current.top + dy })
       } else if (resizing) {
         const dx = e.clientX - dragStart.current.x
         const dy = e.clientY - dragStart.current.y
@@ -327,14 +342,14 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
         if (dir.includes('s')) ns.height = Math.max(240, dragStart.current.height + dy)
         if (dir.includes('w')) { ns.width = Math.max(320, dragStart.current.width - dx); ns.left = dragStart.current.left + dx }
         if (dir.includes('n')) { ns.height = Math.max(240, dragStart.current.height - dy); ns.top = dragStart.current.top + dy }
-        onUpdateState({ width: ns.width, height: ns.height, left: ns.left, top: ns.top })
+        onUpdateStateRef.current({ width: ns.width, height: ns.height, left: ns.left, top: ns.top })
       }
     }
     const handleUp = () => { setDragging(false); setResizing(false) }
     window.addEventListener('mousemove', handleMove)
     window.addEventListener('mouseup', handleUp)
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp) }
-  }, [dragging, resizing, onUpdateState])
+  }, [dragging, resizing])
 
   // 隐藏/唤起动画：genie 神奇效果（吸入/弹出 Dock）
   const [hideAnimating, setHideAnimating] = useState(false)
@@ -390,7 +405,7 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
           <div className="w-16" />
         </div>
         <div className="flex-1 overflow-auto">
-          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.id === 'worldtree' ? <WorldTree /> : app.id === 'album' ? <Album /> : app.id === 'ratefetcher' ? <RateFetcher /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
+          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.id === 'worldtree' ? <WorldTree /> : app.id === 'album' ? <Album /> : app.id === 'ratefetcher' ? <RateFetcher /> : app.id === 'northlandbank' ? <NorthlandBank /> : app.id === 'gachastation' ? <GachaStation /> : app.id === 'memoryhub' ? <MemoryHub /> : app.id === 'hourglass' ? <Hourglass /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
         </div>
         {!fullscreen && (
           <>
@@ -775,12 +790,25 @@ function CustomizationTool() {
 // 主 TerminalPage 组件
 // ═══════════════════════════════════════════════
 export default function TerminalPage() {
-  const { launchApp } = useTerminal()
+  const { launchApp, selectedAppIds, setSelectedAppIds } = useTerminal()
+  const location = useLocation()
   const [wallpaper, setWallpaper] = useState(null)
   const [desktopIcons, setDesktopIcons] = useState({})
   const [settled, setSettled] = useState(false)
   const [gridCols, setGridCols] = useState(6)
   const desktopRef = useRef(null)
+
+  // ── 框选状态 ──
+  const [selecting, setSelecting] = useState(false)
+  const [selBox, setSelBox] = useState(null)
+  const selStart = useRef({ x: 0, y: 0 })
+  const selBoxRef = useRef(null)
+  // 群组拖动实时偏移
+  const [groupDragOffset, setGroupDragOffset] = useState(null)
+  const groupDragStartMouse = useRef({ x: 0, y: 0 })
+
+  // 切换页面时清除选中
+  useEffect(() => { setSelectedAppIds([]) }, [location.pathname, setSelectedAppIds])
 
   // 动态列数
   useEffect(() => {
@@ -880,13 +908,123 @@ export default function TerminalPage() {
   }
 
   function handleIconDragEnd(appId, col, row) {
-    const next = { ...desktopIcons, [appId]: { col, row } }
-    saveDesktopIcons(next)
+    setGroupDragOffset(null)
+    groupDragStartMouse.current = { x: 0, y: 0 }
+    // 群组拖动：选中多个图标时，一起按相同偏移移动
+    if (selectedAppIds.length > 1 && selectedAppIds.includes(appId) && dragOriginRef.current[appId]) {
+      const orig = dragOriginRef.current[appId]
+      const dCol = col - orig.col
+      const dRow = row - orig.row
+      const next = { ...desktopIcons }
+      for (const id of selectedAppIds) {
+        const o = dragOriginRef.current[id]
+        if (o) {
+          next[id] = { col: Math.max(0, o.col + dCol), row: Math.max(0, o.row + dRow) }
+        }
+      }
+      saveDesktopIcons(next)
+      // 保留选择，用户可继续调整
+    } else {
+      const next = { ...desktopIcons, [appId]: { col, row } }
+      saveDesktopIcons(next)
+    }
+    dragOriginRef.current = {}
+  }
+
+  const dragOriginRef = useRef({})
+  function handleIconDragStart(appId, clientX, clientY) {
+    if (selectedAppIds.length > 1 && selectedAppIds.includes(appId)) {
+      for (const id of selectedAppIds) {
+        dragOriginRef.current[id] = getIconPositionById(id)
+      }
+      groupDragStartMouse.current = { x: clientX, y: clientY }
+      setGroupDragOffset({ dx: 0, dy: 0 })
+    } else {
+      dragOriginRef.current = { [appId]: getIconPositionById(appId) }
+      setGroupDragOffset(null)
+    }
+  }
+
+  function handleIconDragMove(appId, clientX, clientY) {
+    if (groupDragOffset !== null && selectedAppIds.includes(appId)) {
+      const dx = clientX - groupDragStartMouse.current.x
+      const dy = clientY - groupDragStartMouse.current.y
+      setGroupDragOffset({ dx, dy })
+    }
+  }
+
+  function getIconPositionById(appId) {
+    const app = APPS.find(a => a.id === appId)
+    const idx = APPS.indexOf(app)
+    return getIconPosition(app, idx >= 0 ? idx : 0)
   }
 
   function getIconPosition(app, index) {
     return desktopIcons[app.id] || { col: index % gridCols, row: Math.floor(index / gridCols) }
   }
+
+  // ── 框选处理 ──
+  const handleDesktopMouseDown = useCallback((e) => {
+    // DesktopIcon 已 stopPropagation，到这里的一定是桌面空白处
+    if (e.button !== 0) return
+    selStart.current = { x: e.clientX, y: e.clientY }
+    const box = { startX: e.clientX, startY: e.clientY, endX: e.clientX, endY: e.clientY }
+    selBoxRef.current = box
+    setSelBox(box)
+    setSelecting(true)
+  }, [])
+
+  useEffect(() => {
+    if (!selecting) return
+    const handleMove = (e) => {
+      const box = {
+        startX: selStart.current.x,
+        startY: selStart.current.y,
+        endX: e.clientX,
+        endY: e.clientY,
+      }
+      selBoxRef.current = box
+      setSelBox(box)
+    }
+    const handleUp = () => {
+      setSelecting(false)
+      setSelBox(null)
+      const prev = selBoxRef.current
+      selBoxRef.current = null
+      if (!prev) return
+      const x1 = Math.min(prev.startX, prev.endX)
+      const y1 = Math.min(prev.startY, prev.endY)
+      const x2 = Math.max(prev.startX, prev.endX)
+      const y2 = Math.max(prev.startY, prev.endY)
+      const w = x2 - x1
+      const h = y2 - y1
+      if (w < 10 && h < 10) {
+        setSelectedAppIds([])
+        return
+      }
+      const desktopRect = desktopRef.current?.getBoundingClientRect()
+      if (!desktopRect) return
+      const ids = APPS
+        .filter(app => {
+          const pos = getIconPosition(app, 0)
+          const col = pos.col
+          const row = pos.row
+          const ix = desktopRect.left + col * GRID_CELL + (GRID_CELL - 80) / 2
+          const iy = desktopRect.top + row * GRID_CELL + 8
+          const ir = ix + 80
+          const ib = iy + 80
+          return ix < x2 && ir > x1 && iy < y2 && ib > y1
+        })
+        .map(app => app.id)
+      setSelectedAppIds(ids.length > 0 ? ids : [])
+    }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+    }
+  }, [selecting, setSelectedAppIds])
 
   // 当前已占用的格子
   function getOccupiedCells() {
@@ -913,14 +1051,27 @@ export default function TerminalPage() {
           <div className="absolute inset-0 bg-black/40 pointer-events-none" />
         </>
       )}
-      <div ref={desktopRef} className="flex-1 relative overflow-hidden">
-        <div className="absolute inset-0 p-1">
+      <div ref={desktopRef} className="flex-1 relative overflow-hidden" onMouseDown={handleDesktopMouseDown}>
+        <div className="absolute inset-0 p-1 desktop-bg-area">
           {APPS.map((app, i) => (
             <DesktopIcon key={app.id} app={app} position={getIconPosition(app, i)}
-              onClick={launchApp} onDragEnd={handleIconDragEnd}
-              gridRef={desktopRef} settled={settled} occupiedCells={getOccupiedCells} gridCols={gridCols} />
+              onClick={launchApp} onDragEnd={handleIconDragEnd} onDragStart={handleIconDragStart} onDragMove={handleIconDragMove}
+              gridRef={desktopRef} settled={settled} occupiedCells={getOccupiedCells} gridCols={gridCols}
+              isSelected={selectedAppIds.includes(app.id)} groupDragOffset={groupDragOffset} />
           ))}
         </div>
+        {/* 选择框 */}
+        {selBox && (
+          <div
+            className="absolute pointer-events-none border border-blue-400/60 bg-blue-500/10"
+            style={{
+              left: Math.min(selBox.startX, selBox.endX) - (desktopRef.current?.getBoundingClientRect().left || 0),
+              top: Math.min(selBox.startY, selBox.endY) - (desktopRef.current?.getBoundingClientRect().top || 0),
+              width: Math.abs(selBox.endX - selBox.startX),
+              height: Math.abs(selBox.endY - selBox.startY),
+            }}
+          />
+        )}
       </div>
     </div>
   )

@@ -8,7 +8,7 @@ import { useDownloadProgress } from '../hooks/useDownloadProgress'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import {
   FolderOpen, RefreshCw, Database, AlertTriangle, CheckCircle2,
-  Palette, Image, Upload, Settings, ChevronRight, Sparkles, Paintbrush,
+  Palette, Type, Image, Upload, Settings, ChevronRight, Sparkles, Paintbrush,
   Wrench, Download, Upload as UploadIcon, FileCode, ShieldAlert,
   LayoutList, LayoutGrid, List, Info, Images, HardDrive, Save, Pencil, Trash2, Shirt, X, Shield
 } from 'lucide-react'
@@ -19,7 +19,7 @@ import ColorPicker from '../components/ColorPicker'
 const MODULES = [
   { key: 'general', label: '通用', icon: Settings, desc: '数据库位置、基准数据更新与图包管理' },
   { key: 'appearance', label: '外观', icon: Sparkles, desc: '颜色主题与默认视图模式' },
-  { key: 'color-presets', label: '元素颜色', icon: Palette, desc: '自定义元素颜色与图标' },
+  { key: 'color-presets', label: '颜色', icon: Palette, desc: '自定义元素颜色与字体颜色忽略' },
   { key: 'version', label: '版本信息', icon: Info, desc: '查看软件版本与检查更新' },
   { key: 'advanced', label: '高级', icon: Wrench, desc: '开发者模式、备份导入与种子数据管理' },
 ]
@@ -1465,7 +1465,52 @@ function ColorPresetsModule() {
   const [iconPreviews, setIconPreviews] = useState({})
   const [message, setMessage] = useState(null)
 
+  // ── 字体颜色忽略状态 ──
+  const [ignoredFontColors, setIgnoredFontColors] = useState(['#e2e8f0', '#cbd5e1'])
+  const [ignoredColorInput, setIgnoredColorInput] = useState('')
+  const ignoredColorInputRef = useRef(null)
+
   useEffect(() => { loadElementColors() }, [])
+
+  // 加载字体颜色忽略配置
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.electronAPI?.getUserConfig()
+        if (res?.config?.ignoredFontColors && Array.isArray(res.config.ignoredFontColors)) {
+          setIgnoredFontColors(res.config.ignoredFontColors)
+        }
+      } catch (_) {}
+    })()
+  }, [])
+
+  function addIgnoredColor() {
+    const color = ignoredColorInput.trim().toLowerCase()
+    if (!color || !/^#[0-9a-f]{3,8}$/i.test(color)) return
+    if (ignoredFontColors.includes(color)) {
+      setIgnoredColorInput('')
+      return
+    }
+    const next = [...ignoredFontColors, color]
+    setIgnoredFontColors(next)
+    setIgnoredColorInput('')
+    saveIgnoredColors(next)
+  }
+
+  function removeIgnoredColor(color) {
+    const next = ignoredFontColors.filter(c => c !== color)
+    setIgnoredFontColors(next)
+    saveIgnoredColors(next)
+  }
+
+  async function saveIgnoredColors(colors) {
+    try {
+      await window.electronAPI?.setUserConfig('ignoredFontColors', colors)
+      // 导入 setIgnoredColors 并即时生效
+      const { setIgnoredColors } = await import('../utils/colorMarkup')
+      setIgnoredColors(colors)
+    } catch (_) {}
+  }
 
   // Load icon previews
   useEffect(() => {
@@ -1499,7 +1544,7 @@ function ColorPresetsModule() {
     try {
       const json = JSON.stringify(elementColors.map(c => ({ color: c.color, icon: c.icon || '' })))
       await window.electronAPI?.dbQuery("INSERT OR REPLACE INTO settings (key, value) VALUES ('element_colors', ?)", [json])
-      setMessage({ type: 'success', text: '元素颜色已保存' })
+      setMessage({ type: 'success', text: '颜色已保存' })
     } catch (e) {
       setMessage({ type: 'error', text: '保存失败: ' + e.message })
     } finally {
@@ -1566,8 +1611,8 @@ function ColorPresetsModule() {
         <div className="flex items-center gap-3">
           <Palette className="w-5 h-5 text-primary-400 flex-shrink-0" />
           <div className="flex-1">
-            <p className="text-sm font-medium">元素颜色</p>
-            <p className="text-xs text-surface-400 mt-0.5">自定义七种元素对应的颜色预设，编辑器中可直接选用</p>
+            <p className="text-sm font-medium">颜色</p>
+            <p className="text-xs text-surface-400 mt-0.5">自定义元素颜色预设与字体颜色忽略设置</p>
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1621,6 +1666,50 @@ function ColorPresetsModule() {
             恢复默认
           </button>
         </div>
+      </div>
+
+      {/* ── 字体颜色忽略设置 ── */}
+      <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <Type className="w-5 h-5 text-primary-400 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium">字体颜色忽略</p>
+            <p className="text-xs text-surface-400 mt-0.5">从外部粘贴文本时自动忽略的字体颜色（添加后文字不再显示为灰色）</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {ignoredFontColors.map((color, i) => (
+            <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-800/50 border border-surface-700 text-xs">
+              <span className="w-3.5 h-3.5 rounded border border-surface-600 flex-shrink-0" style={{ backgroundColor: color }} />
+              <span className="text-surface-300 font-mono">{color}</span>
+              <button
+                onClick={() => removeIgnoredColor(color)}
+                className="ml-0.5 text-surface-500 hover:text-red-400 transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            ref={ignoredColorInputRef}
+            type="text"
+            value={ignoredColorInput}
+            onChange={e => setIgnoredColorInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addIgnoredColor() }}
+            placeholder="#e2e8f0"
+            className="flex-1 px-3 py-1.5 rounded-lg bg-surface-800/50 border border-surface-700 text-xs text-surface-200 placeholder-surface-500 font-mono outline-none focus:border-primary-500 transition-colors"
+          />
+          <button
+            onClick={addIgnoredColor}
+            disabled={!ignoredColorInput.trim()}
+            className="px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-surface-300 transition-colors disabled:opacity-50"
+          >
+            添加
+          </button>
+        </div>
+        <p className="text-[10px] text-surface-500">输入 hex 颜色值（如 #e2e8f0），不区分大小写</p>
       </div>
     </div>
   )

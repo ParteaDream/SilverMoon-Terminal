@@ -1,15 +1,17 @@
 {
   "name": "silvermoon-terminal",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "SilverMoon Terminal - 银月终端",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:memoryhub": "node scripts/test-marker-overlap.mjs && node scripts/test-idle-loader.mjs && node scripts/test-map-viewport.mjs",
+    "perf:memoryhub": "env -u ELECTRON_RUN_AS_NODE electron scripts/benchmark-memoryhub-zoom.cjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && electron-builder --mac --arm64",
+    "electron:build": "vite build && electron-builder --mac --arm64 && bash scripts/fix-mac-quarantine.sh -y",
     "electron:build:win": "vite build && electron-builder --win --x64",
-    "electron:publish": "vite build && electron-builder --mac --arm64 --win --x64 --publish always",
+    "electron:publish": "vite build && electron-builder --mac --arm64 --win --x64 --publish always && bash scripts/fix-mac-quarantine.sh -y",
     "start": "electron ."
   },
   "dependencies": {
@@ -57,7 +59,16 @@
           ]
         }
       ],
-      "icon": "assets/icon.icns"
+      "icon": "assets/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSBluetoothAlwaysUsageDescription": "",
+        "NSBluetoothPeripheralUsageDescription": "",
+        "NSCameraUsageDescription": "",
+        "NSMicrophoneUsageDescription": ""
+      }
     },
     "win": {
       "target": [
@@ -98,5 +109,6 @@
       "releaseType": "release",
       "vPrefixedTagName": true
     }
-  }
+  },
+  "versionTag": "beta"
 }

@@ -69,6 +69,12 @@ export default function WorldTree() {
     finally{setLoading(false)}
   }, [loadAccounts, loadAccountDetail])
 
+  const handlePasswordLogin = useCallback(async () => {
+    setLoading(true);setLoadingHint('账号登录中...');setError('')
+    try{const r=await window.electronAPI?.genshinPasswordLoginAndCrawl();if(!r?.success){setError(r?.error||'失败');return}await loadAccounts();loadAccountDetail(String(r.uid))}catch(e){setError(e.message)}
+    finally{setLoading(false)}
+  }, [loadAccounts, loadAccountDetail])
+
   const handleDelete = useCallback(async (uid) => { if(!confirm(`删除账号 ${uid}`))return;await window.electronAPI?.genshinDeleteAccount(String(uid));if(activeUid===String(uid)){setView('home');setActiveUid(null);setActiveData(null)}await loadAccounts() }, [activeUid, loadAccounts])
   useEffect(() => { if(!activeUid)return;const t=setInterval(async()=>{try{const r=await window.electronAPI?.genshinRefetchDaily(String(activeUid));if(r?.success&&r.daily)setDailyData(r.daily)}catch(_){}},60000);return()=>clearInterval(t) }, [activeUid])
   useEffect(() => { if(error){const t=setTimeout(()=>setError(''),6000);return()=>clearTimeout(t)} }, [error])
@@ -82,7 +88,7 @@ export default function WorldTree() {
         )}
         <div className="flex-1 overflow-y-auto">
           {loading && <div className="flex flex-col items-center justify-center py-16 gap-2"><Loader2 className="w-6 h-6 text-green-400 animate-spin" /><span className="text-xs text-surface-500">{loadingHint}</span></div>}
-          {!loading && view === 'home' && <HomePage accounts={accounts} onLogin={handleLogin} onDelete={handleDelete} onSelect={loadAccountDetail} loading={loading} />}
+          {!loading && view === 'home' && <HomePage accounts={accounts} onLogin={handleLogin} onPasswordLogin={handlePasswordLogin} onDelete={handleDelete} onSelect={loadAccountDetail} loading={loading} />}
           {!loading && view === 'account' && activeData && <MainContent data={activeData.data||{}} charDBMap={charDBMap} dailyData={dailyData} />}
         </div>
       </div>
@@ -112,12 +118,15 @@ function Sidebar({ account, data, onBack, onDelete }) {
   )
 }
 
-function HomePage({ accounts, onLogin, onDelete, onSelect, loading }) {
-  if(!accounts.length) return <div className="flex flex-col items-center justify-center h-full gap-3"><Globe className="w-10 h-10 text-surface-600"/><p className="text-[10px] text-surface-500">登录并爬取数据</p><button onClick={onLogin} disabled={loading} className="px-4 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-[10px] flex items-center gap-1">{loading?<Loader2 className="w-3 h-3 animate-spin"/>:<Plus className="w-3 h-3"/>}添加账号</button></div>
+function HomePage({ accounts, onLogin, onPasswordLogin, onDelete, onSelect, loading }) {
+  if(!accounts.length) return <div className="flex flex-col items-center justify-center h-full gap-3"><Globe className="w-10 h-10 text-surface-600"/><p className="text-[10px] text-surface-500">登录并爬取数据</p><div className="flex gap-2"><button onClick={onLogin} disabled={loading} className="px-4 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-[10px] flex items-center gap-1">{loading?<Loader2 className="w-3 h-3 animate-spin"/>:<Plus className="w-3 h-3"/>}扫码登录</button><button onClick={onPasswordLogin} disabled={loading} className="px-4 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 disabled:opacity-50 text-surface-200 text-[10px] flex items-center gap-1">账号登录</button></div></div>
   return (
     <div className="p-3 space-y-1.5 max-w-md mx-auto">
       <div className="flex justify-between mb-1"><span className="text-[9px] text-surface-500">{accounts.length} 个账号</span>
-        <button onClick={onLogin} disabled={loading} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-50">{loading?<Loader2 className="w-2.5 h-2.5 animate-spin"/>:<Plus className="w-2.5 h-2.5"/>}添加</button>
+        <div className="flex gap-1">
+          <button onClick={onLogin} disabled={loading} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-50">{loading?<Loader2 className="w-2.5 h-2.5 animate-spin"/>:<Plus className="w-2.5 h-2.5"/>}扫码</button>
+          <button onClick={onPasswordLogin} disabled={loading} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] bg-surface-700 text-surface-400 hover:bg-surface-600 disabled:opacity-50">账号</button>
+        </div>
       </div>
       {accounts.map(acc => (
         <div key={acc.uid} onClick={()=>onSelect(acc.uid)} className="flex items-center gap-2.5 p-2 rounded-lg bg-surface-800/40 border border-surface-700/30 hover:border-green-500/30 hover:bg-surface-800/60 cursor-pointer group">

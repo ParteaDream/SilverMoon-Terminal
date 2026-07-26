@@ -402,7 +402,11 @@ function getUserConfigPath() {
 function loadUserConfig() {
   const p = getUserConfigPath();
   if (p && fs.existsSync(p)) {
-    try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {}
+    try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (e) {
+      // JSON 解析失败→备份损坏文件，避免静默丢失用户数据
+      console.warn('[user-config] parse error, backing up corrupted user.json:', e.message);
+      try { fs.renameSync(p, p + '.corrupted'); } catch (_) {}
+    }
   }
   return {};
 }
@@ -421,7 +425,11 @@ function saveUserConfig(config) {
     const toSave = _userConfigPending
     _userConfigPending = null
     if (toSave) {
-      try { fs.writeFileSync(p, JSON.stringify(toSave, null, 2)) } catch (_) {}
+      const tmp = p + '.tmp';
+      try {
+        fs.writeFileSync(tmp, JSON.stringify(toSave, null, 2));
+        fs.renameSync(tmp, p);
+      } catch (e) { console.warn('[user-config] write failed:', e.message); }
     }
   }, 500)
 }
@@ -545,6 +553,65 @@ function ensureUserDbSchema() {
     try { userDb.exec('CREATE INDEX IF NOT EXISTS idx_related_source_user ON related_links(source_type, source_id)'); } catch (_) {}
     // 世界树：原神爬取数据归档表
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS genshin_accounts (uid TEXT PRIMARY KEY, server TEXT NOT NULL, data_json TEXT NOT NULL, nickname TEXT, level INTEGER, avatar_url TEXT, updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
+    // 祈愿数据表
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS gacha_archives (uid TEXT PRIMARY KEY, server TEXT NOT NULL, nickname TEXT, updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS gacha_items (id TEXT NOT NULL, uid TEXT NOT NULL, gacha_type INTEGER NOT NULL, item_id TEXT, count INTEGER, time TEXT NOT NULL, name TEXT NOT NULL, lang TEXT, item_type TEXT, rank_type INTEGER, PRIMARY KEY (id, uid))`); } catch (_) {}
+    try { userDb.exec(`CREATE INDEX IF NOT EXISTS idx_gacha_items_uid_type ON gacha_items(uid, gacha_type)`); } catch (_) {}
+    try { userDb.exec(`CREATE INDEX IF NOT EXISTS idx_gacha_items_time ON gacha_items(uid, time DESC)`); } catch (_) {}
+    // 应用层持久化键值表（设备指纹、device_id 等跨会话数据）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS _app_identity (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); } catch (_) {}
+    // Beta备忘录任务表（从 user.json 迁移到 user.db）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS betamemo_tasks (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
+    // 北国银行收支记录表（从 user.json 迁移到 user.db）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS northlandbank_records (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
+    // 地图：用户放置的标点（非开发者模式写入 user.db）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS map_marker_placements (
+      id TEXT PRIMARY KEY,
+      map_id TEXT NOT NULL,
+      marker_id TEXT NOT NULL,
+      world_x REAL NOT NULL,
+      world_y REAL NOT NULL,
+      custom_name TEXT DEFAULT '',
+      special_function TEXT DEFAULT NULL,
+      subscript TEXT DEFAULT '0',
+      sort_order INTEGER DEFAULT 0,
+      created_by_dev INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )`); } catch (_) {}
+    // 标点模板存根表（用于支持 LEFT JOIN 查询，无种子数据）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS map_markers (
+      id TEXT PRIMARY KEY,
+      map_id TEXT NOT NULL,
+      marker_type TEXT NOT NULL DEFAULT 'normal',
+      image_filename TEXT,
+      name_zh TEXT DEFAULT '',
+      special_function TEXT DEFAULT NULL,
+      category TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0,
+      visibility TEXT DEFAULT '1,2,3',
+      base_config TEXT DEFAULT NULL,
+      is_favorite INTEGER DEFAULT 0,
+      created_by_dev INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`); } catch (_) {}
+    // 地图：文本框（非开发者模式预留）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS map_textboxes (
+      id TEXT PRIMARY KEY,
+      map_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      level INTEGER NOT NULL DEFAULT 1,
+      world_x REAL NOT NULL,
+      world_y REAL NOT NULL,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`); } catch (_) {}
+    // 地图：用户 per-map 覆盖配置（非开发者模式调整的值）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS map_user_config (
+      map_id TEXT PRIMARY KEY,
+      config TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`); } catch (_) {}
   } catch (e) {
     console.error('[ensureUserDbSchema] error:', e.message);
   }
@@ -797,6 +864,48 @@ function storeUpdateAsDelta(targetDb, sql, params = []) {
   return { changes: savedCount, lastId: setId };
 }
 
+// 将 INSERT 语句转换为 _user_delta 增量存储（insert 类型）
+function storeInsertAsDelta(targetDb, sql, params = []) {
+  const tableMatch = sql.match(/^\s*INSERT\s+(?:OR\s+\w+\s+)?INTO\s+['"`]?(\w+)['"`]?\s*\(([^)]+)\)\s*/i);
+  // 若无法解析列名，fallback 到直接写入（不破坏 INSERT 本身）
+  if (!tableMatch) return dbRunOnDb(targetDb, sql, params);
+  const table = tableMatch[1];
+  const columns = tableMatch[2].split(',').map(c => c.trim().replace(/['"`]/g, '')).filter(Boolean);
+  if (columns.length === 0 || columns.length !== params.length) return dbRunOnDb(targetDb, sql, params);
+
+  // 先执行真实 INSERT（写入 user.db 真实表）
+  let insertResult;
+  try {
+    insertResult = dbRunOnDb(targetDb, sql, params);
+  } catch (e) {
+    return { changes: 0, lastId: null, error: e.message };
+  }
+
+  // 获取 lastId（对于 INSERT OR IGNORE，如果行已存在可能没有新 id）
+  const newId = insertResult.lastId;
+  if (newId == null) return insertResult; // 无新行插入（如 IGNORE 命中）
+
+  // 将每列写入 _user_delta 作为 insert 类型
+  let savedCount = 0;
+  for (let i = 0; i < columns.length; i++) {
+    const col = columns[i];
+    const val = params[i];
+    if (col === 'id') continue; // id 由 row_id 字段表示
+    try {
+      const safeTable = table.replace(/'/g, "''");
+      const safeCol = col.replace(/'/g, "''");
+      const safeVal = val != null ? String(val).replace(/'/g, "''") : null;
+      if (safeVal != null) {
+        targetDb.exec(`INSERT OR REPLACE INTO _user_delta (table_name, row_id, column_name, new_value, op_type, updated_at) VALUES ('${safeTable}', ${Number(newId)}, '${safeCol}', '${safeVal}', 'insert', datetime('now','localtime'))`);
+      }
+      savedCount++;
+    } catch (e) {
+      console.error('[storeInsertAsDelta] error:', e.message, 'col:', col);
+    }
+  }
+  return insertResult;
+}
+
 // 清理 user.db 中与基准库一致的多余数据
 function optimizeUserDb() {
   if (!userDb || !db) return;
@@ -1045,6 +1154,147 @@ function migrateSchema() {
         }
       }
     } catch (_) {}
+
+    // 摹忆中枢 — 地图模块表
+    dbRun(`CREATE TABLE IF NOT EXISTS map_maps (
+      id TEXT PRIMARY KEY,
+      name_zh TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`);
+    dbRun(`CREATE TABLE IF NOT EXISTS map_markers (
+      id TEXT PRIMARY KEY,
+      map_id TEXT NOT NULL REFERENCES map_maps(id) ON DELETE CASCADE,
+      marker_type TEXT NOT NULL DEFAULT 'normal',
+      image_filename TEXT,
+      name_zh TEXT DEFAULT '',
+      special_function TEXT DEFAULT NULL,
+      created_by_dev INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`);
+    dbRun(`CREATE TABLE IF NOT EXISTS map_marker_placements (
+      id TEXT PRIMARY KEY,
+      map_id TEXT NOT NULL REFERENCES map_maps(id) ON DELETE CASCADE,
+      marker_id TEXT NOT NULL REFERENCES map_markers(id) ON DELETE CASCADE,
+      world_x REAL NOT NULL,
+      world_y REAL NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      created_by_dev INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )`);
+    dbRun(`CREATE TABLE IF NOT EXISTS map_textboxes (
+      id TEXT PRIMARY KEY,
+      map_id TEXT NOT NULL REFERENCES map_maps(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      level INTEGER NOT NULL DEFAULT 1,
+      world_x REAL NOT NULL,
+      world_y REAL NOT NULL,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`);
+
+    // 地图全局默认配置表
+    dbRun(`CREATE TABLE IF NOT EXISTS map_global_defaults (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`);
+    // 首次初始化时写入默认值
+    const defaultsExist = dbAll("SELECT COUNT(*) as cnt FROM map_global_defaults", []);
+    if (!defaultsExist.length || defaultsExist[0].cnt === 0) {
+      const defaults = [
+        ['levelThresholds', JSON.stringify({ 1: 0.5, 2: 1.5, 3: 3.0 })],
+        ['textboxFontSizes', JSON.stringify({ 0: 12, 1: 12, 2: 12, 3: 12 })],
+        ['markerSize', JSON.stringify(32)],
+        ['fullImgThreshold', JSON.stringify(0.10)],
+      ];
+      for (const [k, v] of defaults) {
+        dbRun("INSERT INTO map_global_defaults (key, value) VALUES (?, ?)", [k, v]);
+      }
+    }
+
+    // 为 map_markers 添加 category 列（如果不存在）
+    try {
+      const mmCols = dbAll("PRAGMA table_info(map_markers)");
+      if (!mmCols.some(c => c.name === 'category')) {
+        dbRun("ALTER TABLE map_markers ADD COLUMN category TEXT DEFAULT ''");
+        console.log('[migrate] added category column to map_markers');
+      }
+    } catch (_) {}
+
+    // 为 map_markers 添加 sort_order 列（标点排序）
+    try {
+      const mmCols2 = dbAll("PRAGMA table_info(map_markers)");
+      if (!mmCols2.some(c => c.name === 'sort_order')) {
+        dbRun("ALTER TABLE map_markers ADD COLUMN sort_order INTEGER DEFAULT 0");
+        console.log('[migrate] added sort_order to map_markers');
+      }
+    } catch (_) {}
+
+    // 为 map_markers 添加 visibility 列（标点可见性）
+    try {
+      const mmCols3 = dbAll("PRAGMA table_info(map_markers)");
+      if (!mmCols3.some(c => c.name === 'visibility')) {
+        dbRun("ALTER TABLE map_markers ADD COLUMN visibility TEXT DEFAULT '1,2,3'");
+        console.log('[migrate] added visibility to map_markers');
+      }
+    } catch (_) {}
+
+    // 为 map_markers 添加 base_config 列（标点底盘样式）
+    try {
+      const mmCols4 = dbAll("PRAGMA table_info(map_markers)");
+      if (!mmCols4.some(c => c.name === 'base_config')) {
+        dbRun("ALTER TABLE map_markers ADD COLUMN base_config TEXT DEFAULT NULL");
+        console.log('[migrate] added base_config to map_markers');
+      }
+    } catch (_) {}
+
+    // 为 map_markers 添加 is_favorite 列（标记常用）
+    try {
+      const mmCols5 = dbAll("PRAGMA table_info(map_markers)");
+      if (!mmCols5.some(c => c.name === 'is_favorite')) {
+        dbRun("ALTER TABLE map_markers ADD COLUMN is_favorite INTEGER DEFAULT 0");
+        console.log('[migrate] added is_favorite to map_markers');
+      }
+    } catch (_) {}
+
+    // 为 map_marker_placements 添加 special_function 列（放置级）
+    try {
+      const mpCols = dbAll("PRAGMA table_info(map_marker_placements)");
+      if (!mpCols.some(c => c.name === 'special_function')) {
+        dbRun("ALTER TABLE map_marker_placements ADD COLUMN special_function TEXT DEFAULT NULL");
+        console.log('[migrate] added special_function to map_marker_placements');
+      }
+    } catch (_) {}
+
+    // custom_name：放置级的自定义名称
+    try {
+      const mpCols2 = dbAll("PRAGMA table_info(map_marker_placements)");
+      if (!mpCols2.some(c => c.name === 'custom_name')) {
+        dbRun("ALTER TABLE map_marker_placements ADD COLUMN custom_name TEXT DEFAULT ''");
+        console.log('[migrate] added custom_name to map_marker_placements');
+      }
+    } catch (_) {}
+
+    // subscript：放置级下标标记
+    try {
+      const mpCols3 = dbAll("PRAGMA table_info(map_marker_placements)");
+      if (!mpCols3.some(c => c.name === 'subscript')) {
+        dbRun("ALTER TABLE map_marker_placements ADD COLUMN subscript TEXT DEFAULT '0'");
+        console.log('[migrate] added subscript to map_marker_placements');
+      }
+    } catch (_) {}
+    // 添加 sort_order 列（图层排序）
+    try {
+      const mpCols4 = dbAll("PRAGMA table_info(map_marker_placements)");
+      if (!mpCols4.some(c => c.name === 'sort_order')) {
+        dbRun("ALTER TABLE map_marker_placements ADD COLUMN sort_order INTEGER DEFAULT 0");
+        console.log('[migrate] added sort_order to map_marker_placements');
+      }
+    } catch (_) {}
   } catch (e) {
     console.error('[migrate] error:', e.message);
   }
@@ -1090,8 +1340,10 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
+    mainWindow.loadURL(process.env.SILVERMOON_DEV_SERVER_URL || 'http://localhost:5173');
+    if (process.env.SILVERMOON_DISABLE_DEVTOOLS !== '1') {
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
@@ -1099,11 +1351,13 @@ function createWindow() {
 
 // ── 应用启动 ──
 app.whenReady().then(async () => {
-  // 注册本地媒体协议（绕过 HTTP→file:// 跨域限制，用于视频播放）
+  // 注册本地媒体协议（绕过 HTTP→file:// 跨域限制，用于视频播放 / 标点图片）
   protocol.handle('local-media', (request) => {
     const rawPath = decodeURIComponent(request.url.slice('local-media://'.length));
-    const fileUrl = url.pathToFileURL(rawPath).toString();
-    return net.fetch(fileUrl);
+    const imagesDir = dbDir ? getImagesDir(dbDir) : null;
+    const fp = imagesDir ? resolveImagePath(imagesDir, rawPath) : null;
+    if (!fp || !fs.existsSync(fp)) return new Response('Not Found', { status: 404 });
+    return net.fetch(url.pathToFileURL(fp).toString());
   });
 
   // 关闭 Chromium Autofill（Electron 不支持，避免终端报 Autofill.enable 错误）
@@ -1182,6 +1436,19 @@ ipcMain.handle('select-db-location', async () => {
       return { success: false, message: '未选择文件夹' };
     }
     const dir = result.filePaths[0];
+
+    // 备份旧 user.json 配置（在 dbDir 改变前读取）
+    let oldUserConfig = null;
+    const oldDir = dbDir;
+    if (oldDir) {
+      const oldPath = path.join(oldDir, 'user.json');
+      try {
+        if (fs.existsSync(oldPath)) {
+          oldUserConfig = JSON.parse(fs.readFileSync(oldPath, 'utf-8'));
+        }
+      } catch (_) {}
+    }
+
     dbDir = dir;
     // 解析最佳基准库（优先 silvermoon_terminal.db，否则最高版本）
     activeBaseDb = resolveBestBaselineDb(dir);
@@ -1189,6 +1456,32 @@ ipcMain.handle('select-db-location', async () => {
     const dbPath = openDb(dir);
     const imagesDir = getImagesDir(dir);
     const needsSeed = !isDbPopulated();
+
+    // 迁移旧 user.json 配置到新位置（除 betamemo_tasks 外全部迁移，不覆盖新位置已有数据）
+    // 仅当新位置已有数据库时才迁移（切换目录场景）；全新空文件夹不迁移，避免旧设置污染新环境
+    if (oldUserConfig && !needsSeed) {
+      const newPath = path.join(dir, 'user.json');
+      let newConfig = {};
+      try {
+        if (fs.existsSync(newPath)) {
+          newConfig = JSON.parse(fs.readFileSync(newPath, 'utf-8'));
+        }
+      } catch (_) {}
+      // 除 betamemo_tasks 和 northlandbank_records 外，旧 config 中所有新位置缺失的 key 都迁移过去
+      let changed = false;
+      for (const key of Object.keys(oldUserConfig)) {
+        if (key === 'betamemo_tasks') continue; // 只迁移 canvas 数据到 user.db，不塞进 user.json
+        if (key === 'northlandbank_records') continue; // 北国银行数据迁移到 user.db
+        if (!(key in newConfig)) {
+          newConfig[key] = oldUserConfig[key];
+          changed = true;
+        }
+      }
+      if (changed) {
+        try { fs.writeFileSync(newPath, JSON.stringify(newConfig, null, 2)); } catch (e) { console.warn('[select-db-location] write user.json failed:', e.message); }
+      }
+    }
+
     return { success: true, dbPath, imagesDir, needsSeed };
   } catch (e) {
     return { success: false, error: e.message };
@@ -1913,7 +2206,9 @@ function seedDatabase() {
         seedSql = seedSql.replace(/INSERT INTO /gi, 'INSERT OR IGNORE INTO ');
         dbExec(seedSql);
       }
-    } finally {}
+    } finally {
+      // 空 finally 确保事务继续，但保留之前的异常
+    }
 
     db.run('COMMIT');
     db.exec('PRAGMA foreign_keys = ON');
@@ -1930,6 +2225,7 @@ function seedDatabase() {
 
     return { success: true, message, addedCount: delta };
   } catch (innerErr) {
+    console.error('[seedDatabase] seed import error:', innerErr.message);
     db.run('ROLLBACK');
     try { db.exec('PRAGMA foreign_keys = ON'); } catch (_) {}
     throw innerErr;
@@ -1939,26 +2235,25 @@ function seedDatabase() {
 ipcMain.handle('init-database', () => {
   try {
     if (!dbDir) throw new Error('数据库路径未设置');
-    // 0. 重置为默认基准库名（初始化始终创建 silvermoon_terminal.db）
+
+    // 2. 重置为默认基准库名
     activeBaseDb = DEFAULT_BASE_DB;
     saveConfig(dbDir);
-    // 1. 关闭两个数据库
-    closeDatabase(); // 这会同时关闭 user.db
-    // 2. 删除两个 db 文件
+    // 3. 关闭两个数据库
+    closeDatabase();
+    // 4. 删除两个 db 文件
     const basePath = getDbPath(dbDir);
     const userPath = getUserDbPath(dbDir);
     try { if (fs.existsSync(basePath)) fs.unlinkSync(basePath); } catch (_) {}
     try { if (fs.existsSync(userPath)) fs.unlinkSync(userPath); } catch (_) {}
     console.log('[init-database] deleted db files, re-creating from seed');
-    // 3. 重新打开基准库（新建空库）并播种
-    openDb(dbDir); // 不传入 userDb，后面会通过 openUserDb 打开（即使不存在）
+    // 5. 重新打开基准库（新建空库）并播种
+    openDb(dbDir);
     const result = seedDatabase();
     dbSave();
-    // 确保 user.db 没有被错误创建（只在首次非开发者写入时创建）
-    if (userDb) {
-      closeUserDb();
-      try { if (fs.existsSync(userPath)) fs.unlinkSync(userPath); } catch (_) {}
-    }
+    // 清除用户配置缓存，下次读取从磁盘重新加载
+    _userConfigCache = null;
+
     return result;
   } catch (error) {
     console.error('[init-database] error:', error.message);
@@ -1971,16 +2266,20 @@ ipcMain.handle('init-database', () => {
 ipcMain.handle('update-database', () => {
   try {
     if (!dbDir) throw new Error('数据库路径未设置');
-    // 备份 related_links 数据（更新种子数据会清空基准库）
+    // 备份 related_links 和 websites 数据（更新种子数据会清空基准库）
     let relatedBackup = null
+    let websitesBackup = null
     try { relatedBackup = dbAll('SELECT * FROM related_links', []) } catch (_) {}
-    // 关闭并删除基准库，保留 user.db
+    try { websitesBackup = dbAll('SELECT * FROM websites', []) } catch (_) {}
+    // 只关闭基准库（不碰 user.db — userDbSave 会额外改写 user.db 文件）
     const basePath = getDbPath(dbDir);
-    closeDatabase(); // 关闭两个库
+    if (db) { db.close(); db = null; }
     try { if (fs.existsSync(basePath)) fs.unlinkSync(basePath); } catch (_) {}
     console.log('[update-database] deleted base db, re-seeding');
-    // 重新打开基准库（不关闭 user.db — closeDatabase 已关闭它，重新打开）
-    openDb(dbDir); // openUserDb 会重新打开已存在的 user.db
+    // 重建基准库（不通过 openDb，避免触发 openUserDb 重新加载 user.db）
+    db = new SQL.Database();
+    db.exec('PRAGMA foreign_keys = OFF');
+    migrateSchema();
     const result = seedDatabase();
     // 恢复 related_links 数据
     if (relatedBackup && relatedBackup.length > 0) {
@@ -1991,6 +2290,16 @@ ipcMain.handle('update-database', () => {
         }
         console.log('[update-database] restored', relatedBackup.length, 'related_links')
       } catch (e) { console.warn('[update-database] failed to restore related_links:', e.message) }
+    }
+    // 恢复 websites 数据
+    if (websitesBackup && websitesBackup.length > 0) {
+      try {
+        for (const row of websitesBackup) {
+          dbRun('INSERT OR IGNORE INTO websites (id, title_zh, url, description_zh, icon, image, sort_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+            [row.id, row.title_zh, row.url, row.description_zh, row.icon, row.image, row.sort_order, row.created_at, row.updated_at])
+        }
+        console.log('[update-database] restored', websitesBackup.length, 'websites')
+      } catch (e) { console.warn('[update-database] failed to restore websites:', e.message) }
     }
     dbSave();
     return result;
@@ -2163,7 +2472,7 @@ ipcMain.handle('db-query', (_event, sql, params = []) => {
       } else if (trimmed.startsWith('UPDATE')) {
         result = storeUpdateAsDelta(udb, sql, params);
       } else if (trimmed.startsWith('INSERT')) {
-        result = dbRunOnDb(udb, sql, params);
+        result = storeInsertAsDelta(udb, sql, params);
       } else if (trimmed.startsWith('DELETE')) {
         const idMatch = sql.match(/WHERE\s+id\s*=\s*\?/i);
         if (writeTableName && idMatch && params.length > 0) {
@@ -2192,6 +2501,753 @@ ipcMain.handle('db-query', (_event, sql, params = []) => {
   } catch (error) {
     return { error: error.message };
   }
+});
+
+// ═══════════════════════════════════════════════════
+// 摹忆中枢 — 地图模块 IPC handlers
+// ═══════════════════════════════════════════════════
+
+// 地图数据查询（SELECT on baseline DB + user.db 合并）
+ipcMain.handle('map-query', (_event, sql, params = []) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    const trimmed = sql.trim().toUpperCase();
+    const trimmedRaw = sql.trim();
+    if (!trimmed.startsWith('SELECT') && !trimmed.startsWith('PRAGMA')) {
+      throw new Error('map-query 仅支持 SELECT/PRAGMA');
+    }
+    // 先查基准库
+    const baseData = dbAll(sql, params);
+    // dualDbMode 下，对 map_marker_placements / map_textboxes 合并 user.db 数据
+    if (dualDbMode && userDb && (trimmedRaw.includes('map_marker_placements') || trimmedRaw.includes('map_textboxes'))) {
+      try {
+        // 检查 user.db 中是否有同名的表
+        const tblResult = userDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('map_marker_placements','map_textboxes')");
+        const userTables = new Set((tblResult[0]?.values || []).map(r => r[0]));
+        const tableInSql = trimmedRaw.includes('map_marker_placements') ? 'map_marker_placements' : 'map_textboxes';
+        if (userTables.has(tableInSql)) {
+          const userRows = dbAllOnDb(userDb, sql, params);
+          // 按 id 去重合并（user.db 中的 id 不应与基准库冲突，但以防万一）
+          const idSet = new Set(baseData.map(r => r.id));
+          for (const row of userRows) {
+            if (!idSet.has(row.id)) {
+              baseData.push(row);
+              idSet.add(row.id);
+            }
+          }
+        }
+      } catch (_) { /* user.db 可能不存在对应表 */ }
+    }
+    return { data: baseData };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 地图数据写入基准库（开发者模式：地图配置、标点模板、文本框）
+ipcMain.handle('map-exec-baseline', (_event, sql, params = []) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    const result = dbRun(sql, params);
+    dbSave();
+    return { changes: result.changes, lastId: result.lastId };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 地图数据写入 user.db（用户标点放置等）
+ipcMain.handle('map-exec-user', (_event, sql, params = []) => {
+  try {
+    const udb = ensureUserDb();
+    if (!udb) throw new Error('无法创建用户数据库');
+    const result = dbRunOnDb(udb, sql, params);
+    userDbSave();
+    return { changes: result.changes, lastId: result.lastId };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 读取地图配置
+ipcMain.handle('map-get-config', (_event, mapId) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    const rows = dbAll("SELECT * FROM map_maps WHERE id = ?", [mapId]);
+    if (rows.length === 0) return { error: '地图不存在' };
+    const row = rows[0];
+    row.config = typeof row.config === 'string' ? JSON.parse(row.config) : row.config;
+    return { success: true, map: row };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 保存/更新地图配置
+ipcMain.handle('map-save-config', (_event, mapId, nameZh, config) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    if (typeof nameZh === 'object' || config === undefined) throw new Error('参数错误：nameZh 和 config 必须提供');
+    const configJson = typeof config === 'string' ? config : JSON.stringify(config);
+    const existing = dbAll("SELECT id FROM map_maps WHERE id = ?", [mapId]);
+    if (existing.length > 0) {
+      dbRun("UPDATE map_maps SET name_zh = ?, config = ?, updated_at = datetime('now','localtime') WHERE id = ?", [nameZh, configJson, mapId]);
+    } else {
+      dbRun("INSERT INTO map_maps (id, name_zh, config) VALUES (?, ?, ?)", [mapId, nameZh, configJson]);
+    }
+    dbSave();
+    return { success: true };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 地图标定初始化：选择原图 → 返回预览 + 图片信息
+ipcMain.handle('map-init-calibration', async (_event, existingMapId) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择地图原图',
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+
+    const srcPath = result.filePaths[0];
+    const ext = path.extname(srcPath).toLowerCase();
+
+    // 读取图片尺寸（通过 nativeImage）
+    const img = nativeImage.createFromPath(srcPath);
+    if (!img || img.isEmpty()) throw new Error('无法读取图片');
+    const { width: imgW, height: imgH } = img.getSize();
+    if (imgW === 0 || imgH === 0) throw new Error('图片尺寸无效');
+
+    // 生成预览图（最大 2048px 宽）
+    const previewMaxW = 4096;
+    let previewData = null;
+    if (imgW > previewMaxW) {
+      const previewH = Math.round(imgH * (previewMaxW / imgW));
+      const preview = img.resize({ width: previewMaxW, height: previewH });
+      if (preview && !preview.isEmpty()) {
+        previewData = `data:image/png;base64,${preview.toPNG().toString('base64')}`;
+      }
+    } else {
+      // 小于预览尺寸，直接读取原图
+      const rawBuf = fs.readFileSync(srcPath);
+      const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+      previewData = `data:${mime};base64,${rawBuf.toString('base64')}`;
+    }
+
+    return {
+      success: true,
+      srcPath,
+      srcName: path.basename(srcPath, path.extname(srcPath)),
+      imageW: imgW,
+      imageH: imgH,
+      previewData,
+      previewW: Math.min(imgW, previewMaxW),
+      previewH: Math.round(imgH * (Math.min(imgW, previewMaxW) / imgW)),
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// ═══════════════════════════════════════════════════
+// 摹忆中枢 — 切片系统
+// ═══════════════════════════════════════════════════
+
+/**
+ * 在地图切片中按世界坐标查找文件（忽略哈希后缀）
+ * 搜索模式：map_{mapId}_{worldRow}_{worldCol}_*
+ */
+// ── 切片文件索引缓存：避免每次读取切片都遍历目录 ──
+// mapId → Map<"row_col", { filepath, mtime }>
+const tileFileIndex = new Map();
+
+async function buildTileIndex(imagesDir, mapId) {
+  const index = new Map();
+  const prefix = `map_${mapId}_`;
+
+  async function walk(dir) {
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          await walk(path.join(dir, entry.name));
+        } else if (entry.isFile() && entry.name.startsWith(prefix)) {
+          const suffix = entry.name.slice(prefix.length);
+          const parts = suffix.split('_');
+          if (parts.length < 3) continue;
+          const row = parseInt(parts[0], 10);
+          const col = parseInt(parts[1], 10);
+          if (isNaN(row) || isNaN(col)) continue;
+          const key = `${row}_${col}`;
+          const filepath = path.join(dir, entry.name);
+          // 同一 row_col 可能有多个哈希版本，取 mtime 最新的
+          try {
+            const stat = await fs.promises.stat(filepath);
+            const existing = index.get(key);
+            if (!existing || stat.mtimeMs > existing.mtime) {
+              index.set(key, { filepath, mtime: stat.mtimeMs });
+            }
+          } catch (_) {
+            if (!index.has(key)) {
+              index.set(key, { filepath, mtime: 0 });
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  await walk(imagesDir);
+  return index;
+}
+
+function invalidateTileFileCache(mapId) {
+  tileFileIndex.delete(mapId);
+}
+
+async function resolveMapTile(imagesDir, mapId, worldRow, worldCol) {
+  let index = tileFileIndex.get(mapId);
+  if (!index) {
+    index = await buildTileIndex(imagesDir, mapId);
+    tileFileIndex.set(mapId, index);
+  }
+  const entry = index.get(`${worldRow}_${worldCol}`);
+  return entry ? entry.filepath : null;
+}
+
+/**
+ * 列出某地图的所有切片文件（返回 { worldRow, worldCol, filepath, hash }[]）
+ */
+function listMapTiles(imagesDir, mapId) {
+  const prefix = `map_${mapId}_`;
+  const tiles = [];
+
+  function parseFile(filepath, name) {
+    if (!name.startsWith(prefix)) return;
+    const suffix = name.slice(prefix.length);
+    const parts = suffix.split('_');
+    if (parts.length < 3) return;
+    const row = parseInt(parts[0], 10);
+    const col = parseInt(parts[1], 10);
+    if (isNaN(row) || isNaN(col)) return;
+    const hashExt = parts.slice(2).join('_');
+    const hash = hashExt.includes('.') ? hashExt.slice(0, hashExt.lastIndexOf('.')) : hashExt;
+    tiles.push({ worldRow: row, worldCol: col, filepath, hash });
+  }
+
+  function walk(dir) {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          walk(path.join(dir, entry.name));
+        } else if (entry.isFile()) {
+          parseFile(path.join(dir, entry.name), entry.name);
+        }
+      }
+    } catch (_) {}
+  }
+
+  walk(imagesDir);
+  return tiles;
+}
+
+// 清除某地图的所有切片和全图文件
+ipcMain.handle('map-clear-tiles', async (_event, mapId) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    const imagesDir = getImagesDir(dbDir);
+    const tiles = listMapTiles(imagesDir, mapId);
+    for (const tile of tiles) {
+      try { fs.unlinkSync(tile.filepath); } catch (_) {}
+    }
+    // 删除全图文件
+    const fullPath = path.join(imagesDir, `map_${mapId}_full.jpg`);
+    try { fs.unlinkSync(fullPath); } catch (_) {}
+    // 清空图片路径缓存和图片内容缓存
+    clearImagePathCache();
+    invalidateImageContentCache(mapId);
+    invalidateTileFileCache(mapId);
+    return { success: true, deleted: tiles.length };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 切片地图：加载原图 → 按世界坐标切割 → 哈希命名 → 写入图包
+ipcMain.handle('map-start-slice', async (_event, mapId, srcPath, config) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+
+    const imagesDir = getImagesDir(dbDir);
+    if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
+
+    const { anchorA, anchorB, distance, scale, mapW, mapH, tileSize = 512 } = config;
+    if (!anchorA || !anchorB || !scale) throw new Error('标定数据不完整');
+
+    const [ax, ay] = anchorA;
+
+    // 加载原图
+    const fullImg = nativeImage.createFromPath(srcPath);
+    if (!fullImg || fullImg.isEmpty()) throw new Error('无法加载原图');
+    const imgW = fullImg.getSize().width;
+    const imgH = fullImg.getSize().height;
+
+    // 计算原图覆盖的世界坐标范围
+    // 世界坐标 (wx, wy) = (px - ax) * scale, (py - ay) * scale
+    // 原图像素 (px, py) = wx / scale + ax, wy / scale + ay
+    const minWorldX = -ax * scale;
+    const minWorldY = -ay * scale;
+    const maxWorldX = (imgW - ax) * scale;
+    const maxWorldY = (imgH - ay) * scale;
+
+    const minRow = Math.floor(minWorldY / tileSize);
+    const maxRow = Math.ceil(maxWorldY / tileSize);
+    const minCol = Math.floor(minWorldX / tileSize);
+    const maxCol = Math.ceil(maxWorldX / tileSize);
+
+    const totalTiles = (maxRow - minRow) * (maxCol - minCol);
+
+    // ── 超大地图自适应切片尺寸：限制总切片数以防止数万小文件 ──
+    const MAX_TOTAL_TILES = 1200;
+    let effectiveTileSize = tileSize;
+    if (totalTiles > MAX_TOTAL_TILES) {
+      // 计算所需的新 tileSize（按面积比例缩放）
+      const worldW = maxWorldX - minWorldX;
+      const worldH = maxWorldY - minWorldY;
+      const targetPerSide = Math.sqrt(MAX_TOTAL_TILES);
+      const newSize = Math.max(512, Math.ceil(Math.max(worldW, worldH) / targetPerSide));
+      effectiveTileSize = Math.ceil(newSize / 256) * 256;  // 对齐到 256 的倍数
+      console.log(`[slice] 总切片数 ${totalTiles} 超过上限 ${MAX_TOTAL_TILES}，` +
+        `增大 tileSize ${tileSize} → ${effectiveTileSize}（原图 ${imgW}×${imgH}，世界 ${worldW.toFixed(0)}×${worldH.toFixed(0)})`);
+    }
+    // 使用 effectiveTileSize（可能已增大）重新计算行列范围
+    const sliceTileSize = effectiveTileSize;
+    const sliceMinRow = Math.floor(minWorldY / sliceTileSize);
+    const sliceMaxRow = Math.ceil(maxWorldY / sliceTileSize);
+    const sliceMinCol = Math.floor(minWorldX / sliceTileSize);
+    const sliceMaxCol = Math.ceil(maxWorldX / sliceTileSize);
+    const actualTotal = (sliceMaxRow - sliceMinRow) * (sliceMaxCol - sliceMinCol);
+
+    let processed = 0;
+    const errors = [];
+
+    for (let worldRow = sliceMinRow; worldRow < sliceMaxRow; worldRow++) {
+      for (let worldCol = sliceMinCol; worldCol < sliceMaxCol; worldCol++) {
+        // 计算切片在原图上的像素区域
+        const pxStart = Math.round(worldCol * sliceTileSize / scale + ax);
+        const pyStart = Math.round(worldRow * sliceTileSize / scale + ay);
+        const pxEnd = Math.round((worldCol + 1) * sliceTileSize / scale + ax);
+        const pyEnd = Math.round((worldRow + 1) * sliceTileSize / scale + ay);
+        const tileWPx = Math.max(1, pxEnd - pxStart);  // 该 tile 在原图中覆盖的像素宽
+        const tileHPx = Math.max(1, pyEnd - pyStart);  // 该 tile 在原图中覆盖的像素高
+
+        // 有效重叠区域（clamp 到图像边界）
+        const cropX = Math.max(0, pxStart);
+        const cropY = Math.max(0, pyStart);
+        const cropW = Math.max(0, Math.min(pxEnd, imgW) - cropX);
+        const cropH = Math.max(0, Math.min(pyEnd, imgH) - cropY);
+
+        if (cropW <= 0 || cropH <= 0) {
+          processed++;
+          continue;
+        }
+
+        try {
+          let tile = fullImg.crop({ x: cropX, y: cropY, width: cropW, height: cropH });
+          if (!tile || tile.isEmpty()) throw new Error('裁剪失败');
+
+          // 比例缩放：crop 在原 tile 中占比 → 输出 tile 中同比占比
+          const outW = Math.max(1, Math.round(cropW / tileWPx * sliceTileSize));
+          const outH = Math.max(1, Math.round(cropH / tileHPx * sliceTileSize));
+          tile = tile.resize({ width: outW, height: outH });
+
+          // 比例偏移
+          const offsetX = Math.round((cropX - pxStart) / tileWPx * sliceTileSize);
+          const offsetY = Math.round((cropY - pyStart) / tileHPx * sliceTileSize);
+
+          // Pad 到完整 tileSize
+          if (offsetX > 0 || offsetY > 0 || outW < sliceTileSize || outH < sliceTileSize) {
+            const srcBuf = tile.toBitmap();
+            const dstBuf = Buffer.alloc(sliceTileSize * sliceTileSize * 4, 0);
+            for (let row = 0; row < outH && (offsetY + row) < sliceTileSize; row++) {
+              const srcOff = row * outW * 4;
+              const dstOff = ((offsetY + row) * sliceTileSize + offsetX) * 4;
+              srcBuf.copy(dstBuf, dstOff, srcOff, srcOff + outW * 4);
+            }
+            tile = nativeImage.createFromBitmap(dstBuf, { width: sliceTileSize, height: sliceTileSize });
+          }
+
+          const srcExt = path.extname(srcPath).toLowerCase();
+          const isJpegSrc = srcExt === '.jpg' || srcExt === '.jpeg';
+          const buf = isJpegSrc ? tile.toJPEG(85) : tile.toPNG();
+          const ext = isJpegSrc ? 'jpg' : 'png';
+          const hash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 8);
+          const filename = `map_${mapId}_${worldRow}_${worldCol}_${hash}.${ext}`;
+          fs.writeFileSync(path.join(imagesDir, filename), buf);
+        } catch (tileErr) {
+          errors.push(`Tile (${worldRow},${worldCol}): ${tileErr.message}`);
+        }
+        processed++;
+      }
+    }
+
+    // ── 生成降采样整图（用于低缩放时替代切片网格） ──
+    let fullImagePath = null;
+    try {
+      const FULL_MAX = 8192; // 最长边不超过 8192px
+      const maxDim = Math.max(imgW, imgH);
+      if (maxDim > FULL_MAX) {
+        const scaleRatio = FULL_MAX / maxDim;
+        const thumbW = Math.round(imgW * scaleRatio);
+        const thumbH = Math.round(imgH * scaleRatio);
+        const thumb = fullImg.resize({ width: thumbW, height: thumbH });
+        const buf = thumb.toJPEG(92);
+        const fullFilename = `map_${mapId}_full.jpg`;
+        fs.writeFileSync(path.join(imagesDir, fullFilename), buf);
+        fullImagePath = fullFilename;
+        console.log(`[slice] 降采样整图 ${fullFilename} (${thumbW}×${thumbH})`);
+      } else {
+        // 原图已小于阈值，直接复制
+        const buf = fullImg.toJPEG(92);
+        const fullFilename = `map_${mapId}_full.jpg`;
+        fs.writeFileSync(path.join(imagesDir, fullFilename), buf);
+        fullImagePath = fullFilename;
+      }
+    } catch (fullErr) {
+      console.error('[slice] 生成降采样整图失败:', fullErr.message);
+    }
+
+    // 更新 config 中的切片元数据
+    const updatedConfig = {
+      ...config,
+      tileSize: sliceTileSize,
+      tileCount: { rows: sliceMaxRow - sliceMinRow, cols: sliceMaxCol - sliceMinCol },
+      tileRange: { minRow: sliceMinRow, maxRow: sliceMaxRow, minCol: sliceMinCol, maxCol: sliceMaxCol },
+      fullImage: fullImagePath,
+      slicedAt: new Date().toISOString(),
+    };
+
+    // 保存到 DB
+    const configJson = JSON.stringify(updatedConfig);
+    const existing = dbAll("SELECT id FROM map_maps WHERE id = ?", [mapId]);
+    if (existing.length > 0) {
+      dbRun("UPDATE map_maps SET config = ?, updated_at = datetime('now','localtime') WHERE id = ?", [configJson, mapId]);
+    }
+    dbSave();
+
+    // 清空图片路径缓存和图片内容缓存，确保后续读取能发现新文件
+    clearImagePathCache();
+    invalidateImageContentCache(mapId);
+    invalidateTileFileCache(mapId);
+
+    return {
+      success: true,
+      totalTiles: actualTotal,
+      processed,
+      errors: errors.length > 0 ? errors : undefined,
+      tileRange: { minRow: sliceMinRow, maxRow: sliceMaxRow, minCol: sliceMinCol, maxCol: sliceMaxCol },
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// ── 手动生成/替换全图（选择原图→降采样→写入图包） ──
+ipcMain.handle('map-generate-full', async (_event, mapId) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择高清原图以生成低缩放全图',
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+
+    const srcPath = result.filePaths[0];
+    const fullImg = nativeImage.createFromPath(srcPath);
+    if (!fullImg || fullImg.isEmpty()) throw new Error('无法读取图片');
+    const { width: imgW, height: imgH } = fullImg.getSize();
+
+    // 缩放到最长边 8192，JPEG 质量 92
+    const FULL_MAX = 8192;
+    const maxDim = Math.max(imgW, imgH);
+    const scaleRatio = Math.min(1, FULL_MAX / maxDim);
+    const outW = Math.round(imgW * scaleRatio);
+    const outH = Math.round(imgH * scaleRatio);
+    const thumb = (scaleRatio < 1) ? fullImg.resize({ width: outW, height: outH }) : fullImg;
+    const buf = thumb.toJPEG(92);
+
+    const imagesDir = getImagesDir(dbDir);
+    if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
+    const fullFilename = `map_${mapId}_full.jpg`;
+    fs.writeFileSync(path.join(imagesDir, fullFilename), buf);
+
+    // 更新 config
+    const existing = dbAll("SELECT config FROM map_maps WHERE id = ?", [mapId]);
+    if (existing.length > 0) {
+      let cfg = typeof existing[0].config === 'string' ? JSON.parse(existing[0].config) : existing[0].config;
+      cfg.fullImage = fullFilename;
+      dbRun("UPDATE map_maps SET config = ?, updated_at = datetime('now','localtime') WHERE id = ?", [JSON.stringify(cfg), mapId]);
+      dbSave();
+    }
+    return { success: true, fullImage: fullFilename };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 读取地图切片（按世界坐标，自动忽略哈希后缀）
+ipcMain.handle('map-read-tile', async (_event, mapId, worldRow, worldCol, maxWidth) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    const imagesDir = getImagesDir(dbDir);
+    const fp = await resolveMapTile(imagesDir, mapId, worldRow, worldCol);
+    if (!fp) return { error: '切片不存在' };
+    // 地图切片可能是体积不大的超大 JPEG；必须兑现 maxWidth，否则渲染器仍会
+    // 解码完整 2816px 切片，在 10% 层级切换时形成明显的解码/GPU 峰值。
+    return await readImageFile(fp, maxWidth, undefined, false);
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 获取某地图的所有切片列表
+ipcMain.handle('map-list-tiles', (_event, mapId) => {
+  try {
+    if (!dbDir) throw new Error('数据库未初始化');
+    const imagesDir = getImagesDir(dbDir);
+    const tiles = listMapTiles(imagesDir, mapId);
+    return { success: true, tiles };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// 删除地图（含切片文件和数据库记录）
+ipcMain.handle('map-delete', async (_event, mapId) => {
+  try {
+    if (!db || !dbDir) throw new Error('数据库未初始化');
+    invalidateTileFileCache(mapId);
+    // 删除切片文件
+    const imagesDir = getImagesDir(dbDir);
+    const tiles = listMapTiles(imagesDir, mapId);
+    for (const t of tiles) {
+      try { fs.unlinkSync(t.filepath); } catch (_) {}
+    }
+    // 删除数据库记录（CASCADE 自动清理关联表）
+    dbRun("DELETE FROM map_maps WHERE id = ?", [mapId]);
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 调整地图排序
+ipcMain.handle('map-reorder', (_event, orderedIds) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    db.exec("UPDATE map_maps SET sort_order = CASE id " +
+      orderedIds.map((id, i) => `WHEN '${id.replace(/'/g, "''")}' THEN ${i}`).join(' ') +
+      " ELSE sort_order END");
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 更新标点分类
+ipcMain.handle('map-update-marker-category', (_event, markerId, category) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    dbRun("UPDATE map_markers SET category = ?, updated_at = datetime('now','localtime') WHERE id = ?", [category, markerId]);
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 删除标点模板
+ipcMain.handle('map-delete-marker', (_event, markerId) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    dbRun("DELETE FROM map_markers WHERE id = ?", [markerId]);
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 更新标点模板（仅更新传入的非 undefined 字段）
+ipcMain.handle('map-update-marker', (_event, markerId, updates) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    const fields = [];
+    const params = [];
+    const validFields = ['marker_type', 'image_filename', 'name_zh', 'category', 'visibility', 'base_config', 'special_function'];
+    for (const [k, v] of Object.entries(updates || {})) {
+      if (k === 'is_favorite') {
+        fields.push('is_favorite=?');
+        params.push(v ? 1 : 0);
+      } else if (validFields.includes(k) && v !== undefined) {
+        fields.push(`${k}=?`);
+        params.push(v);
+      }
+    }
+    if (fields.length === 0) return { success: true };
+    params.push(markerId);
+    dbRun(`UPDATE map_markers SET ${fields.join(',')}, updated_at=datetime('now','localtime') WHERE id=?`, params);
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 调整标点排序
+ipcMain.handle('map-reorder-markers', (_event, orderedIds) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    db.exec("UPDATE map_markers SET sort_order = CASE id " +
+      orderedIds.map((id, i) => `WHEN '${id.replace(/'/g, "''")}' THEN ${i}`).join(' ') +
+      " ELSE sort_order END");
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 更新文本框（只更新传入的非 undefined 字段）
+ipcMain.handle('map-update-textbox', (_event, id, updates) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    const fields = [];
+    const params = [];
+    for (const [k, v] of Object.entries(updates || {})) {
+      if (v !== undefined) { fields.push(`${k}=?`); params.push(v); }
+    }
+    if (fields.length === 0) return { success: true };
+    params.push(id);
+    dbRun(`UPDATE map_textboxes SET ${fields.join(',')}, updated_at=datetime('now','localtime') WHERE id=?`, params);
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 删除已放置标点
+ipcMain.handle('map-delete-placement', (_event, placementId) => {
+  try {
+    if (!db && !userDb) throw new Error('数据库未初始化');
+    // 先尝试 user.db，再试基准库
+    if (userDb) {
+      try {
+        const res = dbRunOnDb(userDb, "DELETE FROM map_marker_placements WHERE id = ?", [placementId]);
+        if (res.changes > 0) { userDbSave(); return { success: true }; }
+      } catch (_) { /* userDb 无此表，fallback 到基准库 */ }
+    }
+    dbRun("DELETE FROM map_marker_placements WHERE id = ?", [placementId]);
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 更新已放置标点（custom_name, special_function）
+ipcMain.handle('map-update-placement', (_event, placementId, updates) => {
+  try {
+    if (!db && !userDb) throw new Error('数据库未初始化');
+    const { custom_name, special_function, subscript } = updates || {};
+    // special_function 已由前端 JSON.stringify，直接使用即可
+    const sf = special_function || null;
+    if (userDb) {
+      try {
+        const res = dbRunOnDb(userDb, "UPDATE map_marker_placements SET custom_name = ?, special_function = ?, subscript = ? WHERE id = ?",
+          [custom_name || '', sf, subscript || '0', placementId]);
+        if (res.changes > 0) { userDbSave(); return { success: true }; }
+      } catch (_) { /* userDb 无此表，fallback 到基准库 */ }
+    }
+    dbRun("UPDATE map_marker_placements SET custom_name = ?, special_function = ?, subscript = ? WHERE id = ?",
+      [custom_name || '', sf, subscript || '0', placementId]);
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 调整已放置标点的图层顺序（sort_order）
+ipcMain.handle('map-reorder-placements', (_event, items) => {
+  try {
+    if (!db && !userDb) throw new Error('数据库未初始化');
+    // items: [{ id, sort_order }, ...]
+    for (const item of items) {
+      // 先尝试 user.db，再尝试基准库
+      if (userDb) {
+        try {
+          const res = dbRunOnDb(userDb, "UPDATE map_marker_placements SET sort_order = ? WHERE id = ?", [item.sort_order, item.id]);
+          if (res.changes > 0) continue;
+        } catch (_) {}
+      }
+      dbRun("UPDATE map_marker_placements SET sort_order = ? WHERE id = ?", [item.sort_order, item.id]);
+    }
+    dbSave();
+    if (userDb) userDbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 地图全局默认配置 ──
+
+// 读取所有全局默认值
+ipcMain.handle('map-get-global-defaults', () => {
+  try {
+    if (!db) return { success: true, defaults: {} };
+    const rows = dbAll("SELECT key, value FROM map_global_defaults", []);
+    const defaults = {};
+    for (const r of rows) {
+      try { defaults[r.key] = JSON.parse(r.value); } catch { defaults[r.key] = r.value; }
+    }
+    return { success: true, defaults };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 保存单个全局默认键（仅开发者模式调用）
+ipcMain.handle('map-save-global-default', (_event, key, value) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    const jsonVal = typeof value === 'string' ? value : JSON.stringify(value);
+    dbRun("INSERT OR REPLACE INTO map_global_defaults (key, value, updated_at) VALUES (?, ?, datetime('now','localtime'))", [key, jsonVal]);
+    dbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// ── 用户 per-map 覆盖配置 ──
+
+// 读取用户对某地图的覆盖配置
+ipcMain.handle('map-get-user-config', (_event, mapId) => {
+  try {
+    if (!userDb) return { success: true, config: {} };
+    const rows = dbAllOnDb(userDb, "SELECT config FROM map_user_config WHERE map_id = ?", [mapId]);
+    const config = rows.length > 0 ? (() => { try { return JSON.parse(rows[0].config); } catch { return {}; } })() : {};
+    return { success: true, config };
+  } catch (e) { return { success: true, config: {} }; }
+});
+
+// 保存用户对某地图的覆盖配置
+ipcMain.handle('map-save-user-config', (_event, mapId, config) => {
+  try {
+    const udb = ensureUserDb();
+    if (!udb) throw new Error('无法创建用户数据库');
+    const json = JSON.stringify(config);
+    dbRunOnDb(udb, "INSERT OR REPLACE INTO map_user_config (map_id, config, updated_at) VALUES (?, ?, datetime('now','localtime'))", [mapId, json]);
+    userDbSave();
+    return { success: true };
+  } catch (e) { return { error: e.message }; }
+});
+
+// 清除用户对某地图的覆盖（恢复默认）
+ipcMain.handle('map-reset-user-config', (_event, mapId) => {
+  try {
+    if (!userDb) return { success: true };
+    dbRunOnDb(userDb, "DELETE FROM map_user_config WHERE map_id = ?", [mapId]);
+    userDbSave();
+    return { success: true };
+  } catch (e) { return { success: true }; }
 });
 
 // 在指定数据库上执行 dbAll
@@ -2353,7 +3409,9 @@ ipcMain.handle('read-image', async (_event, filename, maxWidth) => {
 
 // ── 图片 base64 内容 LRU 缓存（避免重复读盘+编码）──
 const _imageContentCache = new Map();
-const _IMAGE_CACHE_MAX = 500;
+const _IMAGE_CACHE_MAX = 2000;
+const _IMAGE_CACHE_MAX_BYTES = 256 * 1024 * 1024;
+let _imageContentCacheBytes = 0;
 function getCachedImage(fp) {
   const entry = _imageContentCache.get(fp);
   if (entry) {
@@ -2365,12 +3423,39 @@ function getCachedImage(fp) {
   return null;
 }
 function setCachedImage(fp, data) {
-  if (_imageContentCache.size >= _IMAGE_CACHE_MAX) {
-    // 删除最久未使用的（Map 的第一个 key）
+  const previous = _imageContentCache.get(fp);
+  if (previous) {
+    _imageContentCacheBytes -= previous.length;
+    _imageContentCache.delete(fp);
+  }
+  const dataBytes = data?.length || 0;
+  while (
+    _imageContentCache.size > 0
+    && (
+      _imageContentCache.size >= _IMAGE_CACHE_MAX
+      || _imageContentCacheBytes + dataBytes > _IMAGE_CACHE_MAX_BYTES
+    )
+  ) {
     const oldest = _imageContentCache.keys().next().value;
-    if (oldest !== undefined) _imageContentCache.delete(oldest);
+    if (oldest === undefined) break;
+    const oldestData = _imageContentCache.get(oldest);
+    _imageContentCache.delete(oldest);
+    _imageContentCacheBytes -= oldestData?.length || 0;
   }
   _imageContentCache.set(fp, data);
+  _imageContentCacheBytes += dataBytes;
+}
+
+// 清除某地图的所有缓存内容（切片+全图），避免更新后读取旧数据
+function invalidateImageContentCache(mapId) {
+  const prefix = `map_${mapId}_`;
+  for (const key of _imageContentCache.keys()) {
+    if (key.includes(prefix)) {
+      const data = _imageContentCache.get(key);
+      _imageContentCache.delete(key);
+      _imageContentCacheBytes -= data?.length || 0;
+    }
+  }
 }
 
 // ── 缩略图生成并发锁（防止大量并发 createThumbnailFromPath 阻塞主进程事件循环）──
@@ -2404,6 +3489,8 @@ async function generateThumbnailBuffer(fp, maxWidth) {
 
     const sz = img.getSize();
     if (sz.width === 0 || sz.height === 0) return null;
+    // 缩略图请求只允许降采样，避免小图（含测试占位图）被无意义放大。
+    if (sz.width <= maxWidth && sz.height <= maxWidth * 3) return img.toPNG();
 
     // 等比缩放
     let targetW = maxWidth;
@@ -2431,7 +3518,7 @@ async function generateThumbnailBuffer(fp, maxWidth) {
 // 通用图片文件读取（供 read-image 和 read-user-image 复用）
 // saveAsPath: 可选，若提供则将缩略图 PNG 写入该路径（用于 [Thumbnail] 缓存）
 const fsPromises = fs.promises;
-async function readImageFile(fp, maxWidth, saveAsPath) {
+async function readImageFile(fp, maxWidth, saveAsPath, allowSmallRawImage = false) {
   // 命中缓存直接返回（注意：如果 maxWidth 不同，缓存 key 也不同）
   const cacheKey = maxWidth ? `${fp}::w${maxWidth}` : fp;
   const cached = getCachedImage(cacheKey);
@@ -2454,7 +3541,7 @@ async function readImageFile(fp, maxWidth, saveAsPath) {
       const headBytes = head.subarray(0, Math.min(bytesRead, 4));
       const isJpeg = headBytes[0] === 0xFF && headBytes[1] === 0xD8;
       const isWebp = headBytes[0] === 0x52 && headBytes[1] === 0x49;
-      if (isJpeg || isWebp) {
+      if (allowSmallRawImage && (isJpeg || isWebp)) {
         const stat = await handle.stat();
         if (stat.size < 5 * 1024 * 1024) {  // < 5MB 直接给浏览器，跳过 nativeImage
           const rawCacheKey = maxWidth ? `${fp}::w${maxWidth}::raw` : fp;
@@ -4138,25 +5225,43 @@ ipcMain.handle('download-material-image', async (_event, iconName) => {
     }
     
     const destPath = path.join(imagesDir, filename);
-    
-    // 下载图片
-    const imageData = await new Promise((resolve, reject) => {
-      const proto = url.startsWith('https') ? require('https') : require('http');
-      const req = proto.get(url, (res) => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode}: ${url}`));
-          return;
-        }
-        const chunks = [];
-        res.on('data', chunk => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks)));
-      });
-      req.on('error', reject);
-      req.setTimeout(15000, () => {
-        req.destroy();
-        reject(new Error(`Request timeout: ${url}`));
-      });
-    });
+
+    // 收集候选 URL 列表：主 URL + fallback（技能图标增加 CDN 后备）
+    const urls = [url];
+    if ((iconName.startsWith('Skill_') || iconName.startsWith('UI_Talent_')) && url.startsWith('http://localhost')) {
+      urls.push(`https://static.nanoka.cc/assets/gi/${iconName}.webp`);
+    }
+
+    let imageData = null;
+    let lastError = null;
+    for (const tryUrl of urls) {
+      try {
+        imageData = await new Promise((resolve, reject) => {
+          const proto = tryUrl.startsWith('https') ? require('https') : require('http');
+          const req = proto.get(tryUrl, (res) => {
+            if (res.statusCode !== 200) {
+              reject(new Error(`HTTP ${res.statusCode}: ${tryUrl}`));
+              return;
+            }
+            const chunks = [];
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => resolve(Buffer.concat(chunks)));
+          });
+          req.on('error', reject);
+          req.setTimeout(15000, () => {
+            req.destroy();
+            reject(new Error(`Request timeout: ${tryUrl}`));
+          });
+        });
+        break; // 下载成功
+      } catch (e) {
+        lastError = e;
+        console.log(`[download-material-image] fallback: ${tryUrl} failed, ${urls.length > 1 ? 'trying next...' : 'giving up'}`);
+      }
+    }
+    if (!imageData) {
+      return { success: false, error: (lastError || new Error('所有 URL 均失败')).message };
+    }
     
     fs.writeFileSync(destPath, imageData);
     clearImagePathCache();
@@ -4597,6 +5702,42 @@ ipcMain.handle('export-seed', async (_event, newVersion) => {
           filteredRows = filteredRows.filter(row => validBannerIds.has(row[bannerIdIdx]));
         }
       }
+      // 过滤 settings 表中属于用户配置的键（不应进入 seed）
+      if (tableName === 'settings') {
+        const SETTINGS_EXCLUDE = new Set(['dev_mode', 'default_view_mode', 'theme']);
+        const keyIdx = columns.indexOf('key');
+        if (keyIdx >= 0) {
+          const before = filteredRows.length;
+          filteredRows = filteredRows.filter(row => !SETTINGS_EXCLUDE.has(row[keyIdx]));
+          if (filteredRows.length < before) {
+            console.log(`[export-seed] settings: 过滤 ${before - filteredRows.length} 条用户配置键`);
+          }
+        }
+      }
+      // map_marker_placements：只导出开发者放置的标点（created_by_dev=1），用户放置的标点在 user.db 中
+      if (tableName === 'map_marker_placements') {
+        const devIdx = columns.indexOf('created_by_dev');
+        if (devIdx >= 0) {
+          const before = filteredRows.length;
+          filteredRows = filteredRows.filter(row => row[devIdx] === 1);
+          if (filteredRows.length < before) {
+            console.log(`[export-seed] map_marker_placements: 过滤 ${before - filteredRows.length} 条用户放置标点`);
+          }
+        }
+      }
+      // map_maps：按 sort_order 排序并重新赋值为连续值，确保导出的 seed 排序唯一
+      if (tableName === 'map_maps') {
+        const sortIdx = columns.indexOf('sort_order');
+        if (sortIdx >= 0) {
+          filteredRows = filteredRows
+            .sort((a, b) => (a[sortIdx] ?? 0) - (b[sortIdx] ?? 0))
+            .map((row, i) => {
+              const newRow = [...row];
+              newRow[sortIdx] = i;
+              return newRow;
+            });
+        }
+      }
       if (!filteredRows.length) return null;
 
       const colNames = exportColumns.map(c => `"${c}"`).join(', ');
@@ -4613,6 +5754,12 @@ ipcMain.handle('export-seed', async (_event, newVersion) => {
     if (!tableResult.length) return { success: false, error: '无数据表' };
     const tables = tableResult[0].values.map(r => r[0]);
 
+    const USER_TABLES = new Set([
+      '_user_delta', 'betamemo_tasks', 'northlandbank_records',
+      'genshin_accounts', 'gacha_archives', 'gacha_items', '_app_identity',
+    ]);
+    const filteredTables = tables.filter(t => !USER_TABLES.has(t));
+
     const tablePriority = {
       elements:1, weapon_types:1, regions:1, enemies:1, settings:1,
       materials:2, characters:2, weapons:2, artifacts:2, wishes:2,
@@ -4623,8 +5770,12 @@ ipcMain.handle('export-seed', async (_event, newVersion) => {
       weapon_ascension_materials:3, wish_banners:3,
       spiral_abyss_floors:3, imaginarium_theater_seasons:3, perilous_trail_bosses:3,
       wish_banner_items:4, talent_levels:4,
+      wish_rate_ups:4, version_tags:4, version_additions:4, version_meta:4,
+      map_maps:5, map_markers:5,
+      websites:5, related_links:5,
+      tcg_cards:6, tcg_card_skills:6, tcg_decks:6,
     };
-    const sortedTables = [...tables].sort((a, b) =>
+    const sortedTables = [...filteredTables].sort((a, b) =>
       (tablePriority[a] || 99) - (tablePriority[b] || 99) || a.localeCompare(b)
     );
 
@@ -4793,16 +5944,16 @@ ipcMain.handle('clean-unused-images', () => {
         return hasFiles;
       } catch (_) { return false; }
     }
-    
+
     walkAndClean(imagesDir);
-    
+
     // 清理空子目录（倒序删除，从深到浅）
     for (const d of emptyDirs.reverse()) {
       try { if (fs.readdirSync(d).length === 0) fs.rmdirSync(d); } catch (_) {}
     }
-    
+
     clearImagePathCache();
-    
+
     return { success: true, deleted, total: totalFiles, message: `扫描 ${totalFiles} 个文件，删除 ${deleted} 个未被引用的图片` };
   } catch (e) {
     console.error('[clean-unused-images] error:', e.message);
@@ -4836,6 +5987,247 @@ ipcMain.handle('set-user-config', (_event, key, value) => {
     return { success: false, error: e.message };
   }
 });
+
+// ── Beta备忘录：从 user.db 读写任务数据 ──
+ipcMain.handle('betamemo-load-tasks', () => {
+  try {
+    if (!userDb) return [];
+    const result = userDb.exec("SELECT id, data_json FROM betamemo_tasks ORDER BY updated_at DESC");
+    if (!result.length || !result[0].values) return [];
+    return result[0].values.map(row => {
+      try { return JSON.parse(row[1]); } catch { return null; }
+    }).filter(Boolean);
+  } catch (e) {
+    console.error('[betamemo-load-tasks] error:', e.message);
+    return [];
+  }
+});
+
+ipcMain.handle('betamemo-save-tasks', (_event, tasks) => {
+  try {
+    if (!userDb) throw new Error('userDb not open');
+    if (!Array.isArray(tasks)) throw new Error('tasks must be an array');
+    // 事务：先删后插，保证原子性
+    userDb.exec("DELETE FROM betamemo_tasks");
+    const stmt = userDb.prepare(
+      "INSERT OR REPLACE INTO betamemo_tasks (id, data_json, updated_at) VALUES (?, ?, datetime('now','localtime'))"
+    );
+    for (const task of tasks) {
+      stmt.bind([task.id, JSON.stringify(task)]);
+      stmt.step();
+      stmt.reset();
+    }
+    stmt.free();
+    userDbSave();
+    return { success: true };
+  } catch (e) {
+    console.error('[betamemo-save-tasks] error:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+// 从 user.json 迁移旧 BetaMemo 数据到 user.db
+ipcMain.handle('betamemo-migrate-from-json', () => {
+  try {
+    const config = loadUserConfig();
+    const oldTasks = config?.betamemo_tasks;
+    if (!oldTasks || oldTasks.length === 0) return { migrated: 0 };
+    // 确保 userDb 可用（若之前被删除则重新创建）
+    const udb = userDb || ensureUserDb();
+    if (!udb) {
+      console.log('[betamemo-migrate] cannot open userDb, skip');
+      return { migrated: 0 };
+    }
+    // 检查是否已有数据（避免重复迁移覆盖）
+    const existing = udb.exec("SELECT COUNT(*) as cnt FROM betamemo_tasks");
+    const cnt = existing[0]?.values?.[0]?.[0] || 0;
+    if (cnt > 0) {
+      console.log('[betamemo-migrate] user.db already has', cnt, 'tasks, skip migration');
+      return { migrated: 0, skipped: cnt };
+    }
+    // 写入 user.db
+    udb.exec("DELETE FROM betamemo_tasks");
+    const stmt = udb.prepare(
+      "INSERT INTO betamemo_tasks (id, data_json, created_at, updated_at) VALUES (?, ?, datetime('now','localtime'), datetime('now','localtime'))"
+    );
+    for (const task of oldTasks) {
+      stmt.bind([task.id, JSON.stringify(task)]);
+      stmt.step();
+      stmt.reset();
+    }
+    stmt.free();
+    userDbSave();
+    // 迁移完成，清除 user.json 中的旧数据（避免后续 init 时重复迁移混乱）
+    delete config.betamemo_tasks;
+    saveUserConfig(config);
+    console.log('[betamemo-migrate] migrated', oldTasks.length, 'tasks from user.json to user.db');
+    return { migrated: oldTasks.length };
+  } catch (e) {
+    console.error('[betamemo-migrate] error:', e.message);
+    return { migrated: 0, error: e.message };
+  }
+});
+
+// ── 北国银行 IPC ──
+
+ipcMain.handle('northlandbank-load-records', () => {
+  try {
+    if (!userDb) return [];
+    const result = userDb.exec("SELECT id, data_json FROM northlandbank_records ORDER BY updated_at DESC");
+    if (!result.length || !result[0].values) return [];
+    return result[0].values.map(row => {
+      try { return JSON.parse(row[1]); } catch { return null; }
+    }).filter(Boolean);
+  } catch (e) {
+    console.error('[northlandbank-load-records] error:', e.message);
+    return [];
+  }
+});
+
+ipcMain.handle('northlandbank-save-records', (_event, records) => {
+  try {
+    if (!userDb) throw new Error('userDb not open');
+    if (!Array.isArray(records)) throw new Error('records must be an array');
+    userDb.exec("DELETE FROM northlandbank_records");
+    const stmt = userDb.prepare(
+      "INSERT OR REPLACE INTO northlandbank_records (id, data_json, updated_at) VALUES (?, ?, datetime('now','localtime'))"
+    );
+    for (const rec of records) {
+      stmt.bind([rec.id, JSON.stringify(rec)]);
+      stmt.step();
+      stmt.reset();
+    }
+    stmt.free();
+    userDbSave();
+    return { success: true };
+  } catch (e) {
+    console.error('[northlandbank-save-records] error:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+// 从 user.json 迁移北国银行数据到 user.db
+ipcMain.handle('northlandbank-migrate-from-json', () => {
+  try {
+    const config = loadUserConfig();
+    const oldRecords = config?.northlandbank_records;
+    if (!oldRecords || oldRecords.length === 0) return { migrated: 0 };
+    const udb = userDb || ensureUserDb();
+    if (!udb) {
+      console.log('[northlandbank-migrate] cannot open userDb, skip');
+      return { migrated: 0 };
+    }
+    const existing = udb.exec("SELECT COUNT(*) as cnt FROM northlandbank_records");
+    const cnt = existing[0]?.values?.[0]?.[0] || 0;
+    if (cnt > 0) {
+      console.log('[northlandbank-migrate] user.db already has', cnt, 'records, skip migration');
+      return { migrated: 0, skipped: cnt };
+    }
+    udb.exec("DELETE FROM northlandbank_records");
+    const stmt = udb.prepare(
+      "INSERT INTO northlandbank_records (id, data_json, created_at, updated_at) VALUES (?, ?, datetime('now','localtime'), datetime('now','localtime'))"
+    );
+    for (const rec of oldRecords) {
+      stmt.bind([rec.id, JSON.stringify(rec)]);
+      stmt.step();
+      stmt.reset();
+    }
+    stmt.free();
+    userDbSave();
+    delete config.northlandbank_records;
+    saveUserConfig(config);
+    console.log('[northlandbank-migrate] migrated', oldRecords.length, 'records from user.json to user.db');
+    return { migrated: oldRecords.length };
+  } catch (e) {
+    console.error('[northlandbank-migrate] error:', e.message);
+    return { migrated: 0, error: e.message };
+  }
+});
+
+// ── 时之沙 IPC ──
+
+// 打开文件对话框选择 .db 文件并读取数据
+ipcMain.handle('hourglass-select-and-read-db', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'SQLite 数据库', extensions: ['db'] }],
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return readExternalDb(result.filePaths[0]);
+  } catch (e) {
+    console.error('[hourglass] select-and-read error:', e.message);
+    return null;
+  }
+});
+
+// 根据文件路径读取外部数据库（支持拖拽）
+ipcMain.handle('hourglass-read-external-db', (_event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    return readExternalDb(filePath);
+  } catch (e) {
+    console.error('[hourglass] read-external error:', e.message);
+    return null;
+  }
+});
+
+// 读取当前基准库的指定表数据（用于对比）
+ipcMain.handle('hourglass-read-current-db', () => {
+  try {
+    if (!db) return null;
+    const tables = ['characters', 'weapons', 'artifacts', 'character_talents', 'character_constellations', 'character_related_effects', 'character_outfits'];
+    const result = {};
+    for (const table of tables) {
+      try {
+        const raw = db.exec(`SELECT * FROM "${table}"`);
+        if (raw.length && raw[0].values) {
+          const cols = raw[0].columns;
+          result[table] = raw[0].values.map(row => {
+            const obj = {};
+            for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
+            return obj;
+          });
+        } else {
+          result[table] = [];
+        }
+      } catch {
+        result[table] = [];
+      }
+    }
+    return result;
+  } catch (e) {
+    console.error('[hourglass] read-current error:', e.message);
+    return null;
+  }
+});
+
+function readExternalDb(filePath) {
+  if (!SQL) throw new Error('sql.js not initialized');
+  const buf = fs.readFileSync(filePath);
+  const extDb = new SQL.Database(buf);
+  const tables = ['characters', 'weapons', 'artifacts', 'character_talents', 'character_constellations', 'character_related_effects', 'character_outfits'];
+  const result = {};
+  for (const table of tables) {
+    try {
+      const raw = extDb.exec(`SELECT * FROM "${table}"`);
+      if (raw.length && raw[0].values) {
+        const cols = raw[0].columns;
+        result[table] = raw[0].values.map(row => {
+          const obj = {};
+          for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
+          return obj;
+        });
+      } else {
+        result[table] = [];
+      }
+    } catch {
+      result[table] = [];
+    }
+  }
+  extDb.close();
+  return result;
+}
 
 // ── 自动更新 ──
 autoUpdater.setMaxListeners(20); // prevent MaxListenersExceededWarning
@@ -6225,7 +7617,70 @@ ipcMain.handle('cleanup-scrape-window', async () => {
 // ── DS 签名生成（匹配 Snap Hutao XRpc: SaltType.X4, Gen2, 2.95.1）──
 const HOYOLAB_SALT_X4 = 'xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs'
 const HOYOLAB_SALT_PROD = 'JwYDpKvLj6MrMqqYU6jTKF17KNO2PXoS'
+const HOYOLAB_SALT_LK2 = 't0qEgfub6kuefrUSD8VkOjRLQ4IfDqId'
 const HOYOLAB_APP_VERSION = '2.95.1'
+
+// 祈愿类型映射（米游社 API）
+const GACHA_TYPES = [
+  { id: 100, name: '新手祈愿', icon: '🌟' },
+  { id: 200, name: '常驻祈愿', icon: '⭐' },
+  { id: 301, name: '角色活动祈愿', icon: '👤' },
+  { id: 302, name: '武器活动祈愿', icon: '⚔️' },
+  { id: 400, name: '角色活动祈愿-2', icon: '👥' },
+  { id: 500, name: '集录祈愿', icon: '📜' },
+]
+
+// ── 设备指纹持久化（跨会话复用，避免每次都判为新设备）──
+function getAppIdentity(key) {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return null
+    const stmt = udb.prepare("SELECT value FROM _app_identity WHERE key = ?")
+    stmt.bind([key])
+    if (stmt.step()) { const r = stmt.getAsObject(); stmt.free(); return r.value }
+    stmt.free()
+  } catch (_) {}
+  return null
+}
+
+function setAppIdentity(key, value) {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return
+    const stmt = udb.prepare("INSERT OR REPLACE INTO _app_identity (key, value) VALUES (?, ?)")
+    stmt.bind([key, String(value)]); stmt.step(); stmt.free()
+    userDbSave()
+  } catch (_) {}
+}
+
+/** 持久化的 53 位设备 ID（生成后恒定，跨会话复用） */
+function getOrCreateDeviceId53() {
+  let id = getAppIdentity('device_id_53')
+  if (id && id.length === 53) return id
+  id = Array.from({ length: 53 }, () => {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+    return chars[Math.floor(Math.random() * chars.length)]
+  }).join("")
+  setAppIdentity('device_id_53', id)
+  return id
+}
+
+/** 持久化的设备指纹元数据（跨会话复用） */
+function loadFingerprint() {
+  return {
+    deviceFp: getAppIdentity('device_fp'),
+    deviceId: getAppIdentity('device_id'),
+    seedId: getAppIdentity('seed_id'),
+    bbsDeviceId: getAppIdentity('bbs_device_id'),
+  }
+}
+
+function saveFingerprint(fp) {
+  if (fp.deviceFp) setAppIdentity('device_fp', fp.deviceFp)
+  if (fp.deviceId) setAppIdentity('device_id', fp.deviceId)
+  if (fp.seedId) setAppIdentity('seed_id', fp.seedId)
+  if (fp.bbsDeviceId) setAppIdentity('bbs_device_id', fp.bbsDeviceId)
+}
 const HOYOLAB_DEVICE_ID = crypto.randomUUID()
 
 function generateDS(query = '', body = '', salt = HOYOLAB_SALT_X4, includeChars = false) {
@@ -6258,29 +7713,23 @@ function getHoyolabHeaders(query = '', body = '') {
 
 // ── 世界树：一键登录 + 爬取 ──
 let _genshinCookies = null
+let _gachaCookies = null
 const QRCODE = require("qrcode")
-// 53 位随机设备 ID（匹配胡桃 HoyolabOptions.DeviceId53，小写字母+数字）
-const HOYOLAB_DEVICE_ID_53 = Array.from({ length: 53 }, () => {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-  return chars[Math.floor(Math.random() * chars.length)]
-}).join("")
 
-ipcMain.handle("genshin-login-and-crawl", async () => {
-  const outputDir = path.join(require("os").homedir(), "Downloads")
+// 53 位设备 ID 改用持久化版本（跨会话复用）
+function getDeviceId53() { return getOrCreateDeviceId53() }
 
-  // Step 1: QR 码登录（使用 HoyoPlay 启动器 API，获取 .mihoyo.com 域 cookies）
-  // 匹配胡桃 HoyoPlayPassportClient + XRpc5 配置
-  // XRpc5 必需 headers: User-Agent=HYPContainer, x-rpc-app_id=ddxf5dufpuyo, x-rpc-client_type=3
+/** 扫码登录：QR码 → stoken → cookie_token + ltoken，返回 { cookieStr, stokenObj } */
+async function doQRLogin() {
   const cookies = await new Promise(async (resolve, reject) => {
     try {
-      // Step 1a: 创建 QR 登录
       const qrResp = await fetch("https://passport-api.mihoyo.com/account/ma-cn-passport/app/createQRLogin", {
         method: "POST",
         headers: {
           "User-Agent": "HYPContainer/1.1.4.133",
           "x-rpc-app_id": "ddxf5dufpuyo",
           "x-rpc-client_type": "3",
-          "x-rpc-device_id": HOYOLAB_DEVICE_ID_53,
+          "x-rpc-device_id": getDeviceId53(),
           "Content-Type": "application/json",
         },
         body: "{}"
@@ -6289,12 +7738,8 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
       if (qrData.retcode !== 0) { reject(new Error("生成二维码失败: " + (qrData.message || qrData.retcode))); return }
       const ticket = qrData.data.ticket
       const qrUrl = qrData.data.url
-      console.log("[genshin] QR ticket:", ticket)
-      console.log("[genshin] QR url:", qrUrl)
-
-      // 本地生成 QR 码
+      console.log("[login] QR ticket:", ticket)
       const qrDataUrl = await QRCODE.toDataURL(qrUrl, { width: 200, margin: 1, color: { dark: "#000", light: "#fff" } })
-
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
         body{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;
         margin:0;background:#1a1a2e;color:#eee;font-family:sans-serif}
@@ -6307,15 +7752,12 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
         <div id="qrcode"><img src="${qrDataUrl}" alt="QR"/></div>
         <p class="hint">打开米游社App → 我的 → 右上角扫一扫</p>
       </body></html>`
-
       const loginWin = new BrowserWindow({
         width: 430, height: 580,
         title: "请用米游社App扫码登录",
         webPreferences: { nodeIntegration: false, contextIsolation: true }
       })
       loginWin.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html))
-
-      // Step 1b: 轮询扫码状态
       let polled = false
       const pollTimer = setInterval(async () => {
         if (loginWin.isDestroyed()) { clearInterval(pollTimer); return }
@@ -6327,26 +7769,20 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
               "User-Agent": "HYPContainer/1.1.4.133",
               "x-rpc-app_id": "ddxf5dufpuyo",
               "x-rpc-client_type": "3",
-              "x-rpc-device_id": HOYOLAB_DEVICE_ID_53,
+              "x-rpc-device_id": getDeviceId53(),
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ ticket })
           })
           const statusData = await statusResp.json()
-          // 匹配胡桃: status=Confirmed, tokens 非空
           if (statusData.retcode === 0 && statusData.data?.status === "Confirmed" && statusData.data?.tokens?.length > 0) {
             polled = true; clearInterval(pollTimer)
-            console.log("[genshin] QR confirmed, tokens:", statusData.data.tokens.length)
-            // 匹配胡桃 Cookie.FromQrLoginResult:
-            // stoken = tokens[token_type=1].token (直接是值，如 "v2_...")
-            // stuid = user_info.aid, mid = user_info.mid
             const stokenToken = statusData.data.tokens.find(t => t.token_type === 1)
             if (!stokenToken) { reject(new Error("未获取到 stoken")); return }
             const stoken = stokenToken.token
             const userInfo = statusData.data.user_info || {}
             const stuid = userInfo.aid || ""
             const mid = userInfo.mid || ""
-            console.log("[genshin] stoken:", stoken.slice(0, 16) + "...", "stuid:", stuid, "mid:", mid)
             loginWin.close()
             resolve({ stoken, stuid, mid })
           }
@@ -6355,16 +7791,11 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
       loginWin.on("closed", () => { clearInterval(pollTimer); if (!polled) reject(new Error("扫码窗口被关闭")) })
     } catch (e) { reject(e) }
   }).catch(e => ({ error: e.message }))
-
   if (cookies.error) return { success: false, error: cookies.error }
   if (!cookies.stoken) return { success: false, error: "登录失败：未能获取 stoken" }
-
-  // Step 1c: stoken 兑换 cookie_token + ltoken（匹配胡桃 PassportClient）
-  // stoken cookie 格式: mid=xxx;stoken=xxx;stuid=xxx (Cookie.ToString() via SortedDictionary, sorted by key)
   const stokenStr = `mid=${cookies.mid};stoken=${cookies.stoken};stuid=${cookies.stuid}`
-  let cookieToken = "", ltoken = "", accountId = cookies.stuid  // stuid IS account_id
+  let cookieToken = "", ltoken = "", accountId = cookies.stuid
   try {
-    // getCookieAccountInfoBySToken
     const ctResp = await fetch("https://passport-api.mihoyo.com/account/auth/api/getCookieAccountInfoBySToken", {
       method: "GET",
       headers: {
@@ -6376,12 +7807,9 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
     })
     const ctData = await ctResp.json()
     if (ctData.retcode === 0) {
-      const accountId = ctData.data?.uid  // uid IS account_id (胡桃 UidCookieToken.uid)
+      accountId = ctData.data?.uid
       cookieToken = `cookie_token=${ctData.data?.cookie_token};account_id=${accountId}`
-      console.log("[genshin] cookie_token obtained:", JSON.stringify(ctData.data).slice(0, 120))
-    } else { console.log("[genshin] cookie_token failed:", ctData.retcode, ctData.message) }
-
-    // getLTokenBySToken (ltoken response has no ltuid field; use same uid as ltuid)
+    } else { console.log("[login] cookie_token failed:", ctData.retcode, ctData.message) }
     const ltResp = await fetch("https://passport-api.mihoyo.com/account/auth/api/getLTokenBySToken", {
       method: "GET",
       headers: {
@@ -6393,40 +7821,186 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
     })
     const ltData = await ltResp.json()
     if (ltData.retcode === 0) {
-      // ltoken + same uid as ltuid (胡桃 LTokenWrapper 只有 ltoken 字段)
       ltoken = `ltoken=${ltData.data?.ltoken};ltuid=${accountId}`
-      console.log("[genshin] ltoken obtained:", JSON.stringify(ltData.data).slice(0, 120))
-    } else { console.log("[genshin] ltoken failed:", ltData.retcode, ltData.message) }
-  } catch (e) { console.log("[genshin] stoken exchange error:", e.message) }
-
+    } else { console.log("[login] ltoken failed:", ltData.retcode, ltData.message) }
+  } catch (e) { console.log("[login] stoken exchange error:", e.message) }
   if (!cookieToken || !ltoken) return { success: false, error: "stoken 兑换 cookie 失败" }
   const finalCookieStr = [cookieToken, ltoken, stokenStr].join(";")
-  _genshinCookies = { cookieStr: finalCookieStr, stokenObj: cookies }
+  return { success: true, cookieStr: finalCookieStr, stokenObj: cookies }
+}
 
-  // Step 2 + 3: Bind + Crawl
-  // 获取设备指纹 — 优先复用已有的指纹（每次新指纹会触发 5003 或设备提醒）
-  let deviceFp, deviceId, seedId, bbsDeviceId
-  try {
-    const udb = ensureUserDb()
-    if (udb) {
-      const fpStmt = udb.prepare("SELECT data_json FROM genshin_accounts WHERE uid = ?")
-      fpStmt.bind([String(uid)])
-      if (fpStmt.step()) {
-        const oldRow = fpStmt.getAsObject()
-        const oldData = JSON.parse(oldRow.data_json || '{}')
-        // 复用已有设备指纹和标识（避免每次扫码触发新设备提醒）
-        const meta = oldData._meta || {}
-        deviceFp = meta.device_fp
-        deviceId = meta.device_id
-        seedId = meta.seed_id
-        bbsDeviceId = meta.bbs_device_id
-        if (deviceFp) console.log("[genshin] reusing existing device_fp:", deviceFp.slice(0, 8) + "...")
-        if (deviceId) console.log("[genshin] reusing existing device_id:", deviceId.slice(0, 8) + "...")
-      }
-      fpStmt.free()
+/** 账号密码登录：打开米哈游通行证页面，用户手动登录后关闭窗口，从 session 中提取 stoken */
+async function doPasswordLogin() {
+  const loginWin = new BrowserWindow({
+    width: 520, height: 680,
+    title: "米哈游通行证登录",
+    webPreferences: {
+      partition: 'persist:password_login',
+      nodeIntegration: false, contextIsolation: true,
     }
-  } catch (_) {}
-  if (!deviceFp) deviceFp = crypto.randomBytes(7).toString("hex").slice(0, 13)  // fallback: 13 hex chars
+  })
+  loginWin.loadURL('https://user.mihoyo.com/#/login')
+
+  // 拦截关闭：先抓 cookies 再真正销毁（避免关闭后 webContents 不可用）
+  let capturedCookies = null
+  loginWin.on('close', (e) => {
+    if (capturedCookies === null) {
+      e.preventDefault()
+      loginWin.webContents.session.cookies.get({})
+        .then(c => { capturedCookies = c; loginWin.destroy() })
+        .catch(() => { capturedCookies = []; loginWin.destroy() })
+    }
+  })
+
+  // 等待窗口被 destroy
+  await new Promise((resolve) => {
+    const check = () => { if (loginWin.isDestroyed()) resolve(); else setTimeout(check, 400) }
+    loginWin.on('closed', () => setTimeout(check, 200))
+  })
+
+  // 从抓取的 cookies 中提取所有可用凭据
+  let stuid = '', stoken = '', mid = '', cookieToken = '', accountId = '', ltoken = '', ltuid = '', loginTicket = ''
+  for (const c of (capturedCookies || [])) {
+    if (c.name === 'stuid') stuid = c.value
+    if (c.name === 'stoken') stoken = c.value
+    if (c.name === 'mid') mid = c.value
+    if (c.name === 'cookie_token') cookieToken = c.value
+    if (c.name === 'account_id') accountId = c.value
+    if (c.name === 'ltoken') ltoken = c.value
+    if (c.name === 'ltuid') ltuid = c.value
+    if (c.name === 'login_ticket') loginTicket = c.value
+  }
+  console.log('[login] captured cookies:', (capturedCookies || []).length, 'names:', (capturedCookies || []).map(c => c.name).join(', '))
+
+  // 情况1: 有 stoken → 直接走现有兑换流程
+  if (stoken && stuid) {
+    const stokenStr = `mid=${mid};stoken=${stoken};stuid=${stuid}`
+    let cookieToken = '', ltoken = '', accountId = stuid
+    try {
+      const ctResp = await fetch("https://passport-api.mihoyo.com/account/auth/api/getCookieAccountInfoBySToken", {
+        method: "GET",
+        headers: {
+          "Cookie": stokenStr,
+          "User-Agent": "Mozilla/5.0 (Linux; Android 15) Mobile miHoYoBBS/2.95.1",
+          "x-rpc-app_version": "2.95.1", "x-rpc-client_type": "5",
+          "DS": generateDS("", "", HOYOLAB_SALT_PROD, true),
+        }
+      })
+      const ctData = await ctResp.json()
+      if (ctData.retcode === 0) {
+        accountId = ctData.data?.uid
+        cookieToken = `cookie_token=${ctData.data?.cookie_token};account_id=${accountId}`
+      }
+      const ltResp = await fetch("https://passport-api.mihoyo.com/account/auth/api/getLTokenBySToken", {
+        method: "GET",
+        headers: {
+          "Cookie": stokenStr,
+          "User-Agent": "Mozilla/5.0 (Linux; Android 15) Mobile miHoYoBBS/2.95.1",
+          "x-rpc-app_version": "2.95.1", "x-rpc-client_type": "5",
+          "DS": generateDS("", "", HOYOLAB_SALT_PROD, true),
+        }
+      })
+      const ltData = await ltResp.json()
+      if (ltData.retcode === 0) {
+        ltoken = `ltoken=${ltData.data?.ltoken};ltuid=${accountId}`
+      }
+    } catch (e) { console.log("[login] stoken exchange error:", e.message) }
+    if (!cookieToken || !ltoken) return { success: false, error: "stoken 兑换 cookie 失败" }
+    const finalCookieStr = [cookieToken, ltoken, stokenStr].join(";")
+    return { success: true, cookieStr: finalCookieStr, stokenObj: { stoken, stuid, mid } }
+  }
+
+  // 情况2: 有 login_ticket → 兑换 stoken
+  if (loginTicket && stuid) {
+    try {
+      const tkResp = await fetch(`https://api-takumi.mihoyo.com/auth/api/getMultiTokenByLoginTicket?login_ticket=${loginTicket}&uid=${stuid}&token_types=3`, {
+        headers: {
+          'User-Agent': `Mozilla/5.0 (Linux; Android 9) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
+        }
+      })
+      const tkData = await tkResp.json()
+      if (tkData.retcode === 0 && tkData.data?.list?.length) {
+        const stokenTk = tkData.data.list.find(t => t.token_type === 1)
+        if (stokenTk) {
+          stoken = stokenTk.token
+          const stokenStr = `mid=${mid || ''};stoken=${stoken};stuid=${stuid}`
+          let cookieToken = '', ltoken = '', accountId = stuid
+          try {
+            const ctResp = await fetch("https://passport-api.mihoyo.com/account/auth/api/getCookieAccountInfoBySToken", {
+              method: "GET",
+              headers: {
+                "Cookie": stokenStr,
+                "User-Agent": "Mozilla/5.0 (Linux; Android 15) Mobile miHoYoBBS/2.95.1",
+                "x-rpc-app_version": "2.95.1", "x-rpc-client_type": "5",
+                "DS": generateDS("", "", HOYOLAB_SALT_PROD, true),
+              }
+            })
+            const ctData = await ctResp.json()
+            if (ctData.retcode === 0) {
+              accountId = ctData.data?.uid
+              cookieToken = `cookie_token=${ctData.data?.cookie_token};account_id=${accountId}`
+            }
+            const ltResp = await fetch("https://passport-api.mihoyo.com/account/auth/api/getLTokenBySToken", {
+              method: "GET",
+              headers: {
+                "Cookie": stokenStr,
+                "User-Agent": "Mozilla/5.0 (Linux; Android 15) Mobile miHoYoBBS/2.95.1",
+                "x-rpc-app_version": "2.95.1", "x-rpc-client_type": "5",
+                "DS": generateDS("", "", HOYOLAB_SALT_PROD, true),
+              }
+            })
+            const ltData = await ltResp.json()
+            if (ltData.retcode === 0) {
+              ltoken = `ltoken=${ltData.data?.ltoken};ltuid=${accountId}`
+            }
+          } catch (e) { console.log("[login] stoken exchange error:", e.message) }
+          if (cookieToken && ltoken) {
+            const finalCookieStr = [cookieToken, ltoken, stokenStr].join(";")
+            return { success: true, cookieStr: finalCookieStr, stokenObj: { stoken, stuid, mid } }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 情况3: 有 cookie_token + account_id（纯网页登录产物，gacha 可能不可用）
+  if (cookieToken && accountId) {
+    let cookieStr = `cookie_token=${cookieToken};account_id=${accountId}`
+    if (ltoken && ltuid) cookieStr += `;ltoken=${ltoken};ltuid=${ltuid}`
+    console.log('[login] using cookie_token auth (may not work for gacha)')
+    return { success: true, cookieStr, stokenObj: { cookieToken, accountId, ltoken, ltuid } }
+  }
+
+  console.log('[login] no valid auth found, cookies:', (capturedCookies || []).map(c => `${c.name}=${c.value.slice(0, 8)}...`).join(', '))
+  return { success: false, error: '未检测到登录信息，请确保完成登录后关闭窗口' }
+}
+
+ipcMain.handle("genshin-login-and-crawl", async () => {
+  const outputDir = path.join(require("os").homedir(), "Downloads")
+
+  const loginResult = await doQRLogin()
+  if (!loginResult.success) return loginResult
+  _genshinCookies = { cookieStr: loginResult.cookieStr, stokenObj: loginResult.stokenObj }
+  const cookies = loginResult.stokenObj
+  const finalCookieStr = loginResult.cookieStr
+
+  return await performGenshinCrawl(finalCookieStr, cookies, outputDir)
+})
+
+/** 密码登录 + 爬取（密码登录后调用爬取逻辑） */
+ipcMain.handle("genshin-password-login-and-crawl", async () => {
+  const outputDir = path.join(require("os").homedir(), "Downloads")
+  const loginResult = await doPasswordLogin()
+  if (!loginResult.success) return loginResult
+  _genshinCookies = { cookieStr: loginResult.cookieStr, stokenObj: loginResult.stokenObj }
+  return await performGenshinCrawl(loginResult.cookieStr, loginResult.stokenObj, outputDir)
+})
+
+/** 核心爬取逻辑（登录后执行），被 genshin-login-and-crawl 和 genshin-password-login-and-crawl 共用 */
+async function performGenshinCrawl(finalCookieStr, cookies, outputDir) {
+  // 获取设备指纹 — 优先从 _app_identity 复用（跨会话）
+  let fp = loadFingerprint()
+  let deviceFp = fp.deviceFp, deviceId = fp.deviceId, seedId = fp.seedId, bbsDeviceId = fp.bbsDeviceId
   // 尝试从 API 获取/刷新指纹
   try {
     if (!deviceId) deviceId = crypto.randomBytes(8).toString("hex")  // 16 hex chars
@@ -6486,7 +8060,7 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
     "Accept": "application/json",
     "x-rpc-app_version": HOYOLAB_APP_VERSION,
     "x-rpc-client_type": "5",
-    "x-rpc-device_id": HOYOLAB_DEVICE_ID_53,
+    "x-rpc-device_id": getDeviceId53(),
     "x-rpc-device_fp": deviceFp,
     "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
     "DS": ds,
@@ -6507,7 +8081,7 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
         "x-rpc-challenge_path": challengePath,
         "DS": generateDS("is_high=true", ""),
         "x-rpc-app_version": HOYOLAB_APP_VERSION, "x-rpc-client_type": "5",
-        "x-rpc-device_id": HOYOLAB_DEVICE_ID_53, "x-rpc-device_fp": deviceFp,
+        "x-rpc-device_id": getDeviceId53(), "x-rpc-device_fp": deviceFp,
         "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
       }
     })
@@ -6577,7 +8151,7 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
                 "x-rpc-challenge_path": challengePath,
                 "DS": generateDS("", vvBody),
                 "x-rpc-app_version": HOYOLAB_APP_VERSION, "x-rpc-client_type": "5",
-                "x-rpc-device_id": HOYOLAB_DEVICE_ID_53, "x-rpc-device_fp": deviceFp,
+                "x-rpc-device_id": getDeviceId53(), "x-rpc-device_fp": deviceFp,
                 "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
               },
               body: vvBody
@@ -6597,11 +8171,12 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
   }
 
   let uid, server
+  let geetestCancelled = false
   // 匹配胡桃 BindingClient.GetUserGameRolesByCookieAsync:
   // HttpClientConfiguration.Default (无 DS!), CookieType.LToken only
   try {
     const r = await fetch(`https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn`, {
-      headers: { "Cookie": ltoken }
+      headers: { "Cookie": finalCookieStr }
     })
     const d = await r.json()
     console.log("[genshin] getUserGameRolesByStoken retcode:", d.retcode, "msg:", d.message, "listLen:", d.data?.list?.length)
@@ -6664,7 +8239,7 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
               "Accept": "application/json",
               "x-rpc-app_version": HOYOLAB_APP_VERSION,
               "x-rpc-client_type": "5",
-              "x-rpc-device_id": HOYOLAB_DEVICE_ID_53,
+              "x-rpc-device_id": getDeviceId53(),
               "x-rpc-device_fp": deviceFp,
               "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
               "DS": ds,
@@ -6697,6 +8272,8 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
                 results[key] = d3
                 maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d3, null, 2))
                 console.log(`[genshin] ${key}: retcode=${d3.retcode} (after geetest + new fp)`)
+              } else {
+                geetestCancelled = true
               }
             }
             return
@@ -6710,6 +8287,7 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
       }
 
       // 1034: 需要极验验证（匹配胡桃 RetryIf1034Async）
+      if (geetestCancelled) { results[key] = d; return }
       if (d.retcode === 1034 && retryOn1034) {
         console.log(`[genshin] ${key}: 1034, starting geetest...`)
         // 端点路径映射（匹配胡桃 CardVerificationHeaders）
@@ -6730,6 +8308,7 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
           return
         }
         console.log(`[genshin] ${key}: geetest failed, saving original 1034 result`)
+        geetestCancelled = true
       }
 
       results[key] = d
@@ -6787,6 +8366,8 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
         merged._meta.device_id = deviceId
         merged._meta.seed_id = seedId
         merged._meta.bbs_device_id = bbsDeviceId
+        // 同步保存到 _app_identity（跨会话持久化）
+        saveFingerprint({ deviceFp, deviceId, seedId, bbsDeviceId })
 
         const nickname = merged.index?.data?.role?.nickname || merged.roleBasicInfo?.data?.nickname || ''
         const level = merged.index?.data?.role?.level || merged.roleBasicInfo?.data?.level || 0
@@ -6804,9 +8385,24 @@ ipcMain.handle("genshin-login-and-crawl", async () => {
   }
 
   return { success: true, uid, server, outputDir, summary, data: results }
-})
+}
 
 ipcMain.handle("genshin-logout", () => { _genshinCookies = null; return { success: true } })
+
+ipcMain.handle("gacha-login", async () => {
+  const result = await doQRLogin()
+  if (result.success) _gachaCookies = { cookieStr: result.cookieStr, stokenObj: result.stokenObj }
+  return result
+})
+
+ipcMain.handle("gacha-logout", () => { _gachaCookies = null; return { success: true } })
+
+ipcMain.handle("gacha-password-login", async () => {
+  const result = await doPasswordLogin()
+  if (result.success) _gachaCookies = { cookieStr: result.cookieStr, stokenObj: result.stokenObj }
+  return result
+})
+
 
 // ── 世界树：账号数据 CRUD ──
 ipcMain.handle("genshin-list-accounts", () => {
@@ -6892,3 +8488,241 @@ ipcMain.handle("genshin-refetch-daily", async (_event, uid) => {
   } catch (e) { return { success: false, error: e.message } }
 })
 
+// ── 祈愿捕捉站：辅助函数 ──
+
+async function generateGachaAuthkey(authObj, uid, region) {
+  // 兼容两种认证格式：stoken 方式 或 cookie_token 方式
+  let cookieStr
+  if (authObj.stoken) {
+    cookieStr = `mid=${authObj.mid || ''};stoken=${authObj.stoken};stuid=${authObj.stuid}`
+  } else if (authObj.cookieToken) {
+    cookieStr = `cookie_token=${authObj.cookieToken};account_id=${authObj.accountId}`
+    if (authObj.ltoken) cookieStr += `;ltoken=${authObj.ltoken};ltuid=${authObj.ltuid || authObj.accountId}`
+  } else {
+    throw new Error('无效的认证凭据')
+  }
+  const bodyData = { auth_appid: 'webview_gacha', game_biz: 'hk4e_cn', game_uid: parseInt(uid), region: region || 'cn_gf01' }
+  const body = JSON.stringify(bodyData)
+  const ds = generateDS('', body, HOYOLAB_SALT_LK2)
+  const resp = await fetch('https://api-takumi.mihoyo.com/binding/api/genAuthKey', {
+    method: 'POST',
+    headers: {
+      'Cookie': cookieStr, 'Content-Type': 'application/json',
+      'x-rpc-app_version': HOYOLAB_APP_VERSION, 'x-rpc-client_type': '5',
+      'DS': ds, 'Referer': 'https://app.mihoyo.com',
+      'User-Agent': `Mozilla/5.0 (Linux; Android 9) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
+    }, body
+  })
+  const data = await resp.json()
+  if (data.retcode !== 0) throw new Error(`生成 authkey 失败: ${data.message || data.retcode}`)
+  return data.data
+}
+
+async function fetchGachaLogPage(authkeyData, gachaType, endId = '0', maxRetries = 3) {
+  const params = new URLSearchParams({
+    authkey: authkeyData.authkey, authkey_ver: String(authkeyData.authkey_ver),
+    sign_type: String(authkeyData.sign_type), gacha_type: String(gachaType),
+    size: '20', end_id: String(endId), lang: 'zh-cn'
+  })
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const resp = await fetch(`https://public-operation-hk4e.mihoyo.com/gacha_info/api/getGachaLog?${params}`, {
+        headers: { 'User-Agent': `Mozilla/5.0 (Linux; Android 9) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}` }
+      })
+      const data = await resp.json()
+      if (data.retcode !== 0) {
+        const msg = data.message || String(data.retcode)
+        if (msg.includes('visit too frequently') && attempt < maxRetries) {
+          const waitMs = 5000 + Math.random() * 5000
+          console.log(`[gacha] retry ${attempt}/${maxRetries} after ${Math.round(waitMs)}ms (${msg})`)
+          await new Promise(r => setTimeout(r, waitMs))
+          continue
+        }
+        throw new Error(`获取祈愿记录失败: ${msg}`)
+      }
+      return data.data
+    } catch (e) {
+      if (attempt < maxRetries && e.message.includes('fetch')) {
+        await new Promise(r => setTimeout(r, 3000))
+        continue
+      }
+      throw e
+    }
+  }
+  throw new Error('重试耗尽')
+}
+
+function getLocalMaxId(udb, uid, gachaType) {
+  try {
+    const stmt = udb.prepare("SELECT id FROM gacha_items WHERE uid = ? AND gacha_type = ? ORDER BY id DESC LIMIT 1")
+    stmt.bind([String(uid), gachaType])
+    if (stmt.step()) { const r = stmt.getAsObject(); stmt.free(); return r.id || '0' }
+    stmt.free()
+  } catch (_) {}
+  return '0'
+}
+
+function itemExistsInDb(udb, uid, itemId) {
+  try {
+    const stmt = udb.prepare("SELECT 1 FROM gacha_items WHERE id = ? AND uid = ? LIMIT 1")
+    stmt.bind([String(itemId), String(uid)])
+    const exists = stmt.step(); stmt.free(); return exists
+  } catch (_) { return false }
+}
+
+function getLocalItemCount(udb, uid) {
+  try {
+    const stmt = udb.prepare("SELECT COUNT(*) as cnt FROM gacha_items WHERE uid = ?")
+    stmt.bind([String(uid)])
+    if (stmt.step()) { const r = stmt.getAsObject(); stmt.free(); return r.cnt || 0 }
+    stmt.free()
+  } catch (_) {}
+  return 0
+}
+
+// ── 祈愿捕捉站：IPC handlers ──
+
+ipcMain.handle("gacha-list-archives", () => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: true, archives: [] }
+    const stmt = udb.prepare(`SELECT a.*, (SELECT COUNT(*) FROM gacha_items WHERE uid = a.uid) as item_count FROM gacha_archives a ORDER BY a.updated_at DESC`)
+    const archives = []; while (stmt.step()) archives.push(stmt.getAsObject()); stmt.free()
+    return { success: true, archives }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
+ipcMain.handle("gacha-get-archive", (_event, uid) => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: false, error: "user.db 未初始化" }
+    const stmt = udb.prepare("SELECT * FROM gacha_archives WHERE uid = ?")
+    stmt.bind([String(uid)])
+    if (!stmt.step()) { stmt.free(); return { success: false, error: "档案不存在" } }
+    const archive = stmt.getAsObject(); stmt.free()
+    const countStmt = udb.prepare("SELECT gacha_type, rank_type, COUNT(*) as cnt FROM gacha_items WHERE uid = ? GROUP BY gacha_type, rank_type")
+    countStmt.bind([String(uid)])
+    const stats = []; while (countStmt.step()) stats.push(countStmt.getAsObject()); countStmt.free()
+    const recentStmt = udb.prepare("SELECT * FROM gacha_items WHERE uid = ? ORDER BY time DESC LIMIT 5000")
+    recentStmt.bind([String(uid)])
+    const items = []; while (recentStmt.step()) items.push(recentStmt.getAsObject()); recentStmt.free()
+    return { success: true, archive, stats, items }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
+ipcMain.handle("gacha-delete-archive", (_event, uid) => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: false, error: "user.db 未初始化" }
+    const d1 = udb.prepare("DELETE FROM gacha_items WHERE uid = ?"); d1.bind([String(uid)]); d1.step(); d1.free()
+    const d2 = udb.prepare("DELETE FROM gacha_archives WHERE uid = ?"); d2.bind([String(uid)]); d2.step(); d2.free()
+    userDbSave(); return { success: true }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
+ipcMain.handle("gacha-fetch-and-save", async (_event, uid, server) => {
+  const sendProgress = (current, done, total) => {
+    try { _event.sender.send('gacha-fetch-progress', { current, done, total }) } catch {}
+  }
+  try {
+    if (!_gachaCookies || !_gachaCookies.stokenObj) {
+      return { success: false, error: "未登录，请先扫码登录", needLogin: true }
+    }
+    // 网页登录的 cookie_token 无法用于 genAuthKey
+    if (!_gachaCookies.stokenObj.stoken) {
+      return { success: false, error: "当前登录方式不支持祈愿捕捉站，请使用扫码登录", needRelogin: true }
+    }
+    const udb = ensureUserDb()
+    if (!udb) return { success: false, error: "user.db 未初始化" }
+    let finalUid = String(uid); let finalServer = server || 'cn_gf01'
+    if (!finalUid || finalUid === 'undefined' || finalUid === 'null') {
+      const roleResp = await fetch('https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn', {
+        headers: { 'Cookie': _gachaCookies.cookieStr }
+      })
+      const roleData = await roleResp.json()
+      if (roleData.retcode !== 0 || !roleData.data?.list?.length) {
+        return { success: false, error: '未找到绑定的原神账号' }
+      }
+      finalUid = roleData.data.list[0].game_uid
+      finalServer = roleData.data.list[0].region
+    }
+    sendProgress('正在生成 authkey...', 0, 6)
+    const authkeyData = await generateGachaAuthkey(_gachaCookies.stokenObj, finalUid, finalServer)
+    const results = {}; let totalNew = 0
+    sendProgress('正在拉取数据...', 0, 6)
+    for (const [gi, gt] of GACHA_TYPES.entries()) {
+      sendProgress(`${gt.name}...`, gi, 6)
+      // 每两个类型之间延迟 3~5 秒，避免限流
+      if (gi > 0) await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000))
+      const gachaType = gt.id; const localMaxId = getLocalMaxId(udb, finalUid, gachaType); let endId = '0'
+      let pageItems = []; let keepFetching = true; let pageNum = 0
+      while (keepFetching && pageNum < 200) {
+        const pageData = await fetchGachaLogPage(authkeyData, gachaType, endId)
+        if (!pageData?.list?.length) { keepFetching = false; break }
+        const newItems = []
+        for (const item of pageData.list) {
+          const idStr = String(item.id)
+          if (localMaxId !== '0' && (idStr === localMaxId || itemExistsInDb(udb, finalUid, idStr))) { keepFetching = false; break }
+          newItems.push({
+            id: idStr, uid: finalUid, gacha_type: gachaType,
+            item_id: item.item_id || '', count: item.count != null ? parseInt(item.count) : 1,
+            time: item.time, name: item.name, lang: item.lang || 'zh-cn',
+            item_type: item.item_type || '', rank_type: item.rank_type != null ? parseInt(item.rank_type) : 0
+          })
+        }
+        if (!newItems.length) { keepFetching = false; break }
+        pageItems = pageItems.concat(newItems)
+        endId = String(newItems[newItems.length - 1].id); pageNum++
+        // 每页之间延迟 0.8~1.2 秒
+        await new Promise(r => setTimeout(r, 800 + Math.random() * 400))
+      }
+      results[gachaType] = { count: pageItems.length, items: pageItems }
+      totalNew += pageItems.length
+      sendProgress(`${gt.name} 完成`, gi + 1, 6)
+    }
+    sendProgress('保存数据中...', 6, 6)
+    if (totalNew > 0) {
+      const upsertArch = udb.prepare("INSERT OR REPLACE INTO gacha_archives (uid, server, nickname, updated_at) VALUES (?, ?, ?, datetime('now','localtime'))")
+      upsertArch.bind([finalUid, finalServer, '']); upsertArch.step(); upsertArch.free()
+      const insertStmt = udb.prepare("INSERT OR IGNORE INTO gacha_items (id, uid, gacha_type, item_id, count, time, name, lang, item_type, rank_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      for (const gt of GACHA_TYPES) {
+        for (const item of (results[gt.id]?.items || [])) {
+          insertStmt.bind([item.id, item.uid, item.gacha_type, item.item_id, item.count, item.time, item.name, item.lang, item.item_type, item.rank_type])
+          insertStmt.step(); insertStmt.reset()
+        }
+      }
+      insertStmt.free()
+      try {
+        const qs = `role_id=${finalUid}&server=${finalServer}`
+        const infoResp = await fetch(`https://api-takumi-record.mihoyo.com/game_record/app/genshin/api/index?${qs}`, {
+          headers: { 'Cookie': _gachaCookies.cookieStr, ...getHoyolabHeaders(qs, '') }
+        })
+        const infoData = await infoResp.json()
+        if (infoData.retcode === 0 && infoData.data?.role?.nickname) {
+          const updStmt = udb.prepare("UPDATE gacha_archives SET nickname = ? WHERE uid = ?")
+          updStmt.bind([infoData.data.role.nickname, finalUid]); updStmt.step(); updStmt.free()
+        }
+      } catch (_) {}
+      userDbSave()
+    }
+    const totalLocal = getLocalItemCount(udb, finalUid)
+    return { success: true, uid: finalUid, server: finalServer, newItems: totalNew, totalItems: totalLocal }
+  } catch (e) {
+    console.error('[gacha] fetch error:', e.message)
+    return { success: false, error: e.message }
+  }
+})
+
+ipcMain.handle("gacha-get-items-by-type", (_event, uid, gachaType) => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: false, error: "user.db 未初始化" }
+    const itemsStmt = udb.prepare("SELECT * FROM gacha_items WHERE uid = ? AND gacha_type = ? ORDER BY time ASC")
+    itemsStmt.bind([String(uid), gachaType])
+    const items = []; while (itemsStmt.step()) items.push(itemsStmt.getAsObject()); itemsStmt.free()
+    const statsStmt = udb.prepare("SELECT rank_type, COUNT(*) as cnt FROM gacha_items WHERE uid = ? AND gacha_type = ? GROUP BY rank_type")
+    statsStmt.bind([String(uid), gachaType])
+    const stats = []; while (statsStmt.step()) stats.push(statsStmt.getAsObject()); statsStmt.free()
+    return { success: true, items, stats }
+  } catch (e) { return { success: false, error: e.message } }
+})

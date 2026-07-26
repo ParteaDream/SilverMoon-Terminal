@@ -60,6 +60,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   repairWebsites: () => ipcRenderer.invoke('db-repair-websites'),
   getUserConfig: () => ipcRenderer.invoke('get-user-config'),
   setUserConfig: (key, value) => ipcRenderer.invoke('set-user-config', key, value),
+  // Beta备忘录：user.db 读写
+  betamemoLoadTasks: () => ipcRenderer.invoke('betamemo-load-tasks'),
+  betamemoSaveTasks: (tasks) => ipcRenderer.invoke('betamemo-save-tasks', tasks),
+  betamemoMigrateFromJson: () => ipcRenderer.invoke('betamemo-migrate-from-json'),
+  // 北国银行：user.db 读写
+  northlandbankLoadRecords: () => ipcRenderer.invoke('northlandbank-load-records'),
+  northlandbankSaveRecords: (records) => ipcRenderer.invoke('northlandbank-save-records', records),
+  northlandbankMigrateFromJson: () => ipcRenderer.invoke('northlandbank-migrate-from-json'),
   readAlbumTags: () => ipcRenderer.invoke('read-album-tags'),
   saveAlbumTags: (data) => ipcRenderer.invoke('save-album-tags', data),
   setDevMode: (enabled) => ipcRenderer.invoke('set-dev-mode', enabled),
@@ -129,6 +137,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   genshinDeleteAccount: (uid) => ipcRenderer.invoke('genshin-delete-account', uid),
   genshinRefetchDaily: (uid) => ipcRenderer.invoke('genshin-refetch-daily', uid),
 
+  // 祈愿捕捉站 — 祈愿数据
+  gachaListArchives: () => ipcRenderer.invoke('gacha-list-archives'),
+  gachaGetArchive: (uid) => ipcRenderer.invoke('gacha-get-archive', uid),
+  gachaDeleteArchive: (uid) => ipcRenderer.invoke('gacha-delete-archive', uid),
+  gachaFetchAndSave: (uid, server) => ipcRenderer.invoke('gacha-fetch-and-save', uid, server),
+  gachaGetItemsByType: (uid, gachaType) => ipcRenderer.invoke('gacha-get-items-by-type', uid, gachaType),
+  gachaLogin: () => ipcRenderer.invoke('gacha-login'),
+  gachaLogout: () => ipcRenderer.invoke('gacha-logout'),
+  gachaPasswordLogin: () => ipcRenderer.invoke('gacha-password-login'),
+  genshinPasswordLoginAndCrawl: () => ipcRenderer.invoke('genshin-password-login-and-crawl'),
+  onGachaFetchProgress: (callback) => {
+    ipcRenderer.on('gacha-fetch-progress', (_e, progress) => callback(progress));
+    return () => ipcRenderer.removeAllListeners('gacha-fetch-progress');
+  },
+
   // RateFetcher：角色技能倍率导出
   fetchRateCharData: (charId) => ipcRenderer.invoke('fetch-rate-char-data', charId),
   saveRateCsv: (options) => ipcRenderer.invoke('save-rate-csv', options),
@@ -139,4 +162,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-status', (_e, status) => callback(status));
     return () => ipcRenderer.removeAllListeners('update-status');
   },
+
+  // ═══════════════════════════════════════════════════
+  // 摹忆中枢 — 大地图模块
+  // ═══════════════════════════════════════════════════
+  mapQuery: (sql, params) => ipcRenderer.invoke('map-query', sql, params),
+  mapExecBaseline: (sql, params) => ipcRenderer.invoke('map-exec-baseline', sql, params),
+  mapExecUser: (sql, params) => ipcRenderer.invoke('map-exec-user', sql, params),
+  mapGetConfig: (mapId) => ipcRenderer.invoke('map-get-config', mapId),
+  mapSaveConfig: (mapId, nameZh, config) => ipcRenderer.invoke('map-save-config', mapId, nameZh, config),
+  mapInitCalibration: (existingMapId) => ipcRenderer.invoke('map-init-calibration', existingMapId),
+  mapStartSlice: (mapId, srcPath, config) => ipcRenderer.invoke('map-start-slice', mapId, srcPath, config),
+  mapReadTile: (mapId, worldRow, worldCol, maxWidth) => ipcRenderer.invoke('map-read-tile', mapId, worldRow, worldCol, maxWidth),
+  mapListTiles: (mapId) => ipcRenderer.invoke('map-list-tiles', mapId),
+  mapDelete: (mapId) => ipcRenderer.invoke('map-delete', mapId),
+  mapReorder: (orderedIds) => ipcRenderer.invoke('map-reorder', orderedIds),
+  mapUpdateMarkerCategory: (markerId, category) => ipcRenderer.invoke('map-update-marker-category', markerId, category),
+  mapUpdateMarker: (markerId, updates) => ipcRenderer.invoke('map-update-marker', markerId, updates),
+  mapDeleteMarker: (markerId) => ipcRenderer.invoke('map-delete-marker', markerId),
+  mapReorderMarkers: (orderedIds) => ipcRenderer.invoke('map-reorder-markers', orderedIds),
+  mapReorderPlacements: (items) => ipcRenderer.invoke('map-reorder-placements', items),
+  mapDeletePlacement: (placementId) => ipcRenderer.invoke('map-delete-placement', placementId),
+  mapUpdatePlacement: (placementId, updates) => ipcRenderer.invoke('map-update-placement', placementId, updates),
+  mapUpdateTextbox: (id, updates) => ipcRenderer.invoke('map-update-textbox', id, updates),
+  mapClearTiles: (mapId) => ipcRenderer.invoke('map-clear-tiles', mapId),
+  mapGenerateFull: (mapId) => ipcRenderer.invoke('map-generate-full', mapId),
+  // 地图全局默认配置
+  mapGetGlobalDefaults: () => ipcRenderer.invoke('map-get-global-defaults'),
+  mapSaveGlobalDefault: (key, value) => ipcRenderer.invoke('map-save-global-default', key, value),
+  // 用户 per-map 覆盖配置
+  mapGetUserConfig: (mapId) => ipcRenderer.invoke('map-get-user-config', mapId),
+  mapSaveUserConfig: (mapId, config) => ipcRenderer.invoke('map-save-user-config', mapId, config),
+  mapResetUserConfig: (mapId) => ipcRenderer.invoke('map-reset-user-config', mapId),
+  // 时之沙
+  hourglassSelectAndReadDb: () => ipcRenderer.invoke('hourglass-select-and-read-db'),
+  hourglassReadExternalDb: (filePath) => ipcRenderer.invoke('hourglass-read-external-db', filePath),
+  hourglassReadCurrentDb: () => ipcRenderer.invoke('hourglass-read-current-db'),
 });

@@ -129,6 +129,30 @@ npm run electron:publish
 # 构建产物在 release/ 目录下
 ```
 
+> ⚠️ **macOS 用户须知**
+>
+> SilverMoon Terminal 使用 ad-hoc（自签名）构建，未通过 Apple 公证。macOS 可能会弹窗提示"已阻止恶意软件"或"无法验证开发者"——**这不是病毒**，仅因应用无 Apple 签名。
+>
+> ### 首次启动步骤
+>
+> 1. **将 .app 移到「应用程序」文件夹**（不要放在「下载」中，macOS 对其限制更严）
+> 2. **运行解隔离脚本（推荐）**
+>    ```bash
+>    bash scripts/fix-mac-quarantine.sh
+>    ```
+>    脚本会自动查找 .app，移除隔离属性并执行 ad-hoc 签名。
+>
+> 3. **右键 → 打开（首次必须！）**
+>    在 Finder 中**右键**点击 `SilverMoon-Terminal.app` → 选择「打开」，在弹出的对话框中点击「打开」。之后就可以正常双击启动了。
+>
+> ### 备选方案
+>
+> - **手动清除隔离**：在终端执行 `xattr -cr /Applications/SilverMoon-Terminal.app`
+> - **系统设置允许**：打开 **系统设置 → 隐私与安全性 → 安全性**，在页面底部点击「仍然允许」
+>
+> > 💡 若以上方法均无效，请确认已将 .app 移出**下载**文件夹，并确保运行了 ad-hoc 签名（`codesign --force --deep --sign -`）。<br>
+> > 每次从新版本替换 .app 后，都需要重新执行上述步骤。
+
 ---
 
 ## 图包管理

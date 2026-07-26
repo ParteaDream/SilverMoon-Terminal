@@ -42,6 +42,13 @@ async function main() {
   const tables = tableResult[0].values.map(r => r[0]);
   console.log(`找到 ${tables.length} 个数据表`);
 
+  const USER_TABLES = new Set([
+    '_user_delta', 'betamemo_tasks', 'northlandbank_records',
+    'genshin_accounts', 'gacha_archives', 'gacha_items', '_app_identity',
+  ]);
+  const filteredTables = tables.filter(t => !USER_TABLES.has(t));
+  console.log(`排除 ${tables.length - filteredTables.length} 个用户数据表，剩余 ${filteredTables.length} 个表`);
+
   // ── 表导出顺序 ──
   const tablePriority = {
     elements:1, weapon_types:1, regions:1, enemies:1, settings:1,
@@ -53,7 +60,7 @@ async function main() {
     spiral_abyss_floors:3, imaginarium_theater_seasons:3, perilous_trail_bosses:3,
     wish_banner_items:4, talent_levels:4,
   };
-  const sortedTables = [...tables].sort((a, b) =>
+  const sortedTables = [...filteredTables].sort((a, b) =>
     (tablePriority[a] || 99) - (tablePriority[b] || 99) || a.localeCompare(b)
   );
 
@@ -86,6 +93,32 @@ async function main() {
         filteredRows = filteredRows.filter(row => validBannerIds.has(row[bannerIdIdx]));
         if (filteredRows.length < before) {
           console.log(`  ⚠ ${tableName}: 过滤 ${before - filteredRows.length} 条孤儿引用`);
+        }
+      }
+    }
+
+    if (!filteredRows.length) return null;
+
+    // 过滤 settings 表中属于用户配置的键（不应进入 seed）
+    if (tableName === 'settings') {
+      const SETTINGS_EXCLUDE = new Set(['dev_mode', 'default_view_mode', 'theme']);
+      const keyIdx = columns.indexOf('key');
+      if (keyIdx >= 0) {
+        const before = filteredRows.length;
+        filteredRows = filteredRows.filter(row => !SETTINGS_EXCLUDE.has(row[keyIdx]));
+        if (filteredRows.length < before) {
+          console.log(`  ⚠ settings: 过滤 ${before - filteredRows.length} 条用户配置键`);
+        }
+      }
+    }
+    // map_marker_placements：只导出开发者放置的标点（created_by_dev=1）
+    if (tableName === 'map_marker_placements') {
+      const devIdx = columns.indexOf('created_by_dev');
+      if (devIdx >= 0) {
+        const before = filteredRows.length;
+        filteredRows = filteredRows.filter(row => row[devIdx] === 1);
+        if (filteredRows.length < before) {
+          console.log(`  ⚠ map_marker_placements: 过滤 ${before - filteredRows.length} 条用户放置标点`);
         }
       }
     }

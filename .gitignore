@@ -3,6 +3,7 @@ dist/
 release/
 cert/
 doc/
+analysis/
 .DS_Store
 *.log
 .env

@@ -1,6 +1,19 @@
 import React from 'react'
 import NoteSpan from '../components/NoteSpan'
 
+// ── 可配置的忽略颜色列表（来自外部源的默认文字色，不覆盖父层 style）──
+let _ignoredColors = new Set(['#e2e8f0', '#cbd5e1'])
+
+/** 设置需要忽略的字体颜色列表（全小写 hex） */
+export function setIgnoredColors(colors = []) {
+  _ignoredColors = new Set(colors.map(c => c.toLowerCase()))
+}
+
+/** 获取当前忽略的字体颜色列表 */
+export function getIgnoredColors() {
+  return [..._ignoredColors]
+}
+
 /**
  * 解析富文本标记:
  *   [color=#xxxxxx]文字[/color] → 彩色
@@ -78,7 +91,9 @@ function parseTokens(tokens) {
     if (token.type === 'text') {
       current.children.push(token.value)
     } else if (token.type === 'open_color') {
-      stack.push({ children: [], style: { ...current.style, color: token.value } })
+      // 若颜色在忽略列表中，不覆盖父层 style（静默剥离冗余颜色标记）
+      const isIgnored = token.value && _ignoredColors.has(token.value.toLowerCase())
+      stack.push({ children: [], style: isIgnored ? { ...current.style } : { ...current.style, color: token.value } })
     } else if (token.type === 'close_color') {
       if (stack.length > 1) {
         const popped = stack.pop()
@@ -143,7 +158,7 @@ function buildElement(node, key) {
   if (hasStyle) {
     return React.createElement('span', { key: `s-${key}`, style: node.style }, ...flattenChildren(node.children, key * 1000))
   }
-  return flattenChildren(node.children, key)
+  return React.createElement(React.Fragment, { key: `f-${key}` }, ...flattenChildren(node.children, key * 1000))
 }
 
 function flattenChildren(children, baseKey) {
@@ -362,56 +377,68 @@ export function stripFormatting(text) {
 export function markupToHtml(text) {
   if (!text) return ''
 
-  // Step 1: escape HTML entities
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  // Step 1: tokenize整个文本（含 [note] 标签），利用 tokenize 的栈感知正确配对嵌套
+  const tokens = tokenize(text)
 
-  // Recover &quot; that was double-escaped by the & → &amp; step above
+  // Step 2: 从 token 流构建 HTML（栈式，与 parseTokens 同构）
+  let html = tokensToHtml(tokens)
+
+  // Step 3: 恢复 &quot;（Step 1 的 escapeHtml 会把 &amp;quot; 变成 &amp;amp;quot;，
+  //   这里恢复为 &quot; 以便浏览器渲染为 " 字符）
   html = html.replace(/&amp;quot;/g, '&quot;')
 
-  // Step 2: extract [note] tags and replace with placeholders,
-  // so note content is completely shielded from subsequent regex passes.
-  const notes = []
-  html = html.replace(/\[note="([^"]*)"\]([\s\S]*?)\[\/note\]/g, (_, note, inner) => {
-    const idx = notes.length
-    const escaped = note.replace(/&quot;/g, '"')
-    notes.push({
-      // Encode special chars for safe use inside HTML attributes
-      noteContent: escaped.replace(/"/g, '&quot;').replace(/\n/g, '&#10;'),
-      inner,
-    })
-    return `\x00NOTE${idx}\x00`
-  })
-
-  // Step 3: convert newlines (only affects non-note body text)
-  html = html.replace(/\n/g, '<br>')
-
-  // Step 4: remaining BBCode → HTML (only affects non-note body text)
-  html = html.replace(/\[color=((?:#[0-9a-fA-F]{3,8}|[a-zA-Z]+))\]([\s\S]*?)\[\/color\]/g,
-    (_, color, inner) => `<span style="color:${color}">${inner}</span>`)
-  html = html.replace(/\[b\]([\s\S]*?)\[\/b\]/g, '<b>$1</b>')
-  html = html.replace(/\[i\]([\s\S]*?)\[\/i\]/g, '<i>$1</i>')
-
-  // Step 5: restore note placeholders, processing their inner text independently
-  html = html.replace(/\x00NOTE(\d+)\x00/g, (_, idx) => {
-    const n = notes[+idx]
-    // Process inner text: escape HTML, convert \n → <br>, process BBCode
-    let innerHtml = n.inner
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\n/g, '<br>')
-    innerHtml = innerHtml.replace(/&amp;quot;/g, '&quot;')
-    innerHtml = innerHtml.replace(/\[color=((?:#[0-9a-fA-F]{3,8}|[a-zA-Z]+))\]([\s\S]*?)\[\/color\]/g,
-      (_, c, i) => `<span style="color:${c}">${i}</span>`)
-    innerHtml = innerHtml.replace(/\[b\]([\s\S]*?)\[\/b\]/g, '<b>$1</b>')
-    innerHtml = innerHtml.replace(/\[i\]([\s\S]*?)\[\/i\]/g, '<i>$1</i>')
-    return `<span class="note" data-note="${n.noteContent}" title="${n.noteContent}">${innerHtml}</span>`
-  })
-
   return html
+}
+
+// ── 将 token 序列转为 HTML 字符串（栈式，正确处理嵌套）──
+function tokensToHtml(tokens) {
+  const stack = [{ tag: '', attrs: '', children: [] }]
+
+  for (const token of tokens) {
+    const current = stack[stack.length - 1]
+
+    if (token.type === 'text') {
+      // HTML 转义 + 换行 → <br>
+      current.children.push(
+        token.value
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>')
+      )
+    } else if (token.type === 'open_color') {
+      stack.push({ tag: 'span', attrs: ` style="color:${token.value}"`, children: [] })
+    } else if (token.type === 'close_color') {
+      if (stack.length > 1) closeTop(stack)
+    } else if (token.type === 'open_b') {
+      stack.push({ tag: 'b', attrs: '', children: [] })
+    } else if (token.type === 'close_b') {
+      if (stack.length > 1) closeTop(stack)
+    } else if (token.type === 'open_i') {
+      stack.push({ tag: 'i', attrs: '', children: [] })
+    } else if (token.type === 'close_i') {
+      if (stack.length > 1) closeTop(stack)
+    } else if (token.type === 'open_note') {
+      // note 值中 &quot; 已由 tokenize 解码为 "，这里重新编码用于 HTML 属性
+      const escapedNote = token.value.replace(/"/g, '&quot;').replace(/\n/g, '&#10;')
+      stack.push({ tag: 'span', attrs: ` class="note" data-note="${escapedNote}" title="${escapedNote}"`, children: [] })
+    } else if (token.type === 'close_note') {
+      if (stack.length > 1) closeTop(stack)
+    }
+  }
+
+  // 弹出剩余未闭合标签
+  while (stack.length > 1) closeTop(stack)
+
+  return stack[0].children.join('')
+}
+
+function closeTop(stack) {
+  const popped = stack.pop()
+  const html = popped.tag
+    ? `<${popped.tag}${popped.attrs}>${popped.children.join('')}</${popped.tag}>`
+    : popped.children.join('')
+  stack[stack.length - 1].children.push(html)
 }
 
 /**

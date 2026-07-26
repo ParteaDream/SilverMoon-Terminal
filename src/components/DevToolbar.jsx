@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
+import { useTerminal } from '../context/TerminalContext'
 import {
   Database, Download, Upload, Trash2, X, Bug, History, Wrench,
   Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock, Globe
@@ -448,6 +449,7 @@ function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, on
 export default function DevToolbar() {
   const { devMode } = useDb()
   const location = useLocation()
+  const { clearSelection } = useTerminal()
   const { crawlCharacter, crawlWeapon, checkMissingWeapons, crawlArtifact, checkMissingArtifacts, crawlWishes, crawlWishImages, downloadBannerImage, cleanupScrapeWindow, query, downloadMaterialImage } = useDb()
   // DevToolbar 在 <Routes> 外部，useParams() 不可用，手动从路径提取 id
   const detailId = location.pathname.match(/^\/characters\/(\d+)/)?.[1] || null
@@ -2150,7 +2152,7 @@ export default function DevToolbar() {
   return (
     <>
       {/* Bottom Toolbar */}
-      <div className={`fixed bottom-0 right-0 z-40 h-10 bg-surface-900/95 border-t border-surface-700 backdrop-blur-sm flex items-center px-4 gap-1 ${sidebarCollapsed ? 'left-14' : 'left-56'}`}>
+      <div className={`fixed bottom-0 right-0 z-40 h-10 bg-surface-900/95 border-t border-surface-700 backdrop-blur-sm flex items-center px-4 gap-1 ${sidebarCollapsed ? 'left-14' : 'left-56'}`} onMouseDown={clearSelection}>
         <span className="text-[10px] text-surface-500 mr-2 font-mono uppercase tracking-wider">Dev</span>
 
         <button

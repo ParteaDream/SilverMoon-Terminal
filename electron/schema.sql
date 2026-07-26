@@ -369,3 +369,69 @@ CREATE TABLE IF NOT EXISTS version_meta (
   images TEXT DEFAULT '[]'
 );
 
+-- ═══════════════════════════════════════════════════
+-- 摹忆中枢 — 原神大地图模块
+-- ═══════════════════════════════════════════════════
+
+-- 地图定义
+CREATE TABLE IF NOT EXISTS map_maps (
+  id TEXT PRIMARY KEY,                     -- 唯一标识如 'teyvat'
+  name_zh TEXT NOT NULL,                   -- 显示名称如 '提瓦特'
+  config TEXT NOT NULL DEFAULT '{}',       -- JSON: { tileSize, anchorA[x,y], anchorB[x,y], distance, scale, mapW, mapH, maxRow, maxCol, offsetX, offsetY }
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- 标点定义（开发者模式创建的标点模板）
+CREATE TABLE IF NOT EXISTS map_markers (
+  id TEXT PRIMARY KEY,                     -- uuid
+  map_id TEXT NOT NULL REFERENCES map_maps(id) ON DELETE CASCADE,
+  marker_type TEXT NOT NULL DEFAULT 'normal',  -- 'normal' | 'circle'
+  image_filename TEXT,                     -- 图包中的图标文件名
+  name_zh TEXT DEFAULT '',                 -- 标点名称
+  category TEXT DEFAULT '',                -- 分类
+  sort_order INTEGER DEFAULT 0,            -- 排序
+  visibility TEXT DEFAULT '1,2,3',         -- 可见缩放级别
+  special_function TEXT DEFAULT NULL,      -- JSON: null | { type:'switch_map', map_id } | { type:'tooltip', title, body, image } | { type:'both', switch_map, tooltip }
+  base_config TEXT DEFAULT NULL,           -- JSON: 底盘配置
+  is_favorite INTEGER DEFAULT 0,           -- 是否收藏
+  created_by_dev INTEGER DEFAULT 1,        -- 1=开发者创建, 0=用户创建
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- 已放置的标点（运行时记录）
+CREATE TABLE IF NOT EXISTS map_marker_placements (
+  id TEXT PRIMARY KEY,                     -- uuid
+  map_id TEXT NOT NULL REFERENCES map_maps(id) ON DELETE CASCADE,
+  marker_id TEXT NOT NULL REFERENCES map_markers(id) ON DELETE CASCADE,
+  world_x REAL NOT NULL,                   -- 世界坐标 X
+  world_y REAL NOT NULL,                   -- 世界坐标 Y
+  custom_name TEXT DEFAULT '',             -- 自定义名称
+  special_function TEXT DEFAULT NULL,      -- JSON: 特殊功能配置
+  subscript TEXT DEFAULT '0',              -- '1'=显示右下角下标标记
+  sort_order INTEGER DEFAULT 0,            -- 图层排序（越大越靠上）
+  created_by_dev INTEGER DEFAULT 1,        -- 1=开发者放置, 0=用户放置
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- 文本框（开发者模式）
+CREATE TABLE IF NOT EXISTS map_textboxes (
+  id TEXT PRIMARY KEY,                     -- uuid
+  map_id TEXT NOT NULL REFERENCES map_maps(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  level INTEGER NOT NULL DEFAULT 1,        -- 1/2/3 显示级别
+  world_x REAL NOT NULL,                   -- 中心点世界坐标 X
+  world_y REAL NOT NULL,                   -- 中心点世界坐标 Y
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- 全局默认配置（key-value 存储）
+CREATE TABLE IF NOT EXISTS map_global_defaults (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+

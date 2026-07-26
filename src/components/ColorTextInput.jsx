@@ -599,7 +599,7 @@ export default function ColorTextInput({
     const parsed = parseColorMarkup(expanded)
     if (typeof parsed === 'string') return parsed
     if (Array.isArray(parsed)) {
-      return parsed.map((el, i) =>
+      return parsed.flat(Infinity).map((el, i) =>
         typeof el === 'string' ? el : { ...el, key: i }
       )
     }

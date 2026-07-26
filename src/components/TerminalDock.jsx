@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { useTerminal } from '../context/TerminalContext'
 import { useDb } from '../context/DbContext'
 import {
-  Calculator, FileText, FolderOpen, Settings2, Play, X, Swords, Globe, Images, BarChart3
+  Calculator, FileText, FolderOpen, Settings2, Play, X, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass
 } from 'lucide-react'
 
 /** 应用程序注册表 — 终端板块的权威定义 */
@@ -14,6 +14,10 @@ export const APPS = [
   { id: 'worldtree', name: '世界树', icon: Globe, placeholder: false, color: 'from-green-600 to-emerald-400', iconClass: 'text-white drop-shadow-sm' },
   { id: 'album', name: '切片辖域·鸽', icon: Images, placeholder: false, color: 'from-pink-500 to-rose-600', iconClass: 'text-white drop-shadow-md' },
   { id: 'ratefetcher', name: 'RateFetcher', icon: BarChart3, placeholder: false, color: 'from-cyan-700 to-blue-400', iconClass: 'text-white drop-shadow-md' },
+  { id: 'northlandbank', name: '北国银行', icon: Landmark, placeholder: false, color: 'from-amber-700 to-yellow-500', iconClass: 'text-white drop-shadow-md' },
+  { id: 'gachastation', name: '祈愿捕捉站', icon: Star, placeholder: false, color: 'from-blue-600 to-cyan-400', iconClass: 'text-white drop-shadow-md' },
+  { id: 'memoryhub', name: '摹忆中枢', icon: Compass, placeholder: false, color: 'from-amber-500 to-yellow-400', iconClass: 'text-white drop-shadow-md' },
+  { id: 'hourglass', name: '时之沙', icon: Hourglass, placeholder: false, color: 'from-indigo-600 to-violet-500', iconClass: 'text-white drop-shadow-md' },
 ]
 
 export const SYS_TOOLS = [

@@ -453,3 +453,20 @@ img[src^="data:image/"]:not(.no-fade-in) {
 .animate-rainbow-border {
   animation: rainbowBorder 4s linear infinite;
 }
+
+@keyframes shimmerFlow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: -200% 50%; }
+}
+.animate-shimmer-flow {
+  background: linear-gradient(90deg, #ef4444, #f59e0b, #22c55e, #3b82f6, #a855f7, #ef4444);
+  background-size: 400% 100%;
+  animation: shimmerFlow 2s linear infinite;
+}
+
+/* ── 标点底盘 ── */
+.marker-base {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}

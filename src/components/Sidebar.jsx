@@ -1,7 +1,8 @@
 import { useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { notifySidebarToggled } from '../context/SidebarContext'
 import { useNav } from '../context/NavContext'
+import { useTerminal } from '../context/TerminalContext'
 import {
   Users, Swords, Crown, Package, Sparkle, Skull, Database, Globe, Terminal, Settings, Info,
   PanelLeftClose, PanelLeftOpen, ScrollText
@@ -26,7 +27,13 @@ export default function Sidebar() {
   })
   const [appVersion, setAppVersion] = useState('1.0')
   const { push } = useNav()
+  const { clearSelection } = useTerminal()
   const location = useLocation()
+
+  const nav = useCallback((to) => {
+    clearSelection()
+    push(to)
+  }, [push, clearSelection])
 
   useEffect(() => {
     if (window.electronAPI?.getAppVersion) {
@@ -106,7 +113,7 @@ export default function Sidebar() {
           return (
           <button
             key={item.to}
-            onClick={() => push(item.to)}
+            onClick={() => nav(item.to)}
             title={collapsed ? item.label : undefined}
             className={`flex items-center rounded-lg text-sm font-medium w-full
                transition-all duration-200 no-drag min-w-0
@@ -129,7 +136,7 @@ export default function Sidebar() {
       {/* Terminal */}
       <div className={`flex-shrink-0 ${collapsed ? 'px-2' : 'px-3'} pb-1`}>
         <button
-          onClick={() => push('/terminal')}
+          onClick={() => nav('/terminal')}
           title={collapsed ? '终端' : undefined}
           className={`flex items-center rounded-lg w-full no-drag transition-all duration-200 min-w-0
             ${collapsed
@@ -150,7 +157,7 @@ export default function Sidebar() {
       {/* Changelog */}
       <div className={`flex-shrink-0 ${collapsed ? 'px-2' : 'px-3'} pb-1`}>
         <button
-          onClick={() => push('/changelog')}
+          onClick={() => nav('/changelog')}
           title={collapsed ? 'Changelog' : undefined}
           className={`flex items-center rounded-lg w-full no-drag transition-all duration-200 min-w-0
             ${collapsed
@@ -183,7 +190,7 @@ export default function Sidebar() {
       {/* Footer */}
       <div className={`p-3 border-t border-surface-800 flex-shrink-0 ${collapsed ? 'text-center' : ''}`}>
         <button
-          onClick={() => push('/settings?module=version')}
+          onClick={() => nav('/settings?module=version')}
           title="版本信息"
           className={`flex items-center text-xs text-surface-500 hover:text-primary-400 transition-colors no-drag min-w-0 ${collapsed ? 'w-full justify-center' : 'gap-2 px-2'}`}
         >

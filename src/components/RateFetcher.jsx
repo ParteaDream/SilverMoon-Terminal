@@ -25,27 +25,13 @@ function parseDescParams(desc) {
   const matches = [...desc.matchAll(pattern)]
   if (matches.length === 0) return [{ label: desc, paramIndices: [-1], fmtCode: '' }]
 
-  const [labelPart, paramPart] = desc.includes('|') ? desc.split('|', 2) : ['', desc]
-  const labels = labelPart.split('/').map(l => l.trim()).filter(Boolean)
-  const paramGroups = paramPart.split('/').map(g => g.trim()).filter(Boolean)
+  // 每行 desc 固定对应一列：| 左边是 label，右边是 template，/ 永远是字面文字
+  const [labelPart, template] = desc.includes('|') ? desc.split('|', 2) : ['', desc]
+  const label = labelPart || `参数${matches[0][1]}`
+  const paramIndices = matches.map(m => parseInt(m[1]) - 1)
+  const fmtCode = matches[0][2]
 
-  const results = []
-  for (let gi = 0; gi < paramGroups.length; gi++) {
-    const group = paramGroups[gi]
-    const groupMatches = [...group.matchAll(pattern)]
-    if (groupMatches.length === 0) continue
-
-    const label = gi < labels.length && labels[gi]
-      ? labels[gi]
-      : labels.length === 1 ? labels[0]
-      : `参数${groupMatches[0][1]}`
-    const paramIndices = groupMatches.map(m => parseInt(m[1]) - 1)
-    const fmtCode = groupMatches[0][2]
-    const template = group  // 保留完整模板，如 "{param1:F1}秒"
-
-    results.push({ label, paramIndices, fmtCode, template })
-  }
-  return results
+  return [{ label, paramIndices, fmtCode, template }]
 }
 
 function buildSkillTable(skill, maxLevel = 15) {

@@ -14,7 +14,28 @@ const IMAGE_TYPES = [
   { key: 'questionnaire', label: '问卷汇总', short: '问卷' },
 ]
 
-const STORAGE_KEY = 'betamemo_tasks'
+function getImageKey(task, typeKey) {
+  // 固定类型直接取 task.keyImage，自定义类型从 task.images 中取
+  const fixed = IMAGE_TYPES.find(t => t.key === typeKey)
+  if (fixed) return task[typeKey + 'Image']
+  return task.images?.[typeKey]
+}
+
+function getAllImageKeys(task) {
+  const keys = {}
+  for (const t of IMAGE_TYPES) {
+    const val = task[t.key + 'Image']
+    if (val) keys[t.key] = val
+  }
+  if (task.images) {
+    for (const [k, v] of Object.entries(task.images)) {
+      if (v) keys[k] = v
+    }
+  }
+  return keys
+}
+
+const STORAGE_KEY = 'betamemo_tasks' // 仅用于迁移检测
 
 // ═══════════════════════════════════════
 // 工具函数
@@ -25,14 +46,25 @@ function uid() {
 
 async function loadTasks() {
   try {
-    const res = await window.electronAPI?.getUserConfig()
-    return res?.config?.[STORAGE_KEY] || []
+    const res = await window.electronAPI?.betamemoLoadTasks()
+    return res || []
   } catch { return [] }
 }
 
 async function saveTasks(tasks) {
   try {
-    await window.electronAPI?.setUserConfig(STORAGE_KEY, tasks)
+    await window.electronAPI?.betamemoSaveTasks(tasks)
+  } catch { /* ignore */ }
+}
+
+// 首次加载时，检查并迁移 user.json 中的旧数据
+let _migrationDone = false
+async function migrateIfNeeded() {
+  if (_migrationDone) return
+  _migrationDone = true
+  try {
+    const res = await window.electronAPI?.betamemoMigrateFromJson()
+    if (res?.migrated > 0) console.log('[BetaMemo] 已从 user.json 迁移', res.migrated, '条记录到 user.db')
   } catch { /* ignore */ }
 }
 
@@ -44,8 +76,24 @@ export default function BetaMemo() {
   const [tasks, setTasks] = useState([])
   const [selectedTask, setSelectedTask] = useState(null)
   const [loading, setLoading] = useState(true)
+  const saveTimerRef = useRef(null)
+  const flushSaveRef = useRef(() => {})
+  const tasksRef = useRef(tasks)
 
-  useEffect(() => { loadTasks().then(t => { setTasks(t); setLoading(false) }) }, [])
+  useEffect(() => { migrateIfNeeded().then(() => loadTasks()).then(t => { setTasks(t); setLoading(false) }) }, [])
+
+  // 保持 tasksRef 最新，供 handleBack 强制保存使用
+  useEffect(() => { tasksRef.current = tasks }, [tasks])
+
+  // 组件卸载时 flush 防抖保存
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+    }
+  }, [])
 
   const refreshTasks = useCallback(async () => {
     const t = await loadTasks()
@@ -54,39 +102,68 @@ export default function BetaMemo() {
   }, [])
 
   const handleCreate = useCallback(() => setView('create'), [])
+
   const handleManage = useCallback((task) => {
     setSelectedTask(task)
     setView('manage')
   }, [])
 
+  const handleEdit = useCallback((task) => {
+    setSelectedTask(task)
+    setView('edit')
+  }, [])
+
   const handleReorder = useCallback(async (reordered) => {
+    flushSaveRef.current()
     setTasks(reordered)
+    tasksRef.current = reordered
     await saveTasks(reordered)
   }, [])
 
+  const handleSaveTask = useCallback(async (newTask) => {
+    flushSaveRef.current?.()
+    const updated = [newTask, ...tasks]
+    setTasks(updated)
+    tasksRef.current = updated
+    await saveTasks(updated)
+    setView('list')
+  }, [tasks])
+
+  const handleUpdateTask = useCallback((updatedTask) => {
+    const updated = tasks.map(t => t.id === updatedTask.id ? updatedTask : t)
+    setTasks(updated)
+    setSelectedTask(updatedTask)
+    tasksRef.current = updated
+    // 防抖保存：笔画连续操作期间不写盘，停止 400ms 后再写
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => saveTasks(updated), 400)
+  }, [tasks])
+
+  // 确保防抖保存的刷新函数始终是最新的
+  flushSaveRef.current = () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+  }
+
   const handleBack = useCallback(async () => {
+    // 强制保存最新数据再返回
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+      await saveTasks(tasksRef.current)
+    }
     setView('list')
     setSelectedTask(null)
     await refreshTasks()
   }, [refreshTasks])
 
-  const handleSaveTask = useCallback(async (newTask) => {
-    const updated = [...tasks, newTask]
-    setTasks(updated)
-    await saveTasks(updated)
-    setView('list')
-  }, [tasks])
-
-  const handleUpdateTask = useCallback(async (updatedTask) => {
-    const updated = tasks.map(t => t.id === updatedTask.id ? updatedTask : t)
-    setTasks(updated)
-    await saveTasks(updated)
-    setSelectedTask(updatedTask)
-  }, [tasks])
-
   const handleDeleteTask = useCallback(async (taskId) => {
+    flushSaveRef.current?.()
     const updated = tasks.filter(t => t.id !== taskId)
     setTasks(updated)
+    tasksRef.current = updated
     await saveTasks(updated)
     setView('list')
     setSelectedTask(null)
@@ -103,19 +180,23 @@ export default function BetaMemo() {
   switch (view) {
     case 'create':
       return <CreateView onSave={handleSaveTask} onCancel={handleBack} tasks={tasks} />
+    case 'edit':
+      return selectedTask
+        ? <EditView key={selectedTask.id} task={selectedTask} tasks={tasks} onUpdate={handleUpdateTask} onDelete={handleDeleteTask} onManage={handleManage} onBack={handleBack} />
+        : <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} onReorder={handleReorder} onEdit={handleEdit} />
     case 'manage':
       return selectedTask
         ? <ManageView task={selectedTask} onUpdate={handleUpdateTask} onDelete={handleDeleteTask} onBack={handleBack} />
-        : <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} onReorder={handleReorder} />
+        : <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} onReorder={handleReorder} onEdit={handleEdit} />
     default:
-      return <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} onReorder={handleReorder} />
+      return <TaskListView tasks={tasks} onCreate={handleCreate} onManage={handleManage} onReorder={handleReorder} onEdit={handleEdit} />
   }
 }
 
 // ═══════════════════════════════════════
 // 任务列表视图
 // ═══════════════════════════════════════
-function TaskListView({ tasks, onCreate, onManage, onReorder }) {
+function TaskListView({ tasks, onCreate, onManage, onReorder, onEdit }) {
   const [dragIndex, setDragIndex] = useState(null)
   const [overIndex, setOverIndex] = useState(null)
   const dragNode = useRef(null)
@@ -195,7 +276,7 @@ function TaskListView({ tasks, onCreate, onManage, onReorder }) {
                     : ''
                 } ${dragIndex === i ? 'cursor-grabbing' : 'cursor-grab'}`}
               >
-                <TaskCard task={task} onClick={() => onManage(task)} />
+                <TaskCard task={task} onClick={() => onManage(task)} onEdit={() => onEdit?.(task)} />
               </div>
             ))}
           </div>
@@ -205,35 +286,55 @@ function TaskListView({ tasks, onCreate, onManage, onReorder }) {
   )
 }
 
-function TaskCard({ task, onClick }) {
-  const imgCount = [task.summaryImage, task.constellationImage, task.questionnaireImage].filter(Boolean).length
+function TaskCard({ task, onClick, onEdit }) {
+  const allKeys = getAllImageKeys(task)
+  const imgCount = Object.keys(allKeys).length
+  const customTypes = task.customImageTypes || []
+  const totalTypes = IMAGE_TYPES.length + customTypes.length
   return (
-    <button
+    <div
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } }}
       className="w-full text-left p-4 rounded-xl bg-surface-800/50 border border-white/5
-                 hover:bg-surface-800 hover:border-white/10 transition-all group"
+                 hover:bg-surface-800 hover:border-white/10 transition-all group cursor-pointer"
     >
       <div className="flex items-center justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h3 className="text-sm font-medium text-surface-200 truncate">{task.name || '未命名任务'}</h3>
           <p className="text-[11px] text-surface-500 mt-1">
-            {imgCount}/3 张图片 · {task.createdAt ? new Date(task.createdAt).toLocaleDateString('zh-CN') : ''}
+            {imgCount}/{totalTypes} 张图片 · {task.createdAt ? new Date(task.createdAt).toLocaleDateString('zh-CN') : ''}
           </p>
+          {task.extraInfo && (
+            <p className="text-[11px] text-surface-400 mt-1.5 line-clamp-2 whitespace-pre-wrap break-words">
+              {task.extraInfo}
+            </p>
+          )}
         </div>
-        <div className="flex gap-1 shrink-0 ml-3">
-          {IMAGE_TYPES.map(t => {
-            const hasImg = !!task[t.key + 'Image']
-            const completed = task.completedTypes?.[t.key]
-            let dotColor = 'bg-surface-600' // 无图=灰
-            if (hasImg && completed) dotColor = 'bg-green-500' // 有图且完成=绿
-            else if (hasImg) dotColor = 'bg-yellow-500' // 有图未完成=黄
-            return (
-              <div key={t.key} className={`w-2 h-2 rounded-full ${dotColor}`} />
-            )
-          })}
+        <div className="flex items-center gap-2 shrink-0 ml-3">
+          <div className="flex gap-1">
+            {[...IMAGE_TYPES, ...customTypes].map(t => {
+              const hasImg = !!getImageKey(task, t.key)
+              const completed = task.completedTypes?.[t.key]
+              let dotColor = 'bg-surface-600'
+              if (hasImg && completed) dotColor = 'bg-green-500'
+              else if (hasImg) dotColor = 'bg-yellow-500'
+              return (
+                <div key={t.key} className={`w-2 h-2 rounded-full ${dotColor}`} />
+              )
+            })}
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit?.(task) }}
+            className="p-1.5 rounded-lg text-surface-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+            title="编辑任务"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -244,7 +345,11 @@ function CreateView({ onSave, onCancel, tasks }) {
   const [error, setError] = useState('')
   const existingNames = (tasks || []).map(t => t.name)
   const [name, setName] = useState('')
+  const extraInfoRef = useRef(null)
   const [images, setImages] = useState({ summary: null, constellation: null, questionnaire: null })
+  const [customImageTypes, setCustomImageTypes] = useState([])
+  const [showAddCustom, setShowAddCustom] = useState(false)
+  const [newCustomLabel, setNewCustomLabel] = useState('')
   const [saving, setSaving] = useState(false)
 
   const handleImport = useCallback(async (typeKey) => {
@@ -262,7 +367,6 @@ function CreateView({ onSave, onCancel, tasks }) {
     if (file) {
       srcPath = file.path
     } else {
-      // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
       srcPath = e.dataTransfer?.getData('text/plain') || null
     }
     if (srcPath) {
@@ -273,10 +377,24 @@ function CreateView({ onSave, onCancel, tasks }) {
     }
   }, [])
 
+  const handleAddCustomType = useCallback(() => {
+    const label = newCustomLabel.trim()
+    if (!label) return
+    const key = 'custom_' + Date.now().toString(36)
+    setCustomImageTypes(prev => [...prev, { key, label, short: label }])
+    setImages(prev => ({ ...prev, [key]: null }))
+    setNewCustomLabel('')
+    setShowAddCustom(false)
+  }, [newCustomLabel])
+
+  const handleRemoveCustomType = useCallback((key) => {
+    setCustomImageTypes(prev => prev.filter(t => t.key !== key))
+    setImages(prev => { const next = { ...prev }; delete next[key]; return next })
+  }, [])
+
   const handleSave = useCallback(async () => {
     const trimmed = name.trim()
     if (!trimmed) return
-    // 检查重名
     if (existingNames.includes(trimmed)) {
       setError('任务名称已存在，请使用不同的名称')
       return
@@ -284,7 +402,7 @@ function CreateView({ onSave, onCancel, tasks }) {
     setError('')
     setSaving(true)
 
-    // 重命名图片为 <任务名>-<类型> 格式
+    // 重命名固定类型图片
     const renamedImages = { summary: null, constellation: null, questionnaire: null }
     for (const t of IMAGE_TYPES) {
       const oldName = images[t.key]
@@ -293,32 +411,58 @@ function CreateView({ onSave, onCancel, tasks }) {
       const newName = `${trimmed}-${t.label}${ext}`
       if (oldName !== newName) {
         const result = await window.electronAPI?.renameUserImage(oldName, newName)
-        if (result?.filename) {
-          renamedImages[t.key] = result.filename
-        } else {
-          renamedImages[t.key] = oldName
-        }
+        if (result?.filename) renamedImages[t.key] = result.filename
+        else renamedImages[t.key] = oldName
       } else {
         renamedImages[t.key] = oldName
       }
     }
 
+    // 重命名自定义类型图片
+    const renamedCustomImages = {}
+    for (const ct of customImageTypes) {
+      const oldName = images[ct.key]
+      if (!oldName) { renamedCustomImages[ct.key] = null; continue }
+      const ext = oldName.includes('.') ? oldName.slice(oldName.lastIndexOf('.')) : ''
+      const newName = `${trimmed}-${ct.label}${ext}`
+      if (oldName !== newName) {
+        const result = await window.electronAPI?.renameUserImage(oldName, newName)
+        if (result?.filename) renamedCustomImages[ct.key] = result.filename
+        else renamedCustomImages[ct.key] = oldName
+      } else {
+        renamedCustomImages[ct.key] = oldName
+      }
+    }
+
+    // 构建初始 strokes 和 completedTypes
+    const initStrokes = { summary: [], constellation: [], questionnaire: [] }
+    const initCompleted = { summary: false, constellation: false, questionnaire: false }
+    for (const ct of customImageTypes) {
+      initStrokes[ct.key] = []
+      initCompleted[ct.key] = false
+    }
+
     const task = {
       id: uid(),
       name: trimmed,
+      extraInfo: extraInfoRef.current?.value?.trim() || '',
       summaryImage: renamedImages.summary,
       constellationImage: renamedImages.constellation,
       questionnaireImage: renamedImages.questionnaire,
-      strokes: { summary: [], constellation: [], questionnaire: [] },
-      completedTypes: { summary: false, constellation: false, questionnaire: false },
+      images: renamedCustomImages,
+      customImageTypes,
+      strokes: initStrokes,
+      completedTypes: initCompleted,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
     await onSave(task)
     setSaving(false)
-  }, [name, images, onSave, existingNames])
+  }, [name, images, customImageTypes, onSave, existingNames])
 
-  const hasAnyImage = Object.values(images).some(Boolean)
+  const allTypeKeys = [...IMAGE_TYPES, ...customImageTypes]
+  const hasAnyImage = allTypeKeys.some(t => images[t.key])
+
   const nameDuplicate = name.trim() && existingNames.includes(name.trim())
 
   return (
@@ -351,6 +495,18 @@ function CreateView({ onSave, onCancel, tasks }) {
           )}
         </div>
 
+        <div>
+          <label className="text-[11px] text-surface-400 font-medium mb-1.5 block">额外信息</label>
+          <textarea
+            ref={extraInfoRef}
+            defaultValue=""
+            placeholder="输入额外备注信息（可选，将在任务列表中显示）"
+            rows={3}
+            className="w-full px-3 py-2 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200
+                       placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors resize-none"
+          />
+        </div>
+
         {IMAGE_TYPES.map(t => (
           <ImageDropZone
             key={t.key}
@@ -361,6 +517,65 @@ function CreateView({ onSave, onCancel, tasks }) {
             onRemove={() => setImages(prev => ({ ...prev, [t.key]: null }))}
           />
         ))}
+
+        {/* 自定义图片类型 */}
+        {customImageTypes.map(ct => (
+          <div key={ct.key} className="relative">
+            <button
+              onClick={() => handleRemoveCustomType(ct.key)}
+              className="absolute top-0 right-0 z-10 p-1 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="移除自定义类型"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+            <ImageDropZone
+              label={ct.label}
+              filename={images[ct.key]}
+              onImport={() => handleImport(ct.key)}
+              onDrop={(e) => handleDrop(e, ct.key)}
+              onRemove={() => setImages(prev => ({ ...prev, [ct.key]: null }))}
+            />
+          </div>
+        ))}
+
+        {/* 添加更多 */}
+        {showAddCustom ? (
+          <div className="flex items-center gap-2 bg-surface-800/40 rounded-lg p-3 border border-white/10">
+            <input
+              type="text"
+              value={newCustomLabel}
+              onChange={e => setNewCustomLabel(e.target.value)}
+              placeholder="输入自定义类型名称（如：技能演示）"
+              className="flex-1 px-3 py-1.5 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200
+                         placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors"
+              autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') handleAddCustomType(); if (e.key === 'Escape') setShowAddCustom(false) }}
+            />
+            <button
+              onClick={handleAddCustomType}
+              disabled={!newCustomLabel.trim()}
+              className="px-3 py-1.5 rounded-lg bg-primary-500/20 border border-primary-500/30 text-primary-300 text-xs font-medium
+                         hover:bg-primary-500/30 transition-colors disabled:opacity-50"
+            >
+              确认
+            </button>
+            <button
+              onClick={() => { setShowAddCustom(false); setNewCustomLabel('') }}
+              className="px-3 py-1.5 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              取消
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowAddCustom(true)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed border-surface-600
+                       text-surface-400 text-xs hover:border-surface-500 hover:text-surface-300 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            添加更多
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-3 px-4 py-3 border-t border-white/5">
@@ -385,6 +600,296 @@ function CreateView({ onSave, onCancel, tasks }) {
             <Check className="w-3.5 h-3.5" />
           )}
           确认创建
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════
+// 编辑视图（编辑任务名称、额外信息、图片、自定义类型）
+// ═══════════════════════════════════════
+function EditView({ task, tasks, onUpdate, onDelete, onManage, onBack }) {
+  const [name, setName] = useState(task.name || '')
+  const extraInfoRef = useRef(null)
+  const [images, setImages] = useState(() => {
+    const init = {}
+    for (const t of IMAGE_TYPES) init[t.key] = task[t.key + 'Image'] || null
+    if (task.images) {
+      for (const [k, v] of Object.entries(task.images)) init[k] = v
+    }
+    return init
+  })
+  const [customImageTypes, setCustomImageTypes] = useState(task.customImageTypes || [])
+  const [showAddCustom, setShowAddCustom] = useState(false)
+  const [newCustomLabel, setNewCustomLabel] = useState('')
+  const [saving, setSaving] = useState(false)
+  const existingNames = (tasks || []).map(t => t.name).filter(n => n !== task.name)
+  const nameDuplicate = name.trim() && existingNames.includes(name.trim())
+
+  const handleImport = useCallback(async (typeKey) => {
+    const result = await window.electronAPI?.importUserImage()
+    if (result?.filename) {
+      setImages(prev => ({ ...prev, [typeKey]: result.filename }))
+    }
+  }, [])
+
+  const handleDrop = useCallback(async (e, typeKey) => {
+    e.preventDefault()
+    e.stopPropagation()
+    let srcPath = null
+    const file = e.dataTransfer?.files?.[0]
+    if (file) {
+      srcPath = file.path
+    } else {
+      srcPath = e.dataTransfer?.getData('text/plain') || null
+    }
+    if (srcPath) {
+      const result = await window.electronAPI?.importUserImageFile(srcPath)
+      if (result?.filename) {
+        setImages(prev => ({ ...prev, [typeKey]: result.filename }))
+      }
+    }
+  }, [])
+
+  const handleAddCustomType = useCallback(() => {
+    const label = newCustomLabel.trim()
+    if (!label) return
+    const key = 'custom_' + Date.now().toString(36)
+    setCustomImageTypes(prev => [...prev, { key, label, short: label }])
+    setImages(prev => ({ ...prev, [key]: null }))
+    setNewCustomLabel('')
+    setShowAddCustom(false)
+  }, [newCustomLabel])
+
+  const handleRemoveCustomType = useCallback((key) => {
+    setCustomImageTypes(prev => prev.filter(t => t.key !== key))
+    setImages(prev => { const next = { ...prev }; delete next[key]; return next })
+  }, [])
+
+  async function renameImageForTask(oldName, taskName, typeLabel) {
+    if (!oldName) return null
+    const ext = oldName.includes('.') ? oldName.slice(oldName.lastIndexOf('.')) : ''
+    const newName = `${taskName}-${typeLabel}${ext}`
+    if (oldName === newName) return oldName
+    const result = await window.electronAPI?.renameUserImage(oldName, newName)
+    return result?.filename || oldName
+  }
+
+  const handleSave = useCallback(async () => {
+    const trimmed = name.trim()
+    if (!trimmed || nameDuplicate) return
+    setSaving(true)
+    const oldName = task.name
+
+    // 重命名所有图片（如果任务名称变了）
+    const renamedImages = {}
+    for (const t of IMAGE_TYPES) {
+      const oldFilename = images[t.key]
+      if (!oldFilename) { renamedImages[t.key] = null; continue }
+      // 先恢复到标准旧名称格式再重命名
+      const result = await renameImageForTask(oldFilename, trimmed, t.label)
+      renamedImages[t.key] = result
+    }
+
+    const renamedCustomImages = {}
+    for (const ct of customImageTypes) {
+      const oldFilename = images[ct.key]
+      if (!oldFilename) { renamedCustomImages[ct.key] = null; continue }
+      const result = await renameImageForTask(oldFilename, trimmed, ct.label)
+      renamedCustomImages[ct.key] = result
+    }
+
+    // 构建 strokes 保留旧数据，确保自定义类型有初始值
+    const strokes = { ...(task.strokes || {}) }
+    for (const ct of customImageTypes) {
+      if (!strokes[ct.key]) strokes[ct.key] = []
+    }
+    const completedTypes = { ...(task.completedTypes || {}) }
+    for (const ct of customImageTypes) {
+      if (completedTypes[ct.key] === undefined) completedTypes[ct.key] = false
+    }
+
+    // 移除已删除的自定义类型的 stroke 数据
+    const activeCustomKeys = new Set(customImageTypes.map(ct => ct.key))
+    for (const key of Object.keys(strokes)) {
+      if (!IMAGE_TYPES.find(t => t.key === key) && !activeCustomKeys.has(key)) {
+        delete strokes[key]
+        delete completedTypes[key]
+      }
+    }
+
+    const updated = {
+      ...task,
+      name: trimmed,
+      extraInfo: extraInfoRef.current?.value?.trim() || '',
+      summaryImage: renamedImages.summary,
+      constellationImage: renamedImages.constellation,
+      questionnaireImage: renamedImages.questionnaire,
+      images: renamedCustomImages,
+      customImageTypes,
+      strokes,
+      completedTypes,
+      updatedAt: new Date().toISOString(),
+    }
+    await onUpdate(updated)
+    setSaving(false)
+    onBack()
+  }, [name, images, customImageTypes, task, onUpdate, onBack, nameDuplicate])
+
+  const allTypeKeys = [...IMAGE_TYPES, ...customImageTypes]
+  const hasAnyImage = allTypeKeys.some(t => images[t.key])
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
+        <button onClick={onBack} className="p-1 rounded-md text-surface-400 hover:text-white hover:bg-white/10 transition-colors">
+          <ArrowLeft className="w-4 h-4" />
+        </button>
+        <h2 className="text-sm font-semibold text-white flex-1">编辑测试任务</h2>
+        <button
+          onClick={() => {
+            const trimmed = name.trim() || task.name
+            onUpdate({ ...task, name: trimmed, extraInfo: extraInfoRef.current?.value?.trim() || '' })
+            onManage({ ...task, name: trimmed, extraInfo: extraInfoRef.current?.value?.trim() || '' })
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30
+                     border border-amber-500/30 text-amber-300 text-xs font-medium transition-colors"
+          title="进入画笔编辑模式"
+        >
+          <Pencil className="w-3 h-3" />
+          画笔编辑
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto p-4 space-y-4">
+        <div>
+          <label className="text-[11px] text-surface-400 font-medium mb-1.5 block">任务名称</label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="输入任务名称"
+            className={`w-full px-3 py-2 rounded-lg bg-surface-800/80 border text-sm text-surface-200
+                       placeholder-surface-600 outline-none transition-colors ${
+                         nameDuplicate ? 'border-red-500/50 focus:border-red-500' : 'border-white/10 focus:border-primary-500/50'
+                       }`}
+          />
+          {nameDuplicate && (
+            <p className="text-[11px] text-red-400 mt-1">此名称已被使用，请更换</p>
+          )}
+        </div>
+
+        <div>
+          <label className="text-[11px] text-surface-400 font-medium mb-1.5 block">额外信息</label>
+          <textarea
+            ref={extraInfoRef}
+            defaultValue={task.extraInfo || ''}
+            placeholder="输入额外备注信息"
+            rows={3}
+            className="w-full px-3 py-2 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200
+                       placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors resize-none"
+          />
+        </div>
+
+        {IMAGE_TYPES.map(t => (
+          <ImageDropZone
+            key={t.key}
+            label={t.label}
+            filename={images[t.key]}
+            onImport={() => handleImport(t.key)}
+            onDrop={(e) => handleDrop(e, t.key)}
+            onRemove={() => setImages(prev => ({ ...prev, [t.key]: null }))}
+          />
+        ))}
+
+        {customImageTypes.map(ct => (
+          <div key={ct.key} className="relative">
+            <button
+              onClick={() => handleRemoveCustomType(ct.key)}
+              className="absolute top-0 right-0 z-10 p-1 rounded text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="移除自定义类型"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+            <ImageDropZone
+              label={ct.label}
+              filename={images[ct.key]}
+              onImport={() => handleImport(ct.key)}
+              onDrop={(e) => handleDrop(e, ct.key)}
+              onRemove={() => setImages(prev => ({ ...prev, [ct.key]: null }))}
+            />
+          </div>
+        ))}
+
+        {showAddCustom ? (
+          <div className="flex items-center gap-2 bg-surface-800/40 rounded-lg p-3 border border-white/10">
+            <input
+              type="text"
+              value={newCustomLabel}
+              onChange={e => setNewCustomLabel(e.target.value)}
+              placeholder="输入自定义类型名称（如：技能演示）"
+              className="flex-1 px-3 py-1.5 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200
+                         placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors"
+              autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') handleAddCustomType(); if (e.key === 'Escape') setShowAddCustom(false) }}
+            />
+            <button
+              onClick={handleAddCustomType}
+              disabled={!newCustomLabel.trim()}
+              className="px-3 py-1.5 rounded-lg bg-primary-500/20 border border-primary-500/30 text-primary-300 text-xs font-medium
+                         hover:bg-primary-500/30 transition-colors disabled:opacity-50"
+            >
+              确认
+            </button>
+            <button
+              onClick={() => { setShowAddCustom(false); setNewCustomLabel('') }}
+              className="px-3 py-1.5 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              取消
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowAddCustom(true)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed border-surface-600
+                       text-surface-400 text-xs hover:border-surface-500 hover:text-surface-300 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            添加更多
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 px-4 py-3 border-t border-white/5">
+        <button
+          onClick={onBack}
+          className="px-4 py-2 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-white/5 transition-colors"
+        >
+          取消
+        </button>
+        <button
+          onClick={() => { if (confirm('确定要删除此任务吗？')) onDelete(task.id) }}
+          className="px-4 py-2 rounded-lg text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+        >
+          删除任务
+        </button>
+        <div className="flex-1" />
+        <button
+          onClick={handleSave}
+          disabled={!name.trim() || !hasAnyImage || saving}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
+            name.trim() && hasAnyImage && !saving
+              ? 'bg-primary-500 hover:bg-primary-600 text-white'
+              : 'bg-surface-700 text-surface-500 cursor-not-allowed'
+          }`}
+        >
+          {saving ? (
+            <div className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+          ) : (
+            <Check className="w-3.5 h-3.5" />
+          )}
+          保存修改
         </button>
       </div>
     </div>
@@ -462,7 +967,7 @@ function ImageDropZone({ label, filename, onImport, onDrop, onRemove }) {
 // ── 绘制所有笔迹（纯函数，被多处复用）──
 function drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, previewY, okDragRect, pausePreview) {
   ctx.clearRect(0, 0, w, h)
-  if (!showStrokes && previewY == null && !okDragRect && !pausePreview) return
+  if (!showStrokes) return
 
   const scaleX = w / (imgNaturalSize.w || 1)
   const scaleY = h / (imgNaturalSize.h || 1)
@@ -579,6 +1084,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   const canvasRef = useRef(null)
   const imageRef = useRef(null)
   const containerRef = useRef(null)
+  const extraInfoRef = useRef(null)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [imgDataUrl, setImgDataUrl] = useState(null)
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
@@ -588,12 +1094,16 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   // ── 笔迹管理 ──
   const strokesRef = useRef(task.strokes || { summary: [], constellation: [], questionnaire: [] })
   const getStrokes = useCallback(() => strokesRef.current[activeTab] || [], [activeTab])
+  const showStrokesRef = useRef(showStrokes)
+  const imgNaturalSizeRef = useRef(imgNaturalSize)
   const [undoStack, setUndoStack] = useState([])
   const [redoStack, setRedoStack] = useState([])
 
   useEffect(() => {
     strokesRef.current = task.strokes || { summary: [], constellation: [], questionnaire: [] }
   }, [task])
+  useEffect(() => { showStrokesRef.current = showStrokes }, [showStrokes])
+  useEffect(() => { imgNaturalSizeRef.current = imgNaturalSize }, [imgNaturalSize])
 
   // 仅在切换任务时重置撤销历史
   const prevTaskId = useRef(task.id)
@@ -638,62 +1148,73 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   // ── 加载图片 ──
   useEffect(() => {
     const imageKey = activeTab + 'Image'
-    const filename = task[imageKey]
-    if (!filename) {
-      setImgDataUrl(null)
-      setImageLoaded(false)
-      return
-    }
+    const filename = getImageKey(task, activeTab)
+    // 切换 tab 时立即清除加载状态，防止旧 canvas 残留造成撕裂
+    setImageLoaded(false)
+    setImgDataUrl(null)
+    if (!filename) return
+
+    let cancelled = false
     window.electronAPI?.readUserImage(filename).then(res => {
-      if (res?.data) {
-        setImgDataUrl(res.data)
-        const img = new window.Image()
-        img.onload = () => {
-          setImgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
-          setImageLoaded(true)
-        }
-        img.src = res.data
+      if (cancelled || !res?.data) return
+      setImgDataUrl(res.data)
+      const img = new window.Image()
+      img.onload = () => {
+        if (cancelled) return
+        setImgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+        setImageLoaded(true)
       }
-    }).catch(() => setImgDataUrl(null))
-  }, [activeTab, task])
+      img.src = res.data
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [activeTab, task.id])
 
-  // ── 主绘制 Effect ──
+  // ── Canvas 尺寸同步 & 主绘制（ResizeObserver 监听图片元素）──
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !imageLoaded) return
-    const container = containerRef.current
-    if (!container) return
     const imgEl = imageRef.current
-    const w = imgEl?.clientWidth || container.clientWidth
-    const h = imgEl?.clientHeight || container.clientHeight
-    canvas.width = w
-    canvas.height = h
-    canvas.style.width = w + 'px'
-    canvas.style.height = h + 'px'
-    const ctx = canvas.getContext('2d')
-    drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, null, null)
-  }, [strokes, showStrokes, imageLoaded, imgNaturalSize])
+    if (!imgEl || !imageLoaded) return
 
-  // ── 窗口 resize 重绘 ──
-  useEffect(() => {
-    const handleResize = () => {
+    const syncCanvas = () => {
       const canvas = canvasRef.current
-      if (!canvas || !imageLoaded) return
-      const container = containerRef.current
-      const imgEl = imageRef.current
-      if (!container || !imgEl) return
-      const w = imgEl.clientWidth || container.clientWidth
-      const h = imgEl.clientHeight || container.clientHeight
+      if (!canvas) return
+      const w = imgEl.clientWidth
+      const h = imgEl.clientHeight
+      if (w === 0 || h === 0) return
       canvas.width = w
       canvas.height = h
       canvas.style.width = w + 'px'
       canvas.style.height = h + 'px'
       const ctx = canvas.getContext('2d')
-      drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, null, null)
+      const curStrokes = strokesRef.current[activeTab] || []
+      drawAllStrokes(ctx, w, h, curStrokes, imgNaturalSizeRef.current, showStrokesRef.current, null, null)
     }
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [strokes, showStrokes, imageLoaded, imgNaturalSize])
+
+    // 初始同步（可能在下一帧布局完成后才准确，用 rAF）
+    requestAnimationFrame(syncCanvas)
+
+    const observer = new ResizeObserver(() => {
+      syncCanvas()
+    })
+    observer.observe(imgEl)
+    return () => {
+      observer.disconnect()
+      // 清理 canvas 防止切换到无图片 tab 时残留
+      const canvas = canvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+      }
+    }
+  }, [imageLoaded, activeTab])
+
+  // ── 数据变化重绘（不改 canvas 尺寸）──
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !imageLoaded) return
+    const ctx = canvas.getContext('2d')
+    const curStrokes = strokesRef.current[activeTab] || []
+    drawAllStrokes(ctx, canvas.width, canvas.height, curStrokes, imgNaturalSizeRef.current, showStrokes, null, null)
+  }, [strokes, showStrokes, imageLoaded])
 
   // ── Canvas 坐标转换 ──
   const getCanvasPos = useCallback((e) => {
@@ -717,7 +1238,8 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
 
   // ── 鼠标按下：仅 canvas 区域触发的绘制事件 ──
   const handleMouseDown = useCallback((e) => {
-    if (!imageLoaded) return
+    if (e.button !== 0) return // 只响应左键，右键留给快捷切换笔迹可见
+    if (!showStrokes || !imageLoaded) return
     if (e.target !== canvasRef.current) return
     const pos = getCanvasPos(e)
 
@@ -751,7 +1273,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
         saveStrokes(cur.filter(s => !removeIds.has(s.id)))
       }
     }
-  }, [brush, saveStrokes, getCanvasPos, imageLoaded, pauseColor, getStrokes])
+  }, [brush, saveStrokes, getCanvasPos, imageLoaded, showStrokes, pauseColor, getStrokes])
 
   const handleMouseMove = useCallback((e) => {
     const pos = getCanvasPos(e)
@@ -762,7 +1284,10 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
     const scaleY = canvas.height / (imgNaturalSize.h || 1)
 
     // 光标预览
-    if (brush === 'ok' && !isDrawing.current) {
+    if (!showStrokes) {
+      setCursorY(null)
+      setCursorPos(null)
+    } else if (brush === 'ok' && !isDrawing.current) {
       setCursorY(pos.y)
       setCursorPos(null)
     } else if (brush === 'pause' && !isDrawing.current) {
@@ -872,8 +1397,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [handleUndo, handleRedo])
 
-  const currentImageKey = activeTab + 'Image'
-  const hasImage = !!task[currentImageKey]
+  const hasImage = !!getImageKey(task, activeTab)
 
   const presetColors = [
     '#f97316', '#ef4444', '#3b82f6', '#22c55e', '#eab308',
@@ -897,8 +1421,8 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
 
         {/* 图片切换 tabs */}
         <div className="px-2 py-2 border-b border-white/5 space-y-0.5">
-          {IMAGE_TYPES.map(t => {
-            const hasImg = !!task[t.key + 'Image']
+          {[...IMAGE_TYPES, ...(task.customImageTypes || [])].map(t => {
+            const hasImg = !!getImageKey(task, t.key)
             const completed = task.completedTypes?.[t.key]
             let dotColor = 'bg-surface-600'
             if (hasImg && completed) dotColor = 'bg-green-500'
@@ -928,15 +1452,35 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
           })}
         </div>
 
+        {/* 额外信息编辑 */}
+        <div className="px-2 py-2 border-b border-white/5" onMouseDown={e => e.stopPropagation()}>
+          <p className="text-[10px] text-surface-500 px-1 mb-1">额外信息</p>
+          <textarea
+            ref={extraInfoRef}
+            defaultValue={task.extraInfo || ''}
+            key={task.id}
+            onChange={() => {
+              onUpdate({ ...task, extraInfo: extraInfoRef.current?.value || '', updatedAt: new Date().toISOString() })
+            }}
+            placeholder="输入备注…"
+            rows={2}
+            className="w-full px-2 py-1.5 rounded-md bg-surface-900/60 border border-white/10 text-[11px] text-surface-300
+                       placeholder-surface-600 outline-none focus:border-primary-500/40 transition-colors resize-none"
+          />
+        </div>
+
         {/* 画笔工具 */}
         <div className="px-2 py-2 border-b border-white/5 space-y-1" onMouseDown={e => e.stopPropagation()}>
           <p className="text-[10px] text-surface-500 px-1 mb-1">画笔</p>
           <button
             onClick={() => setBrush('ok')}
+            disabled={!showStrokes}
             className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
-              brush === 'ok' ? 'bg-green-500/20 text-green-400 border border-green-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
+              !showStrokes
+                ? 'text-surface-600 cursor-not-allowed border border-transparent'
+                : brush === 'ok' ? 'bg-green-500/20 text-green-400 border border-green-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
             }`}
-            title="OK - 水平绿色直线（长按拖动平滑覆盖）"
+            title={showStrokes ? 'OK - 水平绿色直线（长按拖动平滑覆盖）' : '笔迹已隐藏，请先显示笔迹'}
           >
             <Check className="w-3 h-3" />
             OK 画笔
@@ -944,10 +1488,13 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
 
           <button
             onClick={() => setBrush('pause')}
+            disabled={!showStrokes}
             className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
-              brush === 'pause' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
+              !showStrokes
+                ? 'text-surface-600 cursor-not-allowed border border-transparent'
+                : brush === 'pause' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
             }`}
-            title="自由画笔（点按画圆，拖动涂鸦）"
+            title={showStrokes ? '自由画笔（点按画圆，拖动涂鸦）' : '笔迹已隐藏，请先显示笔迹'}
           >
             <Pencil className="w-3 h-3" />
             自由画笔
@@ -987,10 +1534,13 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
 
           <button
             onClick={() => setBrush('eraser')}
+            disabled={!showStrokes}
             className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
-              brush === 'eraser' ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
+              !showStrokes
+                ? 'text-surface-600 cursor-not-allowed border border-transparent'
+                : brush === 'eraser' ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'text-surface-400 hover:text-white hover:bg-white/5 border border-transparent'
             }`}
-            title="橡皮擦 - 长按拖动持续擦除"
+            title={showStrokes ? '橡皮擦 - 长按拖动持续擦除' : '笔迹已隐藏，请先显示笔迹'}
           >
             <Eraser className="w-3 h-3" />
             橡皮擦
@@ -1090,7 +1640,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
             <img
               ref={imageRef}
               src={imgDataUrl}
-              alt={IMAGE_TYPES.find(t => t.key === activeTab)?.label || ''}
+              alt={[...IMAGE_TYPES, ...(task.customImageTypes || [])].find(t => t.key === activeTab)?.label || ''}
               className="max-w-full block"
               onLoad={() => setImageLoaded(true)}
               draggable={false}
@@ -1106,6 +1656,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseLeave}
+              onContextMenu={e => { e.preventDefault(); setShowStrokes(s => !s) }}
             />
           </div>
         )}
