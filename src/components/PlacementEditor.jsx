@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Check, X, Image as ImageIcon, Layers } from 'lucide-react'
 
 // ═══════════════════════════════════════
 // 放置标点编辑面板
 // ═══════════════════════════════════════
-export default function PlacementEditor({ template, worldX, worldY, existingPlacement, existingMaps, onConfirm, onCancel }) {
+export default function PlacementEditor({ template, worldX, worldY, existingPlacement, existingMaps, existingLayers = [], presetLayerId = null, onConfirm, onCancel }) {
   const [customName, setName] = useState(existingPlacement?.custom_name || '')
   // 解析现有 special_function
   const existingSf = existingPlacement ? (() => {
@@ -17,7 +17,20 @@ export default function PlacementEditor({ template, worldX, worldY, existingPlac
   const [targetMapId, setTargetMapId] = useState(existingSf?.map_id || '')
   const [description, setDescription] = useState(existingSf?.description || existingSf?.tooltip?.body || '')
   const [imageFilename, setImageFilename] = useState(existingSf?.image || existingSf?.tooltip?.image || '')
-  const [subscript, setSubscript] = useState(existingPlacement?.subscript === '1' || existingPlacement?.subscript === 1)
+  const [subscript, setSubscript] = useState(existingPlacement?.subscript === '1' || existingPlacement?.subscript === 1 || !!presetLayerId)
+  const [layerId, setLayerId] = useState(existingPlacement?.layer_id || presetLayerId || '')
+  const [layerSearch, setLayerSearch] = useState('')
+
+  // 按层级分组
+  const groupedLayers = useCallback(() => {
+    const groups = {}
+    for (const l of existingLayers) {
+      const prefix = l.level.replace(/\d+$/, '')
+      if (!groups[prefix]) groups[prefix] = []
+      groups[prefix].push(l)
+    }
+    return groups
+  }, [existingLayers])
 
   // ── 导入图片 ──
   const handleImportImage = useCallback(async () => {
@@ -39,8 +52,29 @@ export default function PlacementEditor({ template, worldX, worldY, existingPlac
       customName: customName || '',
       specialFunction: sf,
       subscript: subscript ? '1' : '0',
+      layerId: subscript ? layerId : '',  // 只有勾选下标时才能设置 layer_id
     })
   }
+
+  const groups = groupedLayers()
+
+  // 按搜索词过滤分层地图
+  const filteredGroups = useMemo(() => {
+    if (!layerSearch.trim()) return groups
+    const q = layerSearch.toLowerCase()
+    const result = {}
+    for (const [prefix, layers] of Object.entries(groups)) {
+      const matched = layers.filter(l =>
+        l.name?.toLowerCase().includes(q) ||
+        l.level?.toLowerCase().includes(q) ||
+        l.id?.toLowerCase().includes(q)
+      )
+      if (matched.length > 0) result[prefix] = matched
+    }
+    return result
+  }, [groups, layerSearch])
+
+  const hasFiltered = Object.keys(filteredGroups).length > 0
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
@@ -69,6 +103,48 @@ export default function PlacementEditor({ template, worldX, worldY, existingPlac
             <Layers className="w-3.5 h-3.5 text-surface-400" />
             显示下标（右下角黑色圆形分层标记）
           </label>
+
+          {/* 分层地图选择（仅当勾选下标且有分层地图时显示） */}
+          {subscript && existingLayers.length > 0 && (
+            <div className="mt-2">
+              <label className="text-[10px] text-surface-500 block mb-1">所属分层地图</label>
+              <div className="relative">
+                <input value={layerSearch} onChange={e => setLayerSearch(e.target.value)}
+                  placeholder="搜索层名或代号…"
+                  className="w-full px-2 py-1.5 rounded-lg bg-surface-800/50 border border-white/10 text-xs text-surface-200 placeholder-surface-600 outline-none focus:border-amber-500/40 transition-colors mb-1" />
+                <div className="max-h-32 overflow-y-auto space-y-0.5">
+                  <button
+                    onClick={() => { setLayerId(''); setLayerSearch('') }}
+                    className={`w-full text-left px-2 py-1 rounded text-[10px] transition-colors ${
+                      !layerId
+                        ? 'bg-amber-500/20 text-amber-400'
+                        : 'text-surface-500 hover:bg-white/5 hover:text-surface-300'
+                    }`}
+                  >（仅下标，不关联分层地图）</button>
+                  {hasFiltered ? Object.entries(filteredGroups).map(([prefix, layers]) => (
+                    <div key={prefix}>
+                      <div className="text-[9px] text-surface-600 px-1 py-0.5 font-medium">
+                        {prefix === 'B' ? '地下' : prefix === 'F' ? '地上' : ''}层 ({prefix})
+                      </div>
+                      {layers.map(l => (
+                        <button
+                          key={l.id}
+                          onClick={() => { setLayerId(l.id); setLayerSearch('') }}
+                          className={`w-full text-left px-2 py-1 rounded text-[10px] transition-colors truncate ${
+                            layerId === l.id
+                              ? 'bg-amber-500/20 text-amber-400'
+                              : 'text-surface-500 hover:bg-white/5 hover:text-surface-300'
+                          }`}
+                        >{l.level} - {l.name || '未命名'}</button>
+                      ))}
+                    </div>
+                  )) : (
+                    <div className="text-[10px] text-surface-600 text-center py-2">无匹配分层地图</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 特殊功能 */}

@@ -1482,6 +1482,14 @@ ipcMain.handle('select-db-location', async () => {
       }
     }
 
+    // 清除用户配置缓存，强制下次读取从新位置的磁盘重新加载
+    _userConfigCache = null;
+    if (_userConfigSaveTimer) {
+      clearTimeout(_userConfigSaveTimer);
+      _userConfigSaveTimer = null;
+      _userConfigPending = null;
+    }
+
     return { success: true, dbPath, imagesDir, needsSeed };
   } catch (e) {
     return { success: false, error: e.message };
@@ -2593,7 +2601,8 @@ ipcMain.handle('map-save-config', (_event, mapId, nameZh, config) => {
     if (existing.length > 0) {
       dbRun("UPDATE map_maps SET name_zh = ?, config = ?, updated_at = datetime('now','localtime') WHERE id = ?", [nameZh, configJson, mapId]);
     } else {
-      dbRun("INSERT INTO map_maps (id, name_zh, config) VALUES (?, ?, ?)", [mapId, nameZh, configJson]);
+      const maxOrder = dbAll("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM map_maps")[0]?.next_sort ?? 0;
+      dbRun("INSERT INTO map_maps (id, name_zh, config, sort_order) VALUES (?, ?, ?, ?)", [mapId, nameZh, configJson, maxOrder]);
     }
     dbSave();
     return { success: true };
@@ -3152,18 +3161,18 @@ ipcMain.handle('map-delete-placement', (_event, placementId) => {
 ipcMain.handle('map-update-placement', (_event, placementId, updates) => {
   try {
     if (!db && !userDb) throw new Error('数据库未初始化');
-    const { custom_name, special_function, subscript } = updates || {};
+    const { custom_name, special_function, subscript, layer_id } = updates || {};
     // special_function 已由前端 JSON.stringify，直接使用即可
     const sf = special_function || null;
     if (userDb) {
       try {
-        const res = dbRunOnDb(userDb, "UPDATE map_marker_placements SET custom_name = ?, special_function = ?, subscript = ? WHERE id = ?",
-          [custom_name || '', sf, subscript || '0', placementId]);
+        const res = dbRunOnDb(userDb, "UPDATE map_marker_placements SET custom_name = ?, special_function = ?, subscript = ?, layer_id = ? WHERE id = ?",
+          [custom_name || '', sf, subscript || '0', layer_id || null, placementId]);
         if (res.changes > 0) { userDbSave(); return { success: true }; }
       } catch (_) { /* userDb 无此表，fallback 到基准库 */ }
     }
-    dbRun("UPDATE map_marker_placements SET custom_name = ?, special_function = ?, subscript = ? WHERE id = ?",
-      [custom_name || '', sf, subscript || '0', placementId]);
+    dbRun("UPDATE map_marker_placements SET custom_name = ?, special_function = ?, subscript = ?, layer_id = ? WHERE id = ?",
+      [custom_name || '', sf, subscript || '0', layer_id || null, placementId]);
     dbSave();
     return { success: true };
   } catch (e) { return { error: e.message }; }

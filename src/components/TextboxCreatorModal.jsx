@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { Type, X, Check } from 'lucide-react'
 
-export default function TextboxCreatorModal({ onConfirm, onCancel, editData }) {
+export default function TextboxCreatorModal({ onConfirm, onCancel, editData, mapConfig }) {
   const [text, setText] = useState(editData?.text || '')
   const [level, setLevel] = useState(editData?.level || 1)
+  const [layerId, setLayerId] = useState(editData?.layer_id || '')
   const isEdit = !!editData
+
+  const layers = mapConfig?.layers || []
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
@@ -24,7 +27,7 @@ export default function TextboxCreatorModal({ onConfirm, onCancel, editData }) {
             className="w-full px-3 py-2 rounded-lg bg-surface-800 border border-white/10 text-sm text-surface-200 placeholder-surface-600 outline-none focus:border-blue-500/40 transition-colors resize-none" />
         </div>
 
-        <div className="mb-4">
+        <div className="mb-3">
           <label className="text-[11px] text-surface-400 block mb-1.5">显示级别</label>
           <div className="flex gap-2">
             {[0, 1, 2, 3].map(l => (
@@ -39,9 +42,21 @@ export default function TextboxCreatorModal({ onConfirm, onCancel, editData }) {
           <p className="text-[10px] text-surface-500 mt-1.5">零级字体最大，三级最小</p>
         </div>
 
+        {/* 所属分层地图 */}
+        <div className="mb-4">
+          <label className="text-[11px] text-surface-400 block mb-1">所属分层地图</label>
+          <select value={layerId} onChange={e => setLayerId(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-surface-800 border border-white/10 text-xs text-surface-200 outline-none focus:border-blue-500/40 transition-colors">
+            <option value="">（无，属于 G 层）</option>
+            {layers.map(l => (
+              <option key={l.id} value={l.id}>{l.name || '未命名'} ({l.level})</option>
+            ))}
+          </select>
+        </div>
+
         <div className="flex gap-2">
           <button onClick={onCancel} className="flex-1 px-4 py-2 rounded-xl border border-white/10 text-sm text-surface-300 hover:bg-white/5 transition-colors">取消</button>
-          <button onClick={() => onConfirm({ text, level, editId: editData?.id || null })} disabled={!text.trim()}
+          <button onClick={() => onConfirm({ text, level, layerId, editId: editData?.id || null })} disabled={!text.trim()}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
               text.trim() ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30' : 'bg-surface-800 text-surface-600 border border-white/5 cursor-not-allowed'
             }`}>

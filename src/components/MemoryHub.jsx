@@ -4,6 +4,7 @@ import { useDb } from '../context/DbContext'
 import MapCalibration from './MapCalibration'
 import MarkerCreatorModal from './MarkerCreatorModal'
 import TextboxCreatorModal from './TextboxCreatorModal'
+import LayerMapModal from './LayerMapModal'
 import PlacementEditor from './PlacementEditor'
 import { createIdleQueue } from '../utils/idleLoader'
 import { buildMarkerOverlapGroups } from '../utils/markerOverlap.mjs'
@@ -535,6 +536,56 @@ export default function MemoryHub() {
   const [textboxEditData, setTextboxEditData] = useState(null) // 编辑文本框数据
   const [movingTextboxId, setMovingTextboxId] = useState(null)  // 当前可拖拽移动的文本框 ID
   const movingTextboxIdRef = useRef(null)
+  const [movingMarkerId, setMovingMarkerId] = useState(null)    // 当前可拖拽移动的标点 ID
+  const movingMarkerIdRef = useRef(null)
+
+  // ── 分层地图状态 ──
+  const [layerMode, setLayerMode] = useState('G')    // 'G' | 'B' | 'F' | 'B1' | 'B2' | 'F1' | 'F2' ...
+  const [showLayerManager, setShowLayerManager] = useState(false)
+  const [layerEditData, setLayerEditData] = useState(null)   // 编辑分层地图数据
+  const [hoveredLayerId, setHoveredLayerId] = useState(null) // 悬停的分层地图 ID
+  const [layerMenu, setLayerMenu] = useState(null)            // 分层地图中键菜单
+  const layerModeRef = useRef('G')
+  useEffect(() => { layerModeRef.current = layerMode }, [layerMode])
+
+
+
+  // 从 mapConfig 获取分层地图配置
+  const configLayers = useMemo(() => mapConfig?.layers || [], [mapConfig])
+  // 所有存在的层级代号（排序：B... < G < F...）
+  const availableLevels = useMemo(() => {
+    const levels = new Set()
+    for (const l of configLayers) {
+      if (l.level) levels.add(l.level)
+    }
+    return [...levels].sort((a, b) => {
+      const getRank = (s) => {
+        if (s === 'G') return 0
+        const match = s.match(/^([BF])(\d+)$/i)
+        if (!match) return 1
+        const prefix = match[1].toUpperCase()
+        const num = parseInt(match[2])
+        return prefix === 'B' ? -num : num
+      }
+      return getRank(a) - getRank(b)
+    })
+  }, [configLayers])
+  // 是否有 B 层 / F 层
+  const hasBLayers = useMemo(() => availableLevels.some(l => l.startsWith('B')), [availableLevels])
+  const hasFLayers = useMemo(() => availableLevels.some(l => l.startsWith('F')), [availableLevels])
+
+  // ── 调试：监听分层地图数据变化 ──
+  useEffect(() => {
+    console.log('[MemoryHub:Layers] configLayers:', JSON.stringify(configLayers))
+    console.log('[MemoryHub:Layers] layerMode:', layerMode, 'length:', configLayers.length)
+    console.log('[MemoryHub:Layers] hasBLayers:', hasBLayers, 'hasFLayers:', hasFLayers)
+  }, [configLayers, layerMode, hasBLayers, hasFLayers])
+
+  // ── 跟踪层级切换（不做自动定位，保持当前视角） ──
+  const prevLayerMode = useRef('G')
+  useEffect(() => {
+    prevLayerMode.current = layerMode
+  }, [layerMode])
 
   // ── 全局默认配置与用户覆盖配置 ──
   const [globalDefaults, setGlobalDefaults] = useState({
@@ -542,6 +593,7 @@ export default function MemoryHub() {
     textboxFontSizes: { 0: 12, 1: 12, 2: 12, 3: 12 },
     markerSize: 32,
     fullImgThreshold: 0.10,
+    layerHoverZoom: false,
   })
   const [userMapConfig, setUserMapConfig] = useState({})
 
@@ -562,8 +614,7 @@ export default function MemoryHub() {
 
   const effectiveInertiaEnabled = userMapConfig.inertiaEnabled ?? mapConfig?.inertiaEnabled ?? globalDefaults.inertiaEnabled ?? true
   const effectiveInertiaFriction = userMapConfig.inertiaFriction ?? mapConfig?.inertiaFriction ?? globalDefaults.inertiaFriction ?? 0.05
-
-  // 不含用户覆盖的默认值（用于对比差异）
+  const effectiveLayerHoverZoom = userMapConfig.layerHoverZoom ?? mapConfig?.layerHoverZoom ?? globalDefaults.layerHoverZoom ?? false
   const defaultLevelThresholds = {
     1: 0.5, 2: 1.5, 3: 3.0,
     ...(globalDefaults.levelThresholds || {}),
@@ -578,6 +629,19 @@ export default function MemoryHub() {
 
   const defaultInertiaEnabled = mapConfig?.inertiaEnabled ?? globalDefaults.inertiaEnabled ?? true
   const defaultInertiaFriction = mapConfig?.inertiaFriction ?? globalDefaults.inertiaFriction ?? 0.05
+  const defaultLayerHoverZoom = mapConfig?.layerHoverZoom ?? globalDefaults.layerHoverZoom ?? false
+
+  // ── 数据库迁移：为 map_marker_placements 添加 layer_id 列 ──
+  useEffect(() => {
+    window.electronAPI?.mapExecBaseline(
+      "ALTER TABLE map_marker_placements ADD COLUMN layer_id TEXT DEFAULT NULL",
+      []
+    ).catch(() => {})
+    window.electronAPI?.mapExecBaseline(
+      "ALTER TABLE map_textboxes ADD COLUMN layer_id TEXT DEFAULT NULL",
+      []
+    ).catch(() => {})  // 列已存在时忽略错误
+  }, [])
 
   // ── 切换地图时加载全局默认和用户覆盖 ──
   useEffect(() => {
@@ -606,6 +670,7 @@ export default function MemoryHub() {
     const onKey = (e) => {
       if (e.key !== 'Escape') return
       if (movingTextboxIdRef.current !== null) { setMovingTextboxId(null); return }
+      if (movingMarkerIdRef.current !== null) { setMovingMarkerId(null); return }
       if (defaultViewActive) handleCancelDefaultView()
     }
     window.addEventListener('keydown', onKey)
@@ -673,7 +738,7 @@ export default function MemoryHub() {
 
       // 加载已放置标点（基准库 dev + user.db user）
       const placedRes = await window.electronAPI?.mapQuery(
-        "SELECT mp.id, mp.map_id, mp.marker_id, mp.world_x, mp.world_y, mp.special_function, mp.custom_name, mp.created_by_dev, mp.subscript, mp.sort_order, " +
+        "SELECT mp.id, mp.map_id, mp.marker_id, mp.world_x, mp.world_y, mp.special_function, mp.custom_name, mp.created_by_dev, mp.subscript, mp.layer_id, mp.sort_order, " +
         "m.marker_type, m.image_filename, m.name_zh, m.special_function AS template_special " +
         "FROM map_marker_placements mp LEFT JOIN map_markers m ON mp.marker_id = m.id WHERE mp.map_id = ? ORDER BY mp.sort_order, mp.created_at",
         [mapId]
@@ -681,7 +746,7 @@ export default function MemoryHub() {
 
       // 加载文本框
       const tbRes = await window.electronAPI?.mapQuery(
-        "SELECT id, text, level, world_x, world_y FROM map_textboxes WHERE map_id = ? ORDER BY level, world_y, world_x",
+        "SELECT id, text, level, world_x, world_y, layer_id FROM map_textboxes WHERE map_id = ? ORDER BY level, world_y, world_x",
         [mapId]
       )
       if (mapGenerationRef.current !== gen || currentMapIdRef.current !== mapId) return
@@ -771,6 +836,8 @@ export default function MemoryHub() {
     setSlicing(false); setSliceProgress('')
     // 切换地图时退出定点模式
     setDefaultViewActive(false); defaultViewActiveRef.current = false
+    // 重置分层模式
+    setLayerMode('G')
     setCurrentMapId(mapId)
     setMapConfig(m.config)
     mapConfigRef.current = m.config
@@ -1233,8 +1300,9 @@ export default function MemoryHub() {
   // ── 左键拖拽平移（rAF 节流 + ref） ──
   const handleMouseDown = useCallback((e) => {
     e.preventDefault()
-    // 点击空白处取消文本框移动模式
+    // 点击空白处取消移动模式
     if (movingTextboxIdRef.current !== null) setMovingTextboxId(null)
+    if (movingMarkerIdRef.current !== null) setMovingMarkerId(null)
     if (e.button !== 0) return
     // 停止正在运行的惯性动画
     if (inertiaRafRef.current !== null) {
@@ -1262,6 +1330,7 @@ export default function MemoryHub() {
 
   // 同步 movingTextboxId state → ref（供 useCallback 使用最新值）
   useEffect(() => { movingTextboxIdRef.current = movingTextboxId }, [movingTextboxId])
+  useEffect(() => { movingMarkerIdRef.current = movingMarkerId }, [movingMarkerId])
   // 同步惯性设置到 ref（供 useCallback 使用最新值）
   useEffect(() => { inertiaEnabledRef.current = effectiveInertiaEnabled }, [effectiveInertiaEnabled])
   useEffect(() => { inertiaFrictionRef.current = effectiveInertiaFriction }, [effectiveInertiaFriction])
@@ -1416,22 +1485,49 @@ export default function MemoryHub() {
     // 计算点击位置的世界坐标
     const mouseX = (e.clientX - rect.left - viewCenter.x) / zoom
     const mouseY = (e.clientY - rect.top - viewCenter.y) / zoom
+
+    // 分层模式逻辑
+    const isSingleLayerMode = layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F'
+    const isGroupLayerMode = layerMode === 'B' || layerMode === 'F'
+
+    // B 或 F 模式（所有层级显示模式）下无法放置任何标点
+    if (isGroupLayerMode) return
+
+    // 检测右键是否在某个分层地图上
+    let targetLayer = null
+    if (isSingleLayerMode) {
+      for (const layer of configLayers) {
+        if (layer.level !== layerMode) continue
+        const halfW = (layer.width || 500) / 2
+        const halfH = (layer.height || 500) / 2
+        if (
+          mouseX >= (layer.worldX - halfW) && mouseX <= (layer.worldX + halfW) &&
+          mouseY >= (layer.worldY - halfH) && mouseY <= (layer.worldY + halfH)
+        ) {
+          targetLayer = layer
+          break
+        }
+      }
+      // 如果右键位置没有分层地图则不触发菜单
+      if (!targetLayer) return
+    }
+
     // 只显示有可用标点模板的菜单
     const available = markerTemplates
     if (available.length === 0) return
     // 弹出右键菜单选择标点（菜单通过 Portal 在 body 中，用 window 边界）
     const pos = clampMenuPos(e.clientX, e.clientY, 260, 320)
-    setContextMenu({ x: pos.x, y: pos.y, worldX: mouseX, worldY: mouseY, templates: available })
+    setContextMenu({ x: pos.x, y: pos.y, worldX: mouseX, worldY: mouseY, templates: available, targetLayer })
     setContextMenuSearch('')
-  }, [viewCenter, zoom, mapConfig, markerTemplates])
+  }, [viewCenter, zoom, mapConfig, markerTemplates, configLayers, layerMode])
 
   // ── 放置编辑面板确认 ──
-  const handlePlacementConfirm = useCallback(async ({ placementId, markerId, worldX, worldY, customName, specialFunction, subscript }) => {
+  const handlePlacementConfirm = useCallback(async ({ placementId, markerId, worldX, worldY, customName, specialFunction, subscript, layerId }) => {
     try {
       const sf = specialFunction ? JSON.stringify(specialFunction) : null
       if (placementId) {
         // 编辑模式
-        await window.electronAPI?.mapUpdatePlacement(placementId, { custom_name: customName, special_function: sf, subscript })
+        await window.electronAPI?.mapUpdatePlacement(placementId, { custom_name: customName, special_function: sf, subscript, layer_id: layerId || null })
       } else {
         // 新建模式 — 计算 sort_order 排在最上层
         const orderRes = await window.electronAPI?.mapQuery(
@@ -1440,8 +1536,8 @@ export default function MemoryHub() {
         )
         const nextOrder = orderRes?.data?.[0]?.next_order ?? 0
         const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-        const sql = "INSERT INTO map_marker_placements (id, map_id, marker_id, world_x, world_y, custom_name, special_function, subscript, sort_order, created_by_dev) VALUES (?,?,?,?,?,?,?,?,?,?)"
-        const params = [id, currentMapId, markerId, worldX, worldY, customName, sf, subscript || '0', nextOrder, devMode ? 1 : 0]
+        const sql = "INSERT INTO map_marker_placements (id, map_id, marker_id, world_x, world_y, custom_name, special_function, subscript, layer_id, sort_order, created_by_dev) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+        const params = [id, currentMapId, markerId, worldX, worldY, customName, sf, subscript || '0', layerId || null, nextOrder, devMode ? 1 : 0]
         if (devMode) {
           await window.electronAPI?.mapExecBaseline(sql, params)
         } else {
@@ -1454,6 +1550,56 @@ export default function MemoryHub() {
       console.error('[MemoryHub] place marker error:', e)
     }
   }, [currentMapId, devMode])
+
+  // ── 分层地图：添加/编辑/删除 ──
+  const handleLayerConfirm = useCallback(async (layerData) => {
+    try {
+      const layers = [...(mapConfig?.layers || [])]
+      const entry = {
+        id: layerData.editIndex != null ? layers[layerData.editIndex]?.id : (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
+        name: layerData.name,
+        level: layerData.level,
+        imageFilename: layerData.imageFilename,
+        worldX: layerData.worldX,
+        worldY: layerData.worldY,
+        width: layerData.width,
+        height: layerData.height,
+        zIndex: layerData.zIndex,
+      }
+      if (layerData.editIndex != null && layerData.editIndex >= 0 && layerData.editIndex < layers.length) {
+        // 编辑
+        layers[layerData.editIndex] = { ...layers[layerData.editIndex], ...entry }
+      } else {
+        // 新增
+        layers.push(entry)
+      }
+      const updatedConfig = { ...mapConfig, layers }
+      setMapConfig(updatedConfig)
+      setMaps(prev => prev.map(m => m.id === currentMapId ? { ...m, config: updatedConfig } : m))
+      const mn = maps.find(m => m.id === currentMapId)?.name_zh || ''
+      await window.electronAPI?.mapSaveConfig(currentMapId, mn, updatedConfig)
+      setShowLayerManager(false)
+      setLayerEditData(null)
+    } catch (e) {
+      console.error('[MemoryHub] handleLayerConfirm error:', e)
+    }
+  }, [currentMapId, mapConfig, maps])
+
+  const handleLayerDelete = useCallback(async (index) => {
+    try {
+      const layers = [...(mapConfig?.layers || [])]
+      if (index < 0 || index >= layers.length) return
+      if (!confirm(`确定删除分层地图「${layers[index].name || '未命名'}」？`)) return
+      layers.splice(index, 1)
+      const updatedConfig = { ...mapConfig, layers }
+      setMapConfig(updatedConfig)
+      setMaps(prev => prev.map(m => m.id === currentMapId ? { ...m, config: updatedConfig } : m))
+      const mn = maps.find(m => m.id === currentMapId)?.name_zh || ''
+      await window.electronAPI?.mapSaveConfig(currentMapId, mn, updatedConfig)
+    } catch (e) {
+      console.error('[MemoryHub] handleLayerDelete error:', e)
+    }
+  }, [currentMapId, mapConfig, maps])
 
   // ── 创建标点模板 ──
   const handleCreateMarker = useCallback(async (markerData) => {
@@ -1490,30 +1636,46 @@ export default function MemoryHub() {
   // ── 创建文本框 ──
   const handleCreateTextbox = useCallback(async (textData) => {
     try {
+      // 分层模式检查
+      const isSingleLayerMode = layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F'
+      const isGroupLayerMode = layerMode === 'B' || layerMode === 'F'
+      if (isGroupLayerMode) {
+        alert('B/F 模式下无法添加文本框，请先切换到具体层级（如 B1、F1）或 G 层')
+        return
+      }
       if (textData.editId) {
         // 编辑模式
-        await window.electronAPI?.mapUpdateTextbox(textData.editId, { text: textData.text, level: textData.level })
+        await window.electronAPI?.mapUpdateTextbox(textData.editId, { text: textData.text, level: textData.level, layer_id: textData.layerId || null })
         setShowTextboxCreator(false)
         setTextboxEditData(null)
         loadMarkers(currentMapId)
         return
       }
-      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-      // 默认放在视口中心
+      // 默认放在可视范围中心
       const cw = containerSize.current.w || 800
       const ch = containerSize.current.h || 600
-      const defaultWorldX = (cw / 2 - viewCenter.x) / zoom
-      const defaultWorldY = (ch / 2 - viewCenter.y) / zoom
-      const worldX = textData.worldX ?? defaultWorldX
-      const worldY = textData.worldY ?? defaultWorldY
-      const sql = "INSERT INTO map_textboxes (id, map_id, text, level, world_x, world_y) VALUES (?, ?, ?, ?, ?, ?)"
-      await window.electronAPI?.mapExecBaseline(sql, [id, currentMapId, textData.text, textData.level, worldX, worldY])
+      let worldX = (cw / 2 - viewCenter.x) / zoom
+      let worldY = (ch / 2 - viewCenter.y) / zoom
+      worldX = textData.worldX ?? worldX
+      worldY = textData.worldY ?? worldY
+      // 自动设置 layer_id：在特定层模式下创建时，关联到该层第一张地图
+      let autoLayerId = textData.layerId || null
+      if (!autoLayerId) {
+        const isSingleLayerMode = layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F'
+        if (isSingleLayerMode) {
+          const targetLayer = configLayers.find(l => l.level === layerMode)
+          if (targetLayer) autoLayerId = targetLayer.id
+        }
+      }
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+      const sql = "INSERT INTO map_textboxes (id, map_id, text, level, world_x, world_y, layer_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      await window.electronAPI?.mapExecBaseline(sql, [id, currentMapId, textData.text, textData.level, worldX, worldY, autoLayerId])
       setShowTextboxCreator(false)
       loadMarkers(currentMapId)
     } catch (e) {
       console.error('[MemoryHub] create textbox error:', e)
     }
-  }, [currentMapId, viewCenter, zoom])
+  }, [currentMapId, viewCenter, zoom, configLayers, layerMode])
 
   // ── 容器尺寸观察（rAF 节流，避免高频触发重算） ──
   useEffect(() => {
@@ -2038,6 +2200,39 @@ export default function MemoryHub() {
           ))}
         </div>
 
+        {/* ── 分层地图层级滑块 ── */}
+        {(hasBLayers || hasFLayers) && (() => {
+          // 构建滑块选项：B... | G | F...
+          const sliderOptions = []
+          if (hasBLayers) sliderOptions.push('B')
+          sliderOptions.push('G')
+          if (hasFLayers) sliderOptions.push('F')
+          return (
+            <div className="flex items-center gap-0.5 bg-surface-900/60 rounded-lg p-0.5 border border-white/5">
+              {sliderOptions.map(opt => (
+                <button
+                  key={opt}
+                  onClick={() => setLayerMode(opt === 'G' ? 'G' : opt)}
+                  onMouseEnter={(e) => {
+                    if (layerMode !== opt) e.currentTarget.classList.add('bg-white/10')
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.classList.remove('bg-white/10')
+                  }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                    layerMode === opt || (opt === 'G' && layerMode === 'G')
+                      ? 'bg-purple-500/20 text-purple-400'
+                      : 'text-surface-500 hover:text-surface-300'
+                  }`}
+                  title={opt === 'G' ? '地面层' : opt === 'B' ? '地下分层' : '地上分层'}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )
+        })()}
+
         <div className="flex-1" />
 
         {/* 默认视角按钮（始终可见） */}
@@ -2070,6 +2265,15 @@ export default function MemoryHub() {
             </button>
             <button onClick={() => setShowTextboxCreator(true)} className="p-1.5 rounded-lg hover:bg-white/10 text-surface-400 hover:text-blue-400 transition-colors" title="添加文本框">
               <Type className="w-4 h-4" />
+            </button>
+            <button onClick={() => {
+              const vp = containerSize.current
+              const cx = Math.round((vp.w / 2 - viewCenter.x) / zoom)
+              const cy = Math.round((vp.h / 2 - viewCenter.y) / zoom)
+              setLayerEditData({ _defaultX: cx, _defaultY: cy })
+              setShowLayerManager(true)
+            }} className="p-1.5 rounded-lg hover:bg-white/10 text-surface-400 hover:text-purple-400 transition-colors" title="管理分层地图">
+              <Layers className="w-4 h-4" />
             </button>
             <div className="w-px h-5 bg-white/10" />
           </>
@@ -2148,6 +2352,100 @@ export default function MemoryHub() {
               commitAckRef={tileLayerCommitAckRef}
             />
 
+            {/* ── 分层地图模式：G 层变暗覆盖（匹配 FullMapImage 坐标：left=-ax*scale, top=-ay*scale, w=mapW*scale, h=mapH*scale） ── */}
+            {/* ── G 层变暗覆盖（渐隐渐现） ── */}
+            {(() => {
+              const ax = mapConfig?.anchorA?.[0] || 0
+              const ay = mapConfig?.anchorA?.[1] || 0
+              const sc = mapConfig?.scale || 1
+              const mw = mapConfig?.mapW || 0
+              const mh = mapConfig?.mapH || 0
+              return (
+                <div className="absolute z-10 pointer-events-none transition-opacity duration-300"
+                  style={{
+                    left: -ax * sc,
+                    top: -ay * sc,
+                    width: mw * sc,
+                    height: mh * sc,
+                    backgroundColor: 'rgba(0,0,0,0.45)',
+                    opacity: layerMode !== 'G' ? 1 : 0,
+                  }} />
+              )
+            })()}
+
+            {/* ── 分层地图渲染（渐隐渐现） ── */}
+            {configLayers.length > 0 && (() => {
+              // 判断当前应显示哪些分层地图
+              const isLayerMode = (lvl) => {
+                if (layerMode === 'G') return false
+                if (layerMode === 'B') return lvl.startsWith('B')
+                if (layerMode === 'F') return lvl.startsWith('F')
+                return lvl === layerMode
+              }
+              return configLayers
+                .slice()
+                .sort((a, b) => {
+                  const aPref = a.level.match(/^([BF])(\d+)/i)
+                  const bPref = b.level.match(/^([BF])(\d+)/i)
+                  if (aPref && bPref) {
+                    if (aPref[1] !== bPref[1]) return aPref[1] === 'B' ? -1 : 1
+                    const aNum = parseInt(aPref[2])
+                    const bNum = parseInt(bPref[2])
+                    // B 层：数字越大越深 → 排在前面（渲染靠后）
+                    // F 层：数字越小越近 → 排在前面
+                    return aPref[1] === 'B' ? bNum - aNum : aNum - bNum
+                  }
+                  return (a.zIndex || 0) - (b.zIndex || 0)
+                })
+                .map((layer) => {
+                  const halfW = (layer.width || 500) / 2
+                  const halfH = (layer.height || 500) / 2
+                  const visible = isLayerMode(layer.level)
+                  const isHoverZoom = hoveredLayerId === layer.id && (layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F') && effectiveLayerHoverZoom
+                  return (
+                    <div
+                      key={layer.id}
+                      data-layer-id={layer.id}
+                      className="absolute z-20"
+                      style={{
+                        left: layer.worldX - halfW,
+                        top: layer.worldY - halfH,
+                        width: layer.width || 500,
+                        height: layer.height || 500,
+                        opacity: visible ? 1 : 0,
+                        transition: 'opacity 0.3s ease',
+                        pointerEvents: visible ? 'auto' : 'none',
+                      }}
+                      onMouseEnter={() => setHoveredLayerId(layer.id)}
+                      onMouseLeave={() => setHoveredLayerId(null)}
+                      onMouseDown={(e) => {
+                        // 中键：开发者模式 + 具体层级 → 弹出编辑/删除菜单
+                        if (e.button === 1 && devMode && layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F') {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          const pos = clampMenuPos(e.clientX, e.clientY, 120, 88)
+                          setLayerMenu({ layer, editIndex: configLayers.indexOf(layer), x: pos.x, y: pos.y })
+                        }
+                      }}
+                    >
+                      <img
+                        src={`local-media://${layer.imageFilename}`}
+                        alt={layer.name || '分层地图'}
+                        className={`w-full h-full object-contain transition-all duration-200 ${
+                          isHoverZoom ? 'scale-105 brightness-110' : ''
+                        }`}
+                        style={{
+                          filter: isHoverZoom
+                            ? 'brightness(1.1) drop-shadow(0 8px 16px rgba(0,0,0,0.5))'
+                            : 'none',
+                        }}
+                        draggable={false}
+                      />
+                    </div>
+                  )
+                })
+            })()}
+
             {/* 标点渲染 */}
             {viewportMarkers.map(pm => {
               const template = templateMap.get(pm.marker_id)
@@ -2161,7 +2459,15 @@ export default function MemoryHub() {
                 lv === 2 ? zoom > effectiveLevelThresholds[2] && zoom <= effectiveLevelThresholds[3] :
                 lv === 3 ? zoom > effectiveLevelThresholds[3] : false
               )
-              if (!markerVisible) return null
+              // 分层模式过滤：非 G 模式时，只有属于当前层级分层的标点才显示
+              const layerMatch = (() => {
+                if (layerMode === 'G') return true
+                if (!pm.layer_id) return false
+                if (layerMode === 'B') return configLayers.some(l => l.id === pm.layer_id && l.level.startsWith('B'))
+                if (layerMode === 'F') return configLayers.some(l => l.id === pm.layer_id && l.level.startsWith('F'))
+                // 具体层级模式：检查该 layer_id 是否属于当前层代号
+                return configLayers.some(l => l.id === pm.layer_id && l.level === layerMode)
+              })()
               // 视图模式过滤
               if (viewMode === 'original') return null
               if (viewMode === 'compact' && template.marker_type !== 'statue') return null
@@ -2169,20 +2475,72 @@ export default function MemoryHub() {
               const baseSize = effectiveMarkerSize
               const maxWorldSize = Math.max(200, baseSize * 6)
               const effectiveSize = Math.min(baseSize / Math.max(zoom, 0.05), maxWorldSize)
+              // 分层地图悬停时标点偏移：沿半径向外移动 5%
+              let markerOffX = 0, markerOffY = 0
+              const isMarkerLayerHovered = hoveredLayerId && pm.layer_id === hoveredLayerId && (layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F') && effectiveLayerHoverZoom
+              if (isMarkerLayerHovered) {
+                const hl = configLayers.find(l => l.id === hoveredLayerId)
+                if (hl) {
+                  markerOffX = (pm.world_x - hl.worldX) * 0.05
+                  markerOffY = (pm.world_y - hl.worldY) * 0.05
+                }
+              }
               return (
                 <div
                   key={pm.id}
                   data-memoryhub-marker={pm.id}
-                  className={`absolute cursor-pointer group z-20 transition-transform duration-150 hover:scale-110 hover:z-[999] ${overlapHighlightedId === pm.id ? 'scale-125 z-[999]' : ''}`}
+                  className={`absolute group z-[25] transition-all duration-150 hover:scale-110 hover:z-[999] ${overlapHighlightedId === pm.id ? 'scale-125 z-[999]' : ''} ${markerVisible && layerMatch ? 'opacity-100' : 'opacity-0 pointer-events-none'}${movingMarkerId === pm.id ? ' cursor-move ring-2 ring-yellow-400/60' : ' cursor-pointer'}`}
                   style={{
-                    left: pm.world_x - effectiveSize / 2,
-                    top: pm.world_y - effectiveSize / 2,
+                    left: pm.world_x - effectiveSize / 2 + markerOffX,
+                    top: pm.world_y - effectiveSize / 2 + markerOffY,
                     width: effectiveSize, height: effectiveSize,
                     scale: 'var(--memoryhub-marker-scale, 1)',
+                    transition: `${effectiveLayerHoverZoom ? 'left 0.2s ease, top 0.2s ease, ' : ''}opacity 0.3s ease, transform 0.15s ease`,
                   }}
                   draggable={false}
-                  onMouseEnter={() => setHoveredMarker(pm)}
-                  onMouseLeave={() => setHoveredMarker(null)}
+                  onMouseEnter={() => {
+                    setHoveredMarker(pm)
+                    if (pm.layer_id && layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F' && effectiveLayerHoverZoom) {
+                      setHoveredLayerId(pm.layer_id)
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredMarker(null)
+                    setHoveredLayerId(null)
+                  }}
+                  onMouseDown={movingMarkerId === pm.id ? (e) => {
+                    e.stopPropagation()
+                    const mapRect = mapContainerRef.current.getBoundingClientRect()
+                    const z = zoomRef.current
+                    const origX = pm.world_x
+                    const origY = pm.world_y
+                    const startX = e.clientX, startY = e.clientY
+                    const dragPos = { x: origX, y: origY }
+                    const onMove = (ev) => {
+                      const dx = (ev.clientX - startX) / z
+                      const dy = (ev.clientY - startY) / z
+                      dragPos.x = origX + dx
+                      dragPos.y = origY + dy
+                      // 视觉上实时更新（通过 React 重渲染）
+                      setPlacedMarkers(prev => prev.map(p =>
+                        p.id === pm.id ? { ...p, world_x: origX + dx, world_y: origY + dy } : p
+                      ))
+                    }
+                    const onUp = async () => {
+                      window.removeEventListener('mousemove', onMove)
+                      window.removeEventListener('mouseup', onUp)
+                      // 保存最终位置（使用 dragPos ref 避免闭包陈旧值）
+                      const pos = dragPos
+                      await window.electronAPI?.mapExecBaseline(
+                        "UPDATE map_marker_placements SET world_x = ?, world_y = ? WHERE id = ?",
+                        [pos.x, pos.y, pm.id]
+                      ).catch(() => {})
+                      loadMarkers(currentMapId)
+                      setMovingMarkerId(null)
+                    }
+                    window.addEventListener('mousemove', onMove)
+                    window.addEventListener('mouseup', onUp)
+                  } : undefined}
                   onClick={(e) => {
                     const group = getOverlapGroup(pm)
                     if (group && group.length > 1) {
@@ -2190,6 +2548,15 @@ export default function MemoryHub() {
                       const pos = clampMenuPos(e.clientX, e.clientY, 200, Math.min(group.length * 44 + 60, 320))
                       setOverlapMenu({ markers: group, worldX: pm.world_x, worldY: pm.world_y, screenX: pos.x, screenY: pos.y })
                       return
+                    }
+                    // G/B/F 模式下点击有所属分层的标点 → 切换到对应具体层级
+                    if ((layerMode === 'G' || layerMode === 'B' || layerMode === 'F') && pm.subscript === '1' && pm.layer_id) {
+                      e.stopPropagation()
+                      const layer = configLayers.find(l => l.id === pm.layer_id)
+                      if (layer) {
+                        setLayerMode(layer.level)
+                        return
+                      }
                     }
                     const sfRaw = pm.special_function || pm.template_special
                     if (sfRaw) {
@@ -2222,7 +2589,7 @@ export default function MemoryHub() {
                     try {
                       const bc = typeof template.base_config === 'string' ? JSON.parse(template.base_config) : template.base_config
                       if (!bc || bc.baseType === 'none') return null
-                      const baseSz = effectiveSize * (bc.baseScale || 1.30)
+                      const baseSz = effectiveSize * (bc.baseScale || 1.30) * Math.SQRT1_2
                       const offset = (effectiveSize - baseSz) / 2
                       const bwRaw = bc.baseBorderWidth ?? 2
                       const bw = Math.max(1, bwRaw * effectiveSize / baseSize)
@@ -2258,9 +2625,16 @@ export default function MemoryHub() {
                   {pm.subscript === '1' || pm.subscript === 1 ? (() => {
                     const subSize = Math.min(effectiveSize * 0.45, maxWorldSize * 0.45)
                     const iconSize = subSize * 0.625
+                    const isInSpecificLayer = layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F'
+                    const isActiveLayer = isInSpecificLayer && pm.layer_id && configLayers.some(l => l.id === pm.layer_id && l.level === layerMode)
                     return (
-                      <div className="absolute rounded-full bg-black border border-white/30 flex items-center justify-center z-30"
-                        style={{ width: subSize, height: subSize, right: -subSize * 0.25, bottom: -subSize * 0.25, boxShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
+                      <div className={`absolute rounded-full flex items-center justify-center z-30 transition-colors duration-200 ${isActiveLayer ? 'border border-white/40' : 'border border-white/30'}`}
+                        style={{
+                          width: subSize, height: subSize,
+                          right: -subSize * 0.25, bottom: -subSize * 0.25,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+                          backgroundColor: isActiveLayer ? '#70EFF9' : '#000000',
+                        }}>
                         <Layers className="text-white" style={{ width: iconSize, height: iconSize }} />
                       </div>
                     )
@@ -2270,23 +2644,46 @@ export default function MemoryHub() {
             })}
 
             {/* 文本框渲染 — 按缩放级别显隐 */}
-            {(viewMode === 'original') ? null : viewportTextboxes.filter(tb => {
+            {(viewMode === 'original') ? null : viewportTextboxes.map(tb => {
               const levelMatch =
                 tb.level === 0 ? zoom <= effectiveLevelThresholds[1] :
                 tb.level === 1 ? zoom > effectiveLevelThresholds[1] && zoom <= effectiveLevelThresholds[2] :
                 tb.level === 2 ? zoom > effectiveLevelThresholds[2] && zoom <= effectiveLevelThresholds[3] :
                 tb.level === 3 ? zoom > effectiveLevelThresholds[3] :
                 false
-              return levelMatch
-            }).map(tb => (
-              <div
-                key={tb.id}
-                data-memoryhub-textbox={tb.id}
-                className={`absolute whitespace-nowrap font-bold text-white leading-none${devMode ? ' pointer-events-auto' : ' pointer-events-none'}${movingTextboxId === tb.id ? ' cursor-move ring-2 ring-yellow-400/60' : ''}`}
-                style={{ left: tb.world_x, top: tb.world_y, transform: 'translate(-50%, -50%)', scale: 'var(--memoryhub-text-scale, 1)', zIndex: 15, fontSize: (() => {
+              // 分层模式过滤
+              const tbLayerMatch = (() => {
+                if (layerMode === 'G') return !tb.layer_id  // G 模式只显示 G 层文本框（无 layer_id）
+                if (!tb.layer_id) return false  // 无 layer_id 的文本框属于 G 层，分层模式下隐藏
+                if (layerMode === 'B') return configLayers.some(l => l.id === tb.layer_id && l.level.startsWith('B'))
+                if (layerMode === 'F') return configLayers.some(l => l.id === tb.layer_id && l.level.startsWith('F'))
+                return configLayers.some(l => l.id === tb.layer_id && l.level === layerMode)
+              })()
+              // 分层地图悬停时文本框偏移
+              let tbOffX = 0, tbOffY = 0
+              const isTbLayerHovered = hoveredLayerId && tb.layer_id === hoveredLayerId && (layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F') && effectiveLayerHoverZoom
+              if (isTbLayerHovered) {
+                const hl = configLayers.find(l => l.id === hoveredLayerId)
+                if (hl) {
+                  tbOffX = (tb.world_x - hl.worldX) * 0.05
+                  tbOffY = (tb.world_y - hl.worldY) * 0.05
+                }
+              }
+              return (
+                <div
+                  key={tb.id}
+                  data-memoryhub-textbox={tb.id}
+                  className={`absolute whitespace-nowrap font-bold text-white leading-none${devMode ? ' pointer-events-auto' : ' pointer-events-none'}${movingTextboxId === tb.id ? ' cursor-move ring-2 ring-yellow-400/60' : ''} ${levelMatch && tbLayerMatch ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                style={{ left: tb.world_x + tbOffX, top: tb.world_y + tbOffY, transform: 'translate(-50%, -50%) scale(var(--memoryhub-text-scale, 1))', zIndex: tb.layer_id ? 22 : 15, fontSize: (() => {
                   const baseFs = effectiveTextboxFontSizes?.[tb.level] ?? 12
                   return baseFs / Math.max(zoom, 0.05)
-                })(), textShadow: '-1px -1px 0 rgba(60,60,60,0.75), 1px -1px 0 rgba(60,60,60,0.75), -1px 1px 0 rgba(60,60,60,0.75), 1px 1px 0 rgba(60,60,60,0.75)' }}
+                })(), textShadow: '0 -0.06em 0.03em rgba(60,60,60,0.75), 0 0.06em 0.03em rgba(60,60,60,0.75), -0.06em 0 0.03em rgba(60,60,60,0.75), 0.06em 0 0.03em rgba(60,60,60,0.75)', transition: `${effectiveLayerHoverZoom ? 'left 0.2s ease, top 0.2s ease, ' : ''}opacity 0.3s ease` }}
+                onMouseEnter={() => {
+                  if (tb.layer_id && layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F' && effectiveLayerHoverZoom) {
+                    setHoveredLayerId(tb.layer_id)
+                  }
+                }}
+                onMouseLeave={() => setHoveredLayerId(null)}
                 onMouseDown={devMode && movingTextboxId === tb.id ? (e) => {
                   e.stopPropagation()
                   const el = e.currentTarget
@@ -2325,7 +2722,7 @@ export default function MemoryHub() {
               >
                 {tb.text}
               </div>
-            ))}
+            )})}
 
             {/* ── 定点十字准星（在 transform 内，世界坐标定位） ── */}
             {defaultViewActive && (() => {
@@ -2423,6 +2820,45 @@ export default function MemoryHub() {
           onCancel={() => setCalibration(null)}
         />
       )}
+
+      {/* ── 右侧层级切换栏（分层模式） ── */}
+      {configLayers.length > 0 && layerMode !== 'G' && (
+        <div className="absolute right-2 top-2 bottom-2 z-30 flex flex-col gap-0.5 pointer-events-none">
+          <div className="flex-1 flex flex-col justify-center gap-0.5 pointer-events-auto">
+            {(() => {
+              // 收集所有层级按钮
+              const levels = ['G']
+              const bLevels = [...new Set(configLayers.filter(l => l.level.startsWith('B')).map(l => l.level))].sort((a, b) => {
+                const aNum = parseInt(a.match(/\d+/)?.[0] || '0')
+                const bNum = parseInt(b.match(/\d+/)?.[0] || '0')
+                return aNum - bNum // B1 → B5 从上到下
+              })
+              const fLevels = [...new Set(configLayers.filter(l => l.level.startsWith('F')).map(l => l.level))].sort()
+              if (layerMode.startsWith('B')) {
+                levels.push('B')
+                levels.push(...bLevels)
+              } else if (layerMode.startsWith('F')) {
+                levels.push('F')
+                levels.push(...fLevels)
+              }
+              return levels.map(lvl => (
+                <button
+                  key={lvl}
+                  onClick={() => setLayerMode(lvl)}
+                  className={`px-2 py-1.5 rounded text-[10px] font-medium transition-all border ${
+                    layerMode === lvl || (lvl === 'G' && layerMode === 'G')
+                      ? 'bg-purple-500/20 border-purple-500/40 text-purple-400 shadow-lg'
+                      : 'bg-surface-900/80 border-white/5 text-surface-400/70 hover:bg-surface-800/60 hover:text-surface-200'
+                  }`}
+                  title={lvl === 'G' ? '关闭分层模式' : `切换到 ${lvl} 层`}
+                >
+                  {lvl}
+                </button>
+              ))
+            })()}
+          </div>
+        </div>
+      )}
       </div>
 
       {/* ── 切片加载提示（固定居中的系统提示，不受地图变换影响） ── */}
@@ -2483,7 +2919,7 @@ export default function MemoryHub() {
                       ? <div className="px-3 py-4 text-[10px] text-surface-500 text-center">无匹配标点</div>
                       : sorted.map(t => (
                           <button key={t.id}
-                            onClick={() => { setContextMenu(null); setPlacementEditor({ template: t, worldX: contextMenu.worldX, worldY: contextMenu.worldY, templates: null }) }}
+                            onClick={() => { setContextMenu(null); setPlacementEditor({ template: t, worldX: contextMenu.worldX, worldY: contextMenu.worldY, templates: null, targetLayer: contextMenu.targetLayer }) }}
                             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-white/10 transition-colors text-left">
                             {t.image_filename ? (
                               <img src={`local-media://${t.image_filename}`} className="w-5 h-5 object-cover rounded shrink-0" />
@@ -2543,7 +2979,7 @@ export default function MemoryHub() {
                       ? <div className="px-3 py-4 text-[10px] text-surface-500 text-center">无标点</div>
                       : activeTab.markers.map(t => (
                           <button key={t.id}
-                            onClick={() => { setContextMenu(null); setPlacementEditor({ template: t, worldX: contextMenu.worldX, worldY: contextMenu.worldY, templates: null }) }}
+                            onClick={() => { setContextMenu(null); setPlacementEditor({ template: t, worldX: contextMenu.worldX, worldY: contextMenu.worldY, templates: null, targetLayer: contextMenu.targetLayer }) }}
                             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-white/10 transition-colors text-left">
                             {t.image_filename ? (
                               <img src={`local-media://${t.image_filename}`} className="w-5 h-5 object-cover rounded shrink-0" />
@@ -2575,6 +3011,8 @@ export default function MemoryHub() {
           worldY={placementEditor.worldY}
           existingPlacement={placementEditor.existingPlacement || null}
           existingMaps={maps}
+          existingLayers={configLayers}
+          presetLayerId={placementEditor.targetLayer?.id || null}
           onConfirm={handlePlacementConfirm}
           onCancel={() => setPlacementEditor(null)}
         />
@@ -2656,6 +3094,14 @@ export default function MemoryHub() {
                     onMouseLeave={() => setOverlapHighlightedId(null)}
                     onClick={() => {
                       setOverlapMenu(null); setOverlapHighlightedId(null)
+                      // 如果标点属于某个分层地图，切换到对应层级
+                      if (m.layer_id) {
+                        const layer = configLayers.find(l => l.id === m.layer_id)
+                        if (layer && layer.level !== layerMode) {
+                          setLayerMode(layer.level)
+                          return
+                        }
+                      }
                       const sfRaw = m.special_function || m.template_special
                       if (sfRaw) {
                         try {
@@ -2737,6 +3183,11 @@ export default function MemoryHub() {
               setPlacedMenu(null)
               setPlacementEditor({ template, worldX: pm.world_x, worldY: pm.world_y, existingPlacement: pm })
             }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-white/10">编辑</button>
+            {devMode && <button onClick={() => {
+              const pm = placedMenu.pm
+              setPlacedMenu(null)
+              setMovingMarkerId(pm.id)
+            }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-yellow-400 hover:bg-yellow-500/10">移动</button>}
             <button onClick={async () => {
               if (!confirm('确定删除此标点？')) return
               console.log('[MemoryHub] deleting placement', placedMenu.pm.id)
@@ -2754,7 +3205,7 @@ export default function MemoryHub() {
         <div className="fixed z-[10000]" style={{ left: textboxMenu.x, top: textboxMenu.y, transformOrigin: 'top left' }} onMouseDown={e => e.stopPropagation()}>
           <div className="w-36 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in">
             <button onClick={() => {
-              setTextboxEditData({ id: textboxMenu.tb.id, text: textboxMenu.tb.text, level: textboxMenu.tb.level })
+              setTextboxEditData({ id: textboxMenu.tb.id, text: textboxMenu.tb.text, level: textboxMenu.tb.level, layer_id: textboxMenu.tb.layer_id })
               setTextboxMenu(null)
               setShowTextboxCreator(true)
             }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-white/10">编辑</button>
@@ -2769,6 +3220,26 @@ export default function MemoryHub() {
             }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10">删除</button>
           </div>
           <div className="fixed inset-0 z-[-1]" onClick={() => setTextboxMenu(null)} />
+        </div>
+      ), document.body)}
+
+      {/* ── 分层地图中键菜单 ── */}
+      {layerMenu && createPortal((
+        <div className="fixed z-[10003]" style={{ left: layerMenu.x, top: layerMenu.y, transformOrigin: 'top left' }} onMouseDown={e => e.stopPropagation()}>
+          <div className="w-28 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in">
+            <button onClick={() => {
+              setLayerEditData({ ...layerMenu.layer, editIndex: layerMenu.editIndex })
+              setLayerMenu(null)
+              setShowLayerManager(true)
+            }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-white/10">编辑</button>
+            <button onClick={async () => {
+              const layer = layerMenu.layer
+              setLayerMenu(null)
+              if (!confirm(`确定删除分层地图「${layer.name || '未命名'}」？`)) return
+              handleLayerDelete(layerMenu.editIndex)
+            }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10">删除</button>
+          </div>
+          <div className="fixed inset-0 z-[-1]" onClick={() => setLayerMenu(null)} />
         </div>
       ), document.body)}
 
@@ -2787,8 +3258,20 @@ export default function MemoryHub() {
         <TextboxCreatorModal
           key={textboxEditData?.id || 'new'}
           editData={textboxEditData}
+          mapConfig={mapConfig}
           onConfirm={handleCreateTextbox}
           onCancel={() => { setShowTextboxCreator(false); setTextboxEditData(null) }}
+        />
+      )}
+
+      {/* ── 分层地图管理器弹窗 ── */}
+      {showLayerManager && (
+        <LayerMapModal
+          key={layerEditData ? `edit-${layerEditData.id}` : 'new'}
+          editData={layerEditData}
+          mapConfig={mapConfig}
+          onConfirm={handleLayerConfirm}
+          onCancel={() => { setShowLayerManager(false); setLayerEditData(null) }}
         />
       )}
 
@@ -2979,6 +3462,31 @@ export default function MemoryHub() {
                 </div>
               </div>
 
+              {/* ── 分层地图悬停缩放 ── */}
+              <div className="col-span-2">
+                <p className="text-[11px] text-surface-400 mb-2">分层地图悬停缩放</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={async () => {
+                    const next = !effectiveLayerHoverZoom
+                    if (!currentMapId) return
+                    const nextUser = { ...userMapConfig, layerHoverZoom: next }
+                    setUserMapConfig(nextUser)
+                    await window.electronAPI?.mapSaveUserConfig(currentMapId, nextUser)
+                  }} className={`px-3 py-1 rounded text-[10px] font-medium transition-colors ${
+                    effectiveLayerHoverZoom ? 'bg-purple-500/20 text-purple-400' : 'bg-surface-800 text-surface-500'
+                  }`}>{effectiveLayerHoverZoom ? '开启' : '关闭'}</button>
+                  {effectiveLayerHoverZoom !== defaultLayerHoverZoom && (
+                    <button onClick={async () => {
+                      if (!currentMapId) return
+                      const nextUser = { ...userMapConfig, layerHoverZoom: undefined }
+                      setUserMapConfig(nextUser)
+                      await window.electronAPI?.mapSaveUserConfig(currentMapId, nextUser)
+                    }} className="text-[9px] text-surface-500 hover:text-surface-300 underline">恢复默认</button>
+                  )}
+                  <span className="text-[9px] text-surface-600">鼠标悬停分层地图时放大预览</span>
+                </div>
+              </div>
+
               {/* ── 开发者模式：保存为默认值 ── */}
               {devMode && (
                 <div className="col-span-2 border-t border-white/5 pt-3 mt-1">
@@ -2994,23 +3502,13 @@ export default function MemoryHub() {
                           ...(userMapConfig.textboxFontSizes ? { textboxFontSizes: { ...(mapConfig?.textboxFontSizes || {}), ...userMapConfig.textboxFontSizes } } : {}),
                           ...(userMapConfig.markerSize !== undefined ? { markerSize: userMapConfig.markerSize } : {}),
                           ...(userMapConfig.fullImgThreshold !== undefined ? { fullImgThreshold: userMapConfig.fullImgThreshold } : {}),
+                          ...(userMapConfig.inertiaFriction !== undefined ? { inertiaFriction: userMapConfig.inertiaFriction } : {}),
+                          ...(userMapConfig.inertiaEnabled !== undefined ? { inertiaEnabled: userMapConfig.inertiaEnabled } : {}),
                         }
                         setMapConfig(merged)
                         setMaps(prev => prev.map(m => m.id === currentMapId ? { ...m, config: merged } : m))
                         const mn = maps.find(m => m.id === currentMapId)?.name_zh || ''
                         await window.electronAPI?.mapSaveConfig(currentMapId, mn, merged)
-
-                        // 保存为全局默认
-                        const mergedLevelThresholds = { ...(globalDefaults.levelThresholds || {}), ...(userMapConfig.levelThresholds || {}) }
-                        await window.electronAPI?.mapSaveGlobalDefault('levelThresholds', mergedLevelThresholds)
-                        const mergedTextboxFontSizes = { ...(globalDefaults.textboxFontSizes || {}), ...(userMapConfig.textboxFontSizes || {}) }
-                        await window.electronAPI?.mapSaveGlobalDefault('textboxFontSizes', mergedTextboxFontSizes)
-                        if (userMapConfig.markerSize !== undefined) {
-                          await window.electronAPI?.mapSaveGlobalDefault('markerSize', userMapConfig.markerSize)
-                        }
-                        if (userMapConfig.fullImgThreshold !== undefined) {
-                          await window.electronAPI?.mapSaveGlobalDefault('fullImgThreshold', userMapConfig.fullImgThreshold)
-                        }
 
                         // 清空用户覆盖
                         setUserMapConfig({})
@@ -3112,6 +3610,43 @@ export default function MemoryHub() {
                       选择图片并生成全图
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* ── 开发者模式：分层地图管理 ── */}
+              {devMode && currentMapId && (
+                <div className="col-span-2 border-t border-white/5 pt-3 mt-1">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-semibold text-surface-300">分层地图管理</h4>
+                    <button onClick={() => {
+                      const vp = containerSize.current
+                      const cx = Math.round((vp.w / 2 - viewCenter.x) / zoom)
+                      const cy = Math.round((vp.h / 2 - viewCenter.y) / zoom)
+                      setLayerEditData({ _defaultX: cx, _defaultY: cy })
+                      setShowLayerManager(true)
+                    }}
+                      className="text-[10px] px-2 py-1 rounded-lg bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 transition-colors">
+                      + 添加分层地图
+                    </button>
+                  </div>
+                  {configLayers.length === 0 ? (
+                    <p className="text-[10px] text-surface-500">暂无分层地图</p>
+                  ) : (
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {configLayers.map((layer, idx) => (
+                        <div key={layer.id || idx}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-800/30 hover:bg-surface-800/50 transition-colors">
+                          <span className="text-[10px] font-mono text-purple-400 w-6 shrink-0">{layer.level}</span>
+                          <span className="flex-1 text-[11px] text-surface-300 truncate">{layer.name || '未命名'}</span>
+                          <span className="text-[9px] text-surface-500 truncate max-w-[80px]">{layer.imageFilename || ''}</span>
+                          <button onClick={() => { setLayerEditData({ ...layer, editIndex: idx }); setShowLayerManager(true) }}
+                            className="text-[10px] text-amber-400 hover:text-amber-300 shrink-0">✎</button>
+                          <button onClick={() => handleLayerDelete(idx)}
+                            className="text-[10px] text-red-400 hover:text-red-300 shrink-0">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -411,6 +411,7 @@ CREATE TABLE IF NOT EXISTS map_marker_placements (
   custom_name TEXT DEFAULT '',             -- 自定义名称
   special_function TEXT DEFAULT NULL,      -- JSON: 特殊功能配置
   subscript TEXT DEFAULT '0',              -- '1'=显示右下角下标标记
+  layer_id TEXT DEFAULT NULL,              -- 所属分层地图 ID（NULL=G层），关联 config.layers[].id
   sort_order INTEGER DEFAULT 0,            -- 图层排序（越大越靠上）
   created_by_dev INTEGER DEFAULT 1,        -- 1=开发者放置, 0=用户放置
   created_at TEXT DEFAULT (datetime('now','localtime'))
@@ -424,6 +425,7 @@ CREATE TABLE IF NOT EXISTS map_textboxes (
   level INTEGER NOT NULL DEFAULT 1,        -- 1/2/3 显示级别
   world_x REAL NOT NULL,                   -- 中心点世界坐标 X
   world_y REAL NOT NULL,                   -- 中心点世界坐标 Y
+  layer_id TEXT DEFAULT NULL,              -- 所属分层地图 ID（NULL=G层），关联 config.layers[].id
   created_at TEXT DEFAULT (datetime('now','localtime')),
   updated_at TEXT DEFAULT (datetime('now','localtime'))
 );
