@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Type, X, Check } from 'lucide-react'
 
-export default function TextboxCreatorModal({ onConfirm, onCancel, editData, mapConfig }) {
+export default function TextboxCreatorModal({ onConfirm, onCancel, editData, mapConfig, presetLayerId }) {
   const [text, setText] = useState(editData?.text || '')
   const [level, setLevel] = useState(editData?.level || 1)
-  const [layerId, setLayerId] = useState(editData?.layer_id || '')
+  const [layerId, setLayerId] = useState(editData?.layer_id || presetLayerId || '')
   const isEdit = !!editData
 
   const layers = mapConfig?.layers || []

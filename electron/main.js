@@ -1353,7 +1353,7 @@ function createWindow() {
 app.whenReady().then(async () => {
   // 注册本地媒体协议（绕过 HTTP→file:// 跨域限制，用于视频播放 / 标点图片）
   protocol.handle('local-media', (request) => {
-    const rawPath = decodeURIComponent(request.url.slice('local-media://'.length));
+    const rawPath = decodeURIComponent(request.url.slice('local-media://'.length)).trim();
     const imagesDir = dbDir ? getImagesDir(dbDir) : null;
     const fp = imagesDir ? resolveImagePath(imagesDir, rawPath) : null;
     if (!fp || !fs.existsSync(fp)) return new Response('Not Found', { status: 404 });
@@ -3333,7 +3333,7 @@ ipcMain.handle('import-image', async () => {
     if (result.canceled || result.filePaths.length === 0) return { success: false };
 
     const src = result.filePaths[0];
-    const originalName = path.basename(src);
+    const originalName = path.basename(src).trim();
     const imagesDir = getImagesDir(dbDir);
 
     // 如果来源已在 images 文件夹内，直接使用，不复制
@@ -3359,7 +3359,7 @@ ipcMain.handle('import-image-file', (_event, srcPath) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');
     if (!srcPath || !fs.existsSync(srcPath)) return { error: '文件不存在' };
-    const originalName = path.basename(srcPath);
+    const originalName = path.basename(srcPath).trim();
     const imagesDir = getImagesDir(dbDir);
 
     // 如果来源已在 images 文件夹内，直接使用，不复制
@@ -3723,7 +3723,7 @@ ipcMain.handle('import-user-image-file', async (_event, srcPath) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');
     if (!srcPath || !fs.existsSync(srcPath)) return { error: '文件不存在' };
-    const originalName = path.basename(srcPath);
+    const originalName = path.basename(srcPath).trim();
     const userImagesDir = getUserImagesDir(dbDir);
     const dest = path.join(userImagesDir, originalName);
 
@@ -3747,7 +3747,7 @@ ipcMain.handle('import-and-thumbnail', async (_event, srcPath, maxWidth) => {
   try {
     if (!dbDir) throw new Error('数据库未初始化');
     if (!srcPath || !fs.existsSync(srcPath)) return { error: '文件不存在' };
-    const originalName = path.basename(srcPath);
+    const originalName = path.basename(srcPath).trim();
     const userImagesDir = getUserImagesDir(dbDir);
     const dest = path.join(userImagesDir, originalName);
     // 不在 user_images 内则复制

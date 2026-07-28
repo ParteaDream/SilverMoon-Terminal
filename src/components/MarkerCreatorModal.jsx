@@ -15,6 +15,15 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
   })
   const isEdit = !!editData
 
+  // ── 从 special_function 解析 isLocalLegend ──
+  const parseSF = (raw) => {
+    if (!raw) return {}
+    try { return typeof raw === 'string' ? JSON.parse(raw) : raw }
+    catch { return {} }
+  }
+  const initSF = parseSF(editData?.special_function)
+  const [isLocalLegend, setIsLocalLegend] = useState(initSF.isLocalLegend || false)
+
   // ── 底盘配置 ──
   const parseBase = (raw) => {
     if (!raw) return { baseType: 'none', baseBorderColor: '#3375DD', baseFillColor: '#E4E4E2', baseScale: 1.30, baseBorderWidth: 2 }
@@ -44,7 +53,16 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
     if (!nameZh.trim()) return
     const extra = { visibility: visibility.join(',') }
     const baseConfig = baseType === 'none' ? null : JSON.stringify({ baseType, baseBorderColor, baseFillColor, baseScale, baseBorderWidth })
-    onConfirm({ editId: editData?.id || null, markerType, imageFilename, nameZh: nameZh.trim(), category: markerType, baseConfig, ...extra })
+    // 构建 special_function（合并现有 + isLocalLegend）
+    const existingSF = parseSF(editData?.special_function)
+    let sf = null
+    if (isLocalLegend || existingSF.type) {
+      const merged = { ...existingSF }
+      if (isLocalLegend) merged.isLocalLegend = true
+      else delete merged.isLocalLegend
+      if (Object.keys(merged).length > 0) sf = JSON.stringify(merged)
+    }
+    onConfirm({ editId: editData?.id || null, markerType, imageFilename, nameZh: nameZh.trim(), category: markerType, baseConfig, specialFunction: sf, ...extra })
   }
 
   return (
@@ -192,7 +210,7 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
                   <div className="relative z-10 w-8 h-8 flex items-center justify-center overflow-hidden"
                     style={{ borderRadius: baseType === 'circle' ? '50%' : '4px' }}>
                     {imageFilename ? (
-                      <img src={`local-media://${imageFilename}`} className="w-full h-full object-cover"
+                      <img src={`local-media://${(imageFilename || '').trim()}`} className="w-full h-full object-cover"
                         style={{ borderRadius: baseType === 'circle' ? '50%' : '0' }} />
                     ) : (
                       <div className="w-full h-full rounded bg-amber-500/30 border border-amber-500/50 flex items-center justify-center">
@@ -219,6 +237,16 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ── 地方传奇（仅敌人类型） ── */}
+        {markerType === 'enemy' && (
+          <div className="mb-3 flex items-center gap-2">
+            <input type="checkbox" id="localLegend" checked={isLocalLegend}
+              onChange={e => setIsLocalLegend(e.target.checked)}
+              className="w-3.5 h-3.5 rounded border-white/10 bg-surface-800 accent-amber-500 cursor-pointer" />
+            <label htmlFor="localLegend" className="text-[11px] text-surface-300 cursor-pointer select-none">地方传奇</label>
           </div>
         )}
 

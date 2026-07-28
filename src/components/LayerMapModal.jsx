@@ -24,6 +24,8 @@ export default function LayerMapModal({
     return 500
   })
   const [zIndex, setZIndex] = useState(editData?.zIndex ?? existingLayers.length)
+  const [isBase, setIsBase] = useState(editData?.isBase || false)
+  const [isImportant, setIsImportant] = useState(editData?.important || false)
   const [aspectRatio, setAspectRatio] = useState(1)
 
   // ── 预览状态（纯视觉，不影响数据） ──
@@ -129,7 +131,7 @@ export default function LayerMapModal({
         setAspectRatio(img.naturalWidth / img.naturalHeight)
       }
     }
-    img.src = `local-media://${filename}`
+    img.src = `local-media://${(filename || '').trim()}`
   }, [])
 
   const handleImportImage = useCallback(async () => {
@@ -383,6 +385,8 @@ export default function LayerMapModal({
       width: Math.round(width * 100) / 100,
       height: Math.round(height * 100) / 100,
       zIndex: Math.round(zIndex),
+      isBase,
+      important: isImportant,
     })
   }
 
@@ -464,6 +468,17 @@ export default function LayerMapModal({
                   className="flex-1 px-2 py-1.5 rounded-lg bg-surface-800 border border-white/10 text-xs text-surface-200 outline-none focus:border-purple-500/40 transition-colors" step={10} />
               </div>
             </div>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={isBase} onChange={e => setIsBase(e.target.checked)}
+                className="accent-purple-500" />
+              <span className="text-[10px] text-surface-400">基座 <span className="text-surface-600">（切换层级时保持显示）</span></span>
+            </label>
+
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={isImportant} onChange={e => setIsImportant(e.target.checked)}
+                className="accent-amber-500" />
+              <span className="text-[10px] text-surface-400">★ 重要 <span className="text-surface-600">（在标点编辑器中置顶显示）</span></span>
+            </label>
 
             {/* ── 参考图选择 ── */}
             {existingLayers.length > (isEdit ? 1 : 0) && (
@@ -578,7 +593,7 @@ export default function LayerMapModal({
                       onMouseDown={handleLayerMouseDown}
                     >
                       <img
-                        src={`local-media://${imageFilename}`}
+                        src={`local-media://${(imageFilename || '').trim()}`}
                         className="w-full h-full object-contain rounded-lg shadow-lg border-2 border-purple-500/50 pointer-events-none select-none"
                         draggable={false}
                         style={{ imageRendering: 'auto' }}

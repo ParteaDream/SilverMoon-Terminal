@@ -653,7 +653,7 @@ function CustomizationTool() {
     try {
       const res = await window.electronAPI?.getUserConfig()
       const w = res?.config?.terminalWallpaper
-      if (w) { setWallpaper(w); const result = await window.electronAPI?.readUserImage(w, 1024); if (result?.data) setPreview(result.data) }
+      if (w) { setWallpaper(w); const result = await window.electronAPI?.readUserImage(w, 0); if (result?.data) setPreview(result.data) }
     } catch (_) {}
   }
 
@@ -696,7 +696,7 @@ function CustomizationTool() {
   }
 
   async function applyWallpaper(filename) {
-    const readResult = await window.electronAPI?.readUserImage(filename, 1024)
+    const readResult = await window.electronAPI?.readUserImage(filename, 0)
     if (readResult?.data) {
       setWallpaper(filename); setPreview(readResult.data)
       await window.electronAPI?.setUserConfig('terminalWallpaper', filename)
@@ -895,7 +895,7 @@ export default function TerminalPage() {
       const res = await window.electronAPI?.getUserConfig()
       const config = res?.config || {}
       if (config.terminalWallpaper) {
-        const result = await window.electronAPI?.readUserImage(config.terminalWallpaper, 1024)
+        const result = await window.electronAPI?.readUserImage(config.terminalWallpaper, 0)
         if (result?.data) setWallpaper(result.data)
       }
       if (config.terminalDesktopIcons) setDesktopIcons(config.terminalDesktopIcons)

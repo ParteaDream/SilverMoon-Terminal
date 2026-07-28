@@ -513,6 +513,7 @@ export default function MemoryHub() {
   const [placementEditor, setPlacementEditor] = useState(null) // 放置编辑面板
   const [placedMenu, setPlacedMenu] = useState(null)          // 已放置标点右键菜单
   const [sidePanel, setSidePanel] = useState(null)            // switch_map 侧栏
+  const [detailModal, setDetailModal] = useState(null)       // tooltip 详情弹窗
   const [hoveredMarker, setHoveredMarker] = useState(null)   // 悬停的标点
   const [overlapMenu, setOverlapMenu] = useState(null)        // 重合标点弹出菜单 { markers, worldX, worldY, screenX, screenY }
   const [overlapHighlightedId, setOverlapHighlightedId] = useState(null) // 菜单中高亮的标点 ID
@@ -528,6 +529,11 @@ export default function MemoryHub() {
 
   // ── 视图模式 ──
   const [viewMode, setViewMode] = useState('default') // 'default' | 'compact' | 'original'
+
+  // ── 默认模式标点显示开关（持久化到 user.json） ──
+  const [showTeleportMarkers, setShowTeleportMarkers] = useState(true)
+  const [showLocalLegend, setShowLocalLegend] = useState(true)
+  const [showTextLabels, setShowTextLabels] = useState(true)
 
   // ── 文本框状态 ──
   const [textboxes, setTextboxes] = useState([])             // 文本框列表
@@ -574,12 +580,22 @@ export default function MemoryHub() {
   const hasBLayers = useMemo(() => availableLevels.some(l => l.startsWith('B')), [availableLevels])
   const hasFLayers = useMemo(() => availableLevels.some(l => l.startsWith('F')), [availableLevels])
 
-  // ── 调试：监听分层地图数据变化 ──
-  useEffect(() => {
-    console.log('[MemoryHub:Layers] configLayers:', JSON.stringify(configLayers))
-    console.log('[MemoryHub:Layers] layerMode:', layerMode, 'length:', configLayers.length)
-    console.log('[MemoryHub:Layers] hasBLayers:', hasBLayers, 'hasFLayers:', hasFLayers)
-  }, [configLayers, layerMode, hasBLayers, hasFLayers])
+
+  // ── 层级可见性判断 ──
+  const isLevelActive = useCallback((level) => {
+    if (layerMode === 'G') return false
+    if (layerMode === 'B') return level.startsWith('B')
+    if (layerMode === 'F') return level.startsWith('F')
+    return level === layerMode
+  }, [layerMode])
+  // 某分层地图是否为基座且当前作为背景显示
+  const isBaseBackground = useCallback((layer) => {
+    if (!layer?.isBase || layerMode === 'G' || isLevelActive(layer.level)) return false
+    // B 模式下不显示 F 基座，F 模式下不显示 B 基座
+    if (layerMode === 'B' || layerMode.startsWith('B')) return layer.level.startsWith('B')
+    if (layerMode === 'F' || layerMode.startsWith('F')) return layer.level.startsWith('F')
+    return true
+  }, [layerMode, isLevelActive])
 
   // ── 跟踪层级切换（不做自动定位，保持当前视角） ──
   const prevLayerMode = useRef('G')
@@ -631,7 +647,7 @@ export default function MemoryHub() {
   const defaultInertiaFriction = mapConfig?.inertiaFriction ?? globalDefaults.inertiaFriction ?? 0.05
   const defaultLayerHoverZoom = mapConfig?.layerHoverZoom ?? globalDefaults.layerHoverZoom ?? false
 
-  // ── 数据库迁移：为 map_marker_placements 添加 layer_id 列 ──
+  // ── 数据库迁移 ──
   useEffect(() => {
     window.electronAPI?.mapExecBaseline(
       "ALTER TABLE map_marker_placements ADD COLUMN layer_id TEXT DEFAULT NULL",
@@ -641,6 +657,17 @@ export default function MemoryHub() {
       "ALTER TABLE map_textboxes ADD COLUMN layer_id TEXT DEFAULT NULL",
       []
     ).catch(() => {})  // 列已存在时忽略错误
+  }, [])
+
+  // ── 从 user.json 加载标点显示开关 ──
+  useEffect(() => {
+    window.electronAPI?.getUserConfig().then(res => {
+      if (res?.config) {
+        if (res.config.mapShowTeleportMarkers != null) setShowTeleportMarkers(res.config.mapShowTeleportMarkers)
+        if (res.config.mapShowLocalLegend != null) setShowLocalLegend(res.config.mapShowLocalLegend)
+        if (res.config.mapShowTextLabels != null) setShowTextLabels(res.config.mapShowTextLabels)
+      }
+    }).catch(() => {})
   }, [])
 
   // ── 切换地图时加载全局默认和用户覆盖 ──
@@ -1565,6 +1592,8 @@ export default function MemoryHub() {
         width: layerData.width,
         height: layerData.height,
         zIndex: layerData.zIndex,
+        isBase: layerData.isBase || false,
+        important: layerData.important || false,
       }
       if (layerData.editIndex != null && layerData.editIndex >= 0 && layerData.editIndex < layers.length) {
         // 编辑
@@ -1604,12 +1633,13 @@ export default function MemoryHub() {
   // ── 创建标点模板 ──
   const handleCreateMarker = useCallback(async (markerData) => {
     try {
-      const { editId, markerType, imageFilename, nameZh, category, visibility, baseConfig } = markerData
+      const { editId, markerType, imageFilename, nameZh, category, visibility, baseConfig, specialFunction } = markerData
       if (editId) {
         // 编辑模式
         const markerUpdates = { marker_type: markerType, image_filename: imageFilename, name_zh: nameZh, category }
         if (visibility !== undefined) markerUpdates.visibility = visibility
         if (baseConfig !== undefined) markerUpdates.base_config = baseConfig || null
+        if (specialFunction !== undefined) markerUpdates.special_function = specialFunction
         await window.electronAPI?.mapUpdateMarker(editId, markerUpdates)
       } else {
         // 新建模式
@@ -1623,8 +1653,8 @@ export default function MemoryHub() {
         )
         const nextOrder = orderRes?.data?.[0]?.next_order ?? 0
         const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-        const sql = "INSERT INTO map_markers (id, map_id, marker_type, image_filename, name_zh, category, sort_order, visibility, base_config, created_by_dev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
-        await window.electronAPI?.mapExecBaseline(sql, [id, '__global__', markerType, imageFilename, nameZh, category || '', nextOrder, defaultVisibility, baseConfig || null])
+        const sql = "INSERT INTO map_markers (id, map_id, marker_type, image_filename, name_zh, category, sort_order, visibility, base_config, special_function, created_by_dev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+        await window.electronAPI?.mapExecBaseline(sql, [id, '__global__', markerType, imageFilename, nameZh, category || '', nextOrder, defaultVisibility, baseConfig || null, specialFunction || null])
       }
       setShowMarkerCreator(false)
       loadMarkers(currentMapId)
@@ -2200,6 +2230,29 @@ export default function MemoryHub() {
           ))}
         </div>
 
+        {/* ── 默认模式标点显示开关 ── */}
+        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-surface-900/40 border border-white/5">
+          {[
+            { key: 'teleport', label: '传送点', state: showTeleportMarkers, setter: setShowTeleportMarkers, configKey: 'mapShowTeleportMarkers' },
+            { key: 'legend', label: '传奇', state: showLocalLegend, setter: setShowLocalLegend, configKey: 'mapShowLocalLegend' },
+            { key: 'text', label: '文字', state: showTextLabels, setter: setShowTextLabels, configKey: 'mapShowTextLabels' },
+          ].map(({ key, label, state, setter, configKey }) => (
+            <button
+              key={key}
+              onClick={() => {
+                const next = !state
+                setter(next)
+                window.electronAPI?.setUserConfig(configKey, next).catch(() => {})
+              }}
+              className={`px-1.5 py-0.5 rounded text-[9px] font-medium transition-colors ${
+                state ? 'bg-amber-500/15 text-amber-400' : 'text-surface-500 hover:text-surface-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* ── 分层地图层级滑块 ── */}
         {(hasBLayers || hasFLayers) && (() => {
           // 构建滑块选项：B... | G | F...
@@ -2375,13 +2428,6 @@ export default function MemoryHub() {
 
             {/* ── 分层地图渲染（渐隐渐现） ── */}
             {configLayers.length > 0 && (() => {
-              // 判断当前应显示哪些分层地图
-              const isLayerMode = (lvl) => {
-                if (layerMode === 'G') return false
-                if (layerMode === 'B') return lvl.startsWith('B')
-                if (layerMode === 'F') return lvl.startsWith('F')
-                return lvl === layerMode
-              }
               return configLayers
                 .slice()
                 .sort((a, b) => {
@@ -2391,8 +2437,8 @@ export default function MemoryHub() {
                     if (aPref[1] !== bPref[1]) return aPref[1] === 'B' ? -1 : 1
                     const aNum = parseInt(aPref[2])
                     const bNum = parseInt(bPref[2])
-                    // B 层：数字越大越深 → 排在前面（渲染靠后）
-                    // F 层：数字越小越近 → 排在前面
+                    // 同层级内基座排在前面（渲染靠后/在底部）
+                    if (a.isBase !== b.isBase) return a.isBase ? -1 : 1
                     return aPref[1] === 'B' ? bNum - aNum : aNum - bNum
                   }
                   return (a.zIndex || 0) - (b.zIndex || 0)
@@ -2400,26 +2446,32 @@ export default function MemoryHub() {
                 .map((layer) => {
                   const halfW = (layer.width || 500) / 2
                   const halfH = (layer.height || 500) / 2
-                  const visible = isLayerMode(layer.level)
+                  const active = isLevelActive(layer.level)
+                  const asBase = isBaseBackground(layer)
+                  // 汇总模式下，基座层显示在活跃层底部（不变暗）
+                  const isBaseInGroup = active && layer.isBase && (layerMode === 'B' || layerMode === 'F')
+                  const visible = active || asBase
+                  const layerZ = isBaseInGroup ? 12 : (active ? 20 : (asBase ? 12 : 20))
+                  const layerOpacity = isBaseInGroup ? 1 : (active ? 1 : (asBase ? 0.4 : 0))
                   const isHoverZoom = hoveredLayerId === layer.id && (layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F') && effectiveLayerHoverZoom
                   return (
                     <div
                       key={layer.id}
                       data-layer-id={layer.id}
-                      className="absolute z-20"
+                      className="absolute"
                       style={{
                         left: layer.worldX - halfW,
                         top: layer.worldY - halfH,
                         width: layer.width || 500,
                         height: layer.height || 500,
-                        opacity: visible ? 1 : 0,
-                        transition: 'opacity 0.3s ease',
-                        pointerEvents: visible ? 'auto' : 'none',
+                        zIndex: layerZ,
+                        opacity: layerOpacity,
+                        transition: 'opacity 0.3s ease, z-index 0s',
+                        pointerEvents: active ? 'auto' : 'none',
                       }}
                       onMouseEnter={() => setHoveredLayerId(layer.id)}
                       onMouseLeave={() => setHoveredLayerId(null)}
                       onMouseDown={(e) => {
-                        // 中键：开发者模式 + 具体层级 → 弹出编辑/删除菜单
                         if (e.button === 1 && devMode && layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F') {
                           e.preventDefault()
                           e.stopPropagation()
@@ -2429,15 +2481,13 @@ export default function MemoryHub() {
                       }}
                     >
                       <img
-                        src={`local-media://${layer.imageFilename}`}
+                        src={`local-media://${(layer.imageFilename || '').trim()}`}
                         alt={layer.name || '分层地图'}
                         className={`w-full h-full object-contain transition-all duration-200 ${
                           isHoverZoom ? 'scale-105 brightness-110' : ''
                         }`}
                         style={{
-                          filter: isHoverZoom
-                            ? 'brightness(1.1) drop-shadow(0 8px 16px rgba(0,0,0,0.5))'
-                            : 'none',
+                          filter: asBase ? 'brightness(0.5) saturate(0.5)' : (isHoverZoom ? 'brightness(1.1) drop-shadow(0 8px 16px rgba(0,0,0,0.5))' : 'none'),
                         }}
                         draggable={false}
                       />
@@ -2468,9 +2518,25 @@ export default function MemoryHub() {
                 // 具体层级模式：检查该 layer_id 是否属于当前层代号
                 return configLayers.some(l => l.id === pm.layer_id && l.level === layerMode)
               })()
+              // 是否为基座分层地图的附属标点（非当前活跃层时保持显示并变暗）
+              const isBaseMarker = !layerMatch && pm.layer_id && configLayers.some(l => l.id === pm.layer_id && l.isBase && layerMode !== 'G')
+              const markerVisibleFinal = markerVisible && (layerMatch || isBaseMarker)
               // 视图模式过滤
               if (viewMode === 'original') return null
               if (viewMode === 'compact' && template.marker_type !== 'statue') return null
+              // 默认模式标点显示开关过滤
+              if (viewMode !== 'original') {
+                if (!showTeleportMarkers && template.marker_type === 'teleport') return null
+                if (!showLocalLegend && template.marker_type === 'enemy') {
+                  const tplSF = template.special_function
+                  if (tplSF) {
+                    try {
+                      const sf = typeof tplSF === 'string' ? JSON.parse(tplSF) : tplSF
+                      if (sf.isLocalLegend) return null
+                    } catch (_) {}
+                  }
+                }
+              }
               const isCircle = template.marker_type === 'other' || template.marker_type === 'circle'
               const baseSize = effectiveMarkerSize
               const maxWorldSize = Math.max(200, baseSize * 6)
@@ -2489,13 +2555,15 @@ export default function MemoryHub() {
                 <div
                   key={pm.id}
                   data-memoryhub-marker={pm.id}
-                  className={`absolute group z-[25] transition-all duration-150 hover:scale-110 hover:z-[999] ${overlapHighlightedId === pm.id ? 'scale-125 z-[999]' : ''} ${markerVisible && layerMatch ? 'opacity-100' : 'opacity-0 pointer-events-none'}${movingMarkerId === pm.id ? ' cursor-move ring-2 ring-yellow-400/60' : ' cursor-pointer'}`}
+                  className={`absolute group z-[25] transition-all duration-150 hover:scale-110 hover:z-[999] ${overlapHighlightedId === pm.id ? 'scale-125 z-[999]' : ''} ${markerVisibleFinal ? '' : 'opacity-0 pointer-events-none'}${movingMarkerId === pm.id ? ' cursor-move ring-2 ring-yellow-400/60' : ' cursor-pointer'}`}
                   style={{
                     left: pm.world_x - effectiveSize / 2 + markerOffX,
                     top: pm.world_y - effectiveSize / 2 + markerOffY,
                     width: effectiveSize, height: effectiveSize,
                     scale: 'var(--memoryhub-marker-scale, 1)',
+                    opacity: markerVisibleFinal ? (isBaseMarker ? 0.3 : 1) : 0,
                     transition: `${effectiveLayerHoverZoom ? 'left 0.2s ease, top 0.2s ease, ' : ''}opacity 0.3s ease, transform 0.15s ease`,
+                    zIndex: isBaseMarker ? 12 : undefined,
                   }}
                   draggable={false}
                   onMouseEnter={() => {
@@ -2572,6 +2640,23 @@ export default function MemoryHub() {
                             sfImage: null,
                             description: sf.description || '',
                           })
+                        } else if (sf.type === 'tooltip') {
+                          e.stopPropagation()
+                          // 如果有所属层级且不在当前层级，优先切换
+                          if (pm.layer_id) {
+                            const layer = configLayers.find(l => l.id === pm.layer_id)
+                            if (layer && layer.level !== layerMode) {
+                              setLayerMode(layer.level)
+                              return
+                            }
+                          }
+                          // 在对应层级（或无层级）时打开详情弹窗
+                          setDetailModal({
+                            name: pm.custom_name || template.name_zh || '未命名',
+                            imageFilename: template.image_filename || null,
+                            detailImage: sf.image || sf.tooltip?.image || null,
+                            body: sf.tooltip?.body || '',
+                          })
                         }
                       } catch (_) {}
                     }
@@ -2592,7 +2677,8 @@ export default function MemoryHub() {
                       const baseSz = effectiveSize * (bc.baseScale || 1.30) * Math.SQRT1_2
                       const offset = (effectiveSize - baseSz) / 2
                       const bwRaw = bc.baseBorderWidth ?? 2
-                      const bw = Math.max(1, bwRaw * effectiveSize / baseSize)
+                      // 屏幕边框恒定 = bwRaw 像素：世界坐标 bw = bwRaw/zoom 抵消外层缩放
+                      const bw = bwRaw > 0 ? bwRaw / Math.max(zoom, 0.05) : 0
                       const shapeStyle = {
                         borderRadius: bc.baseType === 'circle' ? '50%' : bc.baseType === 'square' ? '6px' : '0',
                         transform: bc.baseType === 'diamond' ? 'rotate(45deg)' : 'none',
@@ -2601,7 +2687,7 @@ export default function MemoryHub() {
                         <>
                           <div className="absolute" style={{ left: offset, top: offset, width: baseSz, height: baseSz, backgroundColor: bc.baseFillColor || '#E4E4E2', ...shapeStyle, zIndex: 0, pointerEvents: 'none' }} />
                           <div className="absolute overflow-hidden" style={{ left: offset, top: offset, width: baseSz, height: baseSz, borderRadius: bc.baseType === 'circle' ? '50%' : bc.baseType === 'square' ? '6px' : '0', zIndex: 1, pointerEvents: 'none' }}>
-                            {template.image_filename ? <img src={`local-media://${template.image_filename}`} className="w-full h-full object-cover" decoding="async" draggable={false} /> : <div className="w-full h-full" />}
+                            {template.image_filename ? <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-full h-full object-cover" decoding="async" draggable={false} /> : <div className="w-full h-full" />}
                           </div>
                           <div className="absolute" style={{ left: offset, top: offset, width: baseSz, height: baseSz, backgroundColor: 'transparent', border: `${bw}px solid black`, boxShadow: `0 0 0 ${bw}px ${bc.baseBorderColor || '#3375DD'} inset`, ...shapeStyle, zIndex: 2, pointerEvents: 'none' }} />
                         </>
@@ -2613,11 +2699,11 @@ export default function MemoryHub() {
                     if (_hasBase) return null
                     return isCircle ? (
                       <div className="w-full h-full rounded-full border-2 flex items-center justify-center overflow-hidden" style={{ borderColor: 'var(--primary-500, #f59e0b)', position: 'relative', zIndex: 1 }}>
-                        {template.image_filename ? <img src={`local-media://${template.image_filename}`} className="w-full h-full object-cover" style={{ borderRadius: '50%' }} decoding="async" draggable={false} /> : <div className="w-5 h-5 rounded-full bg-primary-500/30" />}
+                        {template.image_filename ? <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-full h-full object-cover" style={{ borderRadius: '50%' }} decoding="async" draggable={false} /> : <div className="w-5 h-5 rounded-full bg-primary-500/30" />}
                       </div>
                     ) : (
                       <div className="w-full h-full overflow-hidden rounded-lg" style={{ position: 'relative', zIndex: 1 }}>
-                        {template.image_filename ? <img src={`local-media://${template.image_filename}`} className="w-full h-full object-cover" decoding="async" draggable={false} /> : <div className="w-full h-full rounded-lg bg-primary-500/30 border border-primary-500/50" />}
+                        {template.image_filename ? <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-full h-full object-cover" decoding="async" draggable={false} /> : <div className="w-full h-full rounded-lg bg-primary-500/30 border border-primary-500/50" />}
                       </div>
                     )
                   })()}
@@ -2644,7 +2730,7 @@ export default function MemoryHub() {
             })}
 
             {/* 文本框渲染 — 按缩放级别显隐 */}
-            {(viewMode === 'original') ? null : viewportTextboxes.map(tb => {
+            {(!showTextLabels || viewMode === 'original') ? null : viewportTextboxes.map(tb => {
               const levelMatch =
                 tb.level === 0 ? zoom <= effectiveLevelThresholds[1] :
                 tb.level === 1 ? zoom > effectiveLevelThresholds[1] && zoom <= effectiveLevelThresholds[2] :
@@ -2653,12 +2739,15 @@ export default function MemoryHub() {
                 false
               // 分层模式过滤
               const tbLayerMatch = (() => {
-                if (layerMode === 'G') return !tb.layer_id  // G 模式只显示 G 层文本框（无 layer_id）
-                if (!tb.layer_id) return false  // 无 layer_id 的文本框属于 G 层，分层模式下隐藏
+                if (layerMode === 'G') return !tb.layer_id
+                if (!tb.layer_id) return false
                 if (layerMode === 'B') return configLayers.some(l => l.id === tb.layer_id && l.level.startsWith('B'))
                 if (layerMode === 'F') return configLayers.some(l => l.id === tb.layer_id && l.level.startsWith('F'))
                 return configLayers.some(l => l.id === tb.layer_id && l.level === layerMode)
               })()
+              // 是否为基座分层地图的附属文本框
+              const tbIsBaseMarker = !tbLayerMatch && tb.layer_id && configLayers.some(l => l.id === tb.layer_id && l.isBase && layerMode !== 'G')
+              const tbVisible = levelMatch && (tbLayerMatch || tbIsBaseMarker)
               // 分层地图悬停时文本框偏移
               let tbOffX = 0, tbOffY = 0
               const isTbLayerHovered = hoveredLayerId && tb.layer_id === hoveredLayerId && (layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F') && effectiveLayerHoverZoom
@@ -2673,8 +2762,8 @@ export default function MemoryHub() {
                 <div
                   key={tb.id}
                   data-memoryhub-textbox={tb.id}
-                  className={`absolute whitespace-nowrap font-bold text-white leading-none${devMode ? ' pointer-events-auto' : ' pointer-events-none'}${movingTextboxId === tb.id ? ' cursor-move ring-2 ring-yellow-400/60' : ''} ${levelMatch && tbLayerMatch ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-                style={{ left: tb.world_x + tbOffX, top: tb.world_y + tbOffY, transform: 'translate(-50%, -50%) scale(var(--memoryhub-text-scale, 1))', zIndex: tb.layer_id ? 22 : 15, fontSize: (() => {
+                  className={`absolute whitespace-nowrap font-bold text-white leading-none${devMode ? ' pointer-events-auto' : ' pointer-events-none'}${movingTextboxId === tb.id ? ' cursor-move ring-2 ring-yellow-400/60' : ''} ${tbVisible ? '' : 'opacity-0 pointer-events-none'}`}
+                style={{ left: tb.world_x + tbOffX, top: tb.world_y + tbOffY, opacity: tbVisible ? (tbIsBaseMarker ? 0.3 : 1) : 0, zIndex: tbIsBaseMarker ? 12 : (tb.layer_id ? 22 : 15), transform: 'translate(-50%, -50%) scale(var(--memoryhub-text-scale, 1))', fontSize: (() => {
                   const baseFs = effectiveTextboxFontSizes?.[tb.level] ?? 12
                   return baseFs / Math.max(zoom, 0.05)
                 })(), textShadow: '0 -0.06em 0.03em rgba(60,60,60,0.75), 0 0.06em 0.03em rgba(60,60,60,0.75), -0.06em 0 0.03em rgba(60,60,60,0.75), 0.06em 0 0.03em rgba(60,60,60,0.75)', transition: `${effectiveLayerHoverZoom ? 'left 0.2s ease, top 0.2s ease, ' : ''}opacity 0.3s ease` }}
@@ -2777,7 +2866,7 @@ export default function MemoryHub() {
           <div className="absolute right-0 top-0 bottom-0 w-72 z-40 bg-surface-900 border-l border-white/10 shadow-2xl flex flex-col animate-slide-in-right">
             <div className="p-4 flex items-center gap-3" style={{ background: 'var(--primary-900, #451a03)' }}>
               {sidePanel.markerImage ? (
-                <img src={`local-media://${sidePanel.markerImage}`} className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                <img src={`local-media://${(sidePanel.markerImage || '').trim()}`} className="w-10 h-10 rounded-lg object-cover shrink-0" />
               ) : sidePanel.sfImage ? (
                 <img src={sidePanel.sfImage} className="w-10 h-10 rounded-lg object-cover shrink-0" />
               ) : null}
@@ -2805,6 +2894,36 @@ export default function MemoryHub() {
         </>
       )}
 
+      {/* ── tooltip 详情弹窗（portal → body） ── */}
+      {detailModal && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setDetailModal(null)}>
+          <div className="bg-surface-900 border border-white/10 rounded-2xl shadow-2xl max-w-xl w-full mx-6 max-h-[85vh] flex flex-col overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
+            {/* 头部 */}
+            <div className="flex items-center gap-3 p-5 border-b border-white/10 shrink-0">
+              {detailModal.imageFilename && (
+                <img src={`local-media://${(detailModal.imageFilename || '').trim()}`} className="w-10 h-10 rounded-lg object-cover shrink-0" />
+              )}
+              <p className="text-base font-semibold text-white truncate flex-1">{detailModal.name}</p>
+              <button onClick={() => setDetailModal(null)} className="text-white/50 hover:text-white shrink-0">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* 内容区 */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {detailModal.detailImage && (
+                <img src={`local-media://${(detailModal.detailImage || '').trim()}`} className="w-full max-h-72 rounded-xl object-cover" />
+              )}
+              {detailModal.body ? (
+                <p className="text-sm text-surface-300 whitespace-pre-wrap leading-relaxed">{detailModal.body}</p>
+              ) : (
+                <p className="text-sm text-surface-500 italic">暂无详情描述</p>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* ── 标定弹窗 ── */}
       {calibration && (
         <MapCalibration
@@ -2826,20 +2945,28 @@ export default function MemoryHub() {
         <div className="absolute right-2 top-2 bottom-2 z-30 flex flex-col gap-0.5 pointer-events-none">
           <div className="flex-1 flex flex-col justify-center gap-0.5 pointer-events-auto">
             {(() => {
-              // 收集所有层级按钮
-              const levels = ['G']
+              // 收集所有层级按钮（G 在底部，其他层级在上方）
               const bLevels = [...new Set(configLayers.filter(l => l.level.startsWith('B')).map(l => l.level))].sort((a, b) => {
                 const aNum = parseInt(a.match(/\d+/)?.[0] || '0')
                 const bNum = parseInt(b.match(/\d+/)?.[0] || '0')
-                return aNum - bNum // B1 → B5 从上到下
+                return aNum - bNum // B1 → B5 从上到下（G 在顶部）
               })
-              const fLevels = [...new Set(configLayers.filter(l => l.level.startsWith('F')).map(l => l.level))].sort()
+              const fLevels = [...new Set(configLayers.filter(l => l.level.startsWith('F')).map(l => l.level))].sort((a, b) => {
+                const aNum = parseInt(a.match(/\d+/)?.[0] || '0')
+                const bNum = parseInt(b.match(/\d+/)?.[0] || '0')
+                return bNum - aNum // F5 → F1 从下到上（G 在底部）
+              })
+              const levels = []
               if (layerMode.startsWith('B')) {
+                // B 模式：G 在顶部，B1～B5 在下方
+                levels.push('G')
                 levels.push('B')
                 levels.push(...bLevels)
               } else if (layerMode.startsWith('F')) {
-                levels.push('F')
+                // F 模式：F5～F1 在上方，G 在底部
                 levels.push(...fLevels)
+                levels.push('F')
+                levels.push('G')
               }
               return levels.map(lvl => (
                 <button
@@ -2859,8 +2986,23 @@ export default function MemoryHub() {
           </div>
         </div>
       )}
+
+      {/* ── 分层地图悬停名称提示（地图可视区右上角） ── */}
+      {hoveredLayerId && layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F' && (() => {
+        const hl = configLayers.find(l => l.id === hoveredLayerId)
+        if (!hl) return null
+        return (
+          <div className="absolute top-2 right-2 z-40 pointer-events-none">
+            <div className="px-3 py-1.5 rounded-lg bg-surface-900/90 border border-white/10 backdrop-blur-sm shadow-xl">
+              <span className="text-xs font-medium text-purple-400">{hl.level}</span>
+              <span className="text-xs text-surface-300 ml-2">{hl.name || '未命名'}</span>
+            </div>
+          </div>
+        )
+      })()}
       </div>
 
+      {/* ── 分层地图悬停名称提示（右上角） ── */}
       {/* ── 切片加载提示（固定居中的系统提示，不受地图变换影响） ── */}
       {tileRemaining > 0 && !initialTileLoadDoneRef.current && (
         <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-50">
@@ -2922,7 +3064,7 @@ export default function MemoryHub() {
                             onClick={() => { setContextMenu(null); setPlacementEditor({ template: t, worldX: contextMenu.worldX, worldY: contextMenu.worldY, templates: null, targetLayer: contextMenu.targetLayer }) }}
                             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-white/10 transition-colors text-left">
                             {t.image_filename ? (
-                              <img src={`local-media://${t.image_filename}`} className="w-5 h-5 object-cover rounded shrink-0" />
+                              <img src={`local-media://${(t.image_filename || '').trim()}`} className="w-5 h-5 object-cover rounded shrink-0" />
                             ) : (
                               <div className={`w-3 h-3 shrink-0 ${t.marker_type === 'circle' ? 'rounded-full border' : 'rounded'}`}
                                 style={t.marker_type === 'circle' ? { borderColor: 'var(--primary-500, #f59e0b)' } : { backgroundColor: 'var(--primary-500, #f59e0b)' }} />
@@ -2982,7 +3124,7 @@ export default function MemoryHub() {
                             onClick={() => { setContextMenu(null); setPlacementEditor({ template: t, worldX: contextMenu.worldX, worldY: contextMenu.worldY, templates: null, targetLayer: contextMenu.targetLayer }) }}
                             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-200 hover:bg-white/10 transition-colors text-left">
                             {t.image_filename ? (
-                              <img src={`local-media://${t.image_filename}`} className="w-5 h-5 object-cover rounded shrink-0" />
+                              <img src={`local-media://${(t.image_filename || '').trim()}`} className="w-5 h-5 object-cover rounded shrink-0" />
                             ) : (
                               <div className={`w-3 h-3 shrink-0 ${t.marker_type === 'circle' ? 'rounded-full border' : 'rounded'}`}
                                 style={t.marker_type === 'circle' ? { borderColor: 'var(--primary-500, #f59e0b)' } : { backgroundColor: 'var(--primary-500, #f59e0b)' }} />
@@ -3053,12 +3195,12 @@ export default function MemoryHub() {
                 <div key={pm.id} className="w-64 p-3 rounded-xl bg-surface-900/95 backdrop-blur-md border border-white/10 shadow-2xl">
                   <div className="flex items-center gap-2 mb-2">
                     {template?.image_filename && (
-                      <img src={`local-media://${template.image_filename}`} className="w-8 h-8 rounded object-cover shrink-0" />
+                      <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-8 h-8 rounded object-cover shrink-0" />
                     )}
                     <p className="text-xs font-medium text-white">{tipName}</p>
                   </div>
-                  {(sf.image || sf.tooltip?.image) && <img src={`local-media://${sf.image || sf.tooltip.image}`} className="w-full h-24 rounded-lg object-cover mb-2" />}
-                  {sf.tooltip?.body && <p className="text-[10px] text-surface-400 leading-relaxed">{sf.tooltip.body}</p>}
+                  {(sf.image || sf.tooltip?.image) && <img src={`local-media://${(sf.image || sf.tooltip?.image || '').trim()}`} className="w-full h-24 rounded-lg object-cover mb-2" />}
+                  {sf.tooltip?.body && <p className="text-[10px] text-surface-400 leading-relaxed whitespace-pre-wrap">{sf.tooltip.body}</p>}
                 </div>
               )
             })}
@@ -3116,6 +3258,13 @@ export default function MemoryHub() {
                               sfImage: null,
                               description: sf.description || '',
                             })
+                          } else if (sf.type === 'tooltip') {
+                            setDetailModal({
+                              name: m.custom_name || tpl?.name_zh || '未命名',
+                              imageFilename: tpl?.image_filename || null,
+                              detailImage: sf.image || sf.tooltip?.image || null,
+                              body: sf.tooltip?.body || '',
+                            })
                           }
                         } catch (_) {}
                       }
@@ -3127,7 +3276,14 @@ export default function MemoryHub() {
                       setPlacedMenu({ pm: m, x: pos.x, y: pos.y })
                     }}>
                     {tpl?.image_filename ? (
-                      <img src={`local-media://${tpl.image_filename}`} className="w-5 h-5 object-cover rounded shrink-0" />
+                      <div className="relative shrink-0">
+                        <img src={`local-media://${(tpl.image_filename || '').trim()}`} className="w-5 h-5 object-cover rounded shrink-0" />
+                        {(m.subscript === '1' || m.subscript === 1) && (
+                          <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-black border border-white/30 flex items-center justify-center">
+                            <Layers className="text-white" style={{ width: 8, height: 8 }} />
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <div className={`w-3 h-3 shrink-0 ${tpl?.marker_type === 'circle' ? 'rounded-full border' : 'rounded'}`}
                         style={tpl?.marker_type === 'circle' ? { borderColor: 'var(--primary-500, #f59e0b)' } : { backgroundColor: 'var(--primary-500, #f59e0b)' }} />
@@ -3254,6 +3410,7 @@ export default function MemoryHub() {
       )}
 
       {/* ── 文本框创建弹窗 ── */}
+      {/* ── 文本框创建/编辑弹窗 ── */}
       {showTextboxCreator && (
         <TextboxCreatorModal
           key={textboxEditData?.id || 'new'}
@@ -3726,7 +3883,7 @@ export default function MemoryHub() {
                               className="flex items-center gap-2 px-2 py-1 rounded bg-surface-800/30 text-[10px] text-surface-300 cursor-grab active:cursor-grabbing">
                               <span className="text-[10px] text-surface-600 w-3 select-none shrink-0">⠿</span>
                               {m.image_filename ? (
-                                <img src={`local-media://${m.image_filename}`} className="w-4 h-4 object-cover rounded shrink-0" />
+                                <img src={`local-media://${(m.image_filename || '').trim()}`} className="w-4 h-4 object-cover rounded shrink-0" />
                               ) : (
                                 <div className={`w-3 h-3 shrink-0 ${m.marker_type === 'circle' ? 'rounded-full border' : 'rounded'}`}
                                   style={m.marker_type === 'circle' ? { borderColor: '#f59e0b' } : { backgroundColor: '#f59e0b' }} />

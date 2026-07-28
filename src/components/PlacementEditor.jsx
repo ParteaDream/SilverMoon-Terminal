@@ -20,17 +20,27 @@ export default function PlacementEditor({ template, worldX, worldY, existingPlac
   const [subscript, setSubscript] = useState(existingPlacement?.subscript === '1' || existingPlacement?.subscript === 1 || !!presetLayerId)
   const [layerId, setLayerId] = useState(existingPlacement?.layer_id || presetLayerId || '')
   const [layerSearch, setLayerSearch] = useState('')
+  const [layerTab, setLayerTab] = useState('important') // important | B | F
 
-  // 按层级分组
-  const groupedLayers = useCallback(() => {
-    const groups = {}
-    for (const l of existingLayers) {
-      const prefix = l.level.replace(/\d+$/, '')
-      if (!groups[prefix]) groups[prefix] = []
-      groups[prefix].push(l)
-    }
-    return groups
+  // 按 Tab 分类分层地图
+  const tabLayers = useMemo(() => {
+    const important = existingLayers.filter(l => l.important)
+    const bLayers = existingLayers.filter(l => l.level.startsWith('B') && !l.important)
+    const fLayers = existingLayers.filter(l => l.level.startsWith('F') && !l.important)
+    return { important, B: bLayers, F: fLayers }
   }, [existingLayers])
+
+  // 按搜索词过滤当前 Tab
+  const currentTabLayers = useMemo(() => {
+    const layers = tabLayers[layerTab] || []
+    if (!layerSearch.trim()) return layers
+    const q = layerSearch.toLowerCase()
+    return layers.filter(l =>
+      l.name?.toLowerCase().includes(q) ||
+      l.level?.toLowerCase().includes(q) ||
+      l.id?.toLowerCase().includes(q)
+    )
+  }, [tabLayers, layerTab, layerSearch])
 
   // ── 导入图片 ──
   const handleImportImage = useCallback(async () => {
@@ -56,25 +66,7 @@ export default function PlacementEditor({ template, worldX, worldY, existingPlac
     })
   }
 
-  const groups = groupedLayers()
-
-  // 按搜索词过滤分层地图
-  const filteredGroups = useMemo(() => {
-    if (!layerSearch.trim()) return groups
-    const q = layerSearch.toLowerCase()
-    const result = {}
-    for (const [prefix, layers] of Object.entries(groups)) {
-      const matched = layers.filter(l =>
-        l.name?.toLowerCase().includes(q) ||
-        l.level?.toLowerCase().includes(q) ||
-        l.id?.toLowerCase().includes(q)
-      )
-      if (matched.length > 0) result[prefix] = matched
-    }
-    return result
-  }, [groups, layerSearch])
-
-  const hasFiltered = Object.keys(filteredGroups).length > 0
+  const hasImportant = tabLayers.important.length > 0
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
@@ -108,6 +100,23 @@ export default function PlacementEditor({ template, worldX, worldY, existingPlac
           {subscript && existingLayers.length > 0 && (
             <div className="mt-2">
               <label className="text-[10px] text-surface-500 block mb-1">所属分层地图</label>
+              {/* Tab 切换 */}
+              <div className="flex gap-1 mb-1.5">
+                {hasImportant && (
+                  <button onClick={() => setLayerTab('important')}
+                    className={`flex-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                      layerTab === 'important' ? 'bg-amber-500/20 text-amber-400' : 'bg-surface-800/50 text-surface-500 hover:text-surface-300'
+                    }`}>★ 重要</button>
+                )}
+                <button onClick={() => setLayerTab('B')}
+                  className={`flex-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                    layerTab === 'B' ? 'bg-purple-500/20 text-purple-400' : 'bg-surface-800/50 text-surface-500 hover:text-surface-300'
+                  }`}>B 层</button>
+                <button onClick={() => setLayerTab('F')}
+                  className={`flex-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                    layerTab === 'F' ? 'bg-purple-500/20 text-purple-400' : 'bg-surface-800/50 text-surface-500 hover:text-surface-300'
+                  }`}>F 层</button>
+              </div>
               <div className="relative">
                 <input value={layerSearch} onChange={e => setLayerSearch(e.target.value)}
                   placeholder="搜索层名或代号…"
@@ -121,23 +130,16 @@ export default function PlacementEditor({ template, worldX, worldY, existingPlac
                         : 'text-surface-500 hover:bg-white/5 hover:text-surface-300'
                     }`}
                   >（仅下标，不关联分层地图）</button>
-                  {hasFiltered ? Object.entries(filteredGroups).map(([prefix, layers]) => (
-                    <div key={prefix}>
-                      <div className="text-[9px] text-surface-600 px-1 py-0.5 font-medium">
-                        {prefix === 'B' ? '地下' : prefix === 'F' ? '地上' : ''}层 ({prefix})
-                      </div>
-                      {layers.map(l => (
-                        <button
-                          key={l.id}
-                          onClick={() => { setLayerId(l.id); setLayerSearch('') }}
-                          className={`w-full text-left px-2 py-1 rounded text-[10px] transition-colors truncate ${
-                            layerId === l.id
-                              ? 'bg-amber-500/20 text-amber-400'
-                              : 'text-surface-500 hover:bg-white/5 hover:text-surface-300'
-                          }`}
-                        >{l.level} - {l.name || '未命名'}</button>
-                      ))}
-                    </div>
+                  {currentTabLayers.length > 0 ? currentTabLayers.map(l => (
+                    <button
+                      key={l.id}
+                      onClick={() => { setLayerId(l.id); setLayerSearch('') }}
+                      className={`w-full text-left px-2 py-1 rounded text-[10px] transition-colors truncate ${
+                        layerId === l.id
+                          ? 'bg-amber-500/20 text-amber-400'
+                          : 'text-surface-500 hover:bg-white/5 hover:text-surface-300'
+                      }`}
+                    >{l.level} - {l.name || '未命名'}</button>
                   )) : (
                     <div className="text-[10px] text-surface-600 text-center py-2">无匹配分层地图</div>
                   )}
