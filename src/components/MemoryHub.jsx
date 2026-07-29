@@ -217,6 +217,7 @@ export default function MemoryHub() {
   const tileRemainingRef = useRef(0)
   const [showMapMenu, setShowMapMenu] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [scaleRatio, setScaleRatio] = useState('1.0')
   const [loading, setLoading] = useState(true)
   const [slicing, setSlicing] = useState(false)
   const [sliceProgress, setSliceProgress] = useState('')
@@ -901,15 +902,24 @@ export default function MemoryHub() {
   // ── 标定确认 → 保存地图配置 → 切片 ──
   const handleCalibrationConfirm = useCallback(async (calResult) => {
     try {
-      // 1. 保存地图配置
-      const saveRes = await window.electronAPI?.mapSaveConfig(calResult.mapId, calResult.nameZh, calResult.config)
+      // 从旧 config 中保留分层地图和默认视角（新建地图也可能已有 layers）
+      const oldMap = maps.find(m => m.id === calResult.mapId)
+      const oldCfg = oldMap?.config || {}
+      const mergedConfig = {
+        ...calResult.config,
+        layers: oldCfg.layers ? [...oldCfg.layers] : [],
+        ...(oldCfg.defaultView ? { defaultView: { ...oldCfg.defaultView } } : {}),
+      }
+
+      // 1. 保存地图配置（含分层地图等字段）
+      const saveRes = await window.electronAPI?.mapSaveConfig(calResult.mapId, calResult.nameZh, mergedConfig)
       if (saveRes?.error) throw new Error(saveRes.error)
       setCalibration(null)
 
-      // 2. 触发切片
+      // 2. 触发切片（传入 mergedConfig 确保切片后保留 layers 等字段）
       setSlicing(true)
       setSliceProgress(`正在切片 ${calResult.nameZh}...`)
-      const sliceRes = await window.electronAPI?.mapStartSlice(calResult.mapId, calResult.srcPath, calResult.config)
+      const sliceRes = await window.electronAPI?.mapStartSlice(calResult.mapId, calResult.srcPath, mergedConfig)
       if (!sliceRes) throw new Error('切片服务未响应')
       if (sliceRes?.error) throw new Error(`切片失败: ${sliceRes.error}`)
       setSliceProgress(`切片完成: ${sliceRes.processed ?? 0} 片 (${(sliceRes.errors?.length ?? 0) > 0 ? sliceRes.errors.length + ' 个错误' : '无错误'})`)
@@ -958,7 +968,7 @@ export default function MemoryHub() {
       setSliceProgress(`错误: ${e.message}`)
       setTimeout(() => setSlicing(false), 3000)
     }
-  }, [cancelActiveInteraction, setView])
+  }, [cancelActiveInteraction, setView, maps])
 
   // ── 更新地图（打开标定，预填原距离值） ──
   const handleUpdateMap = useCallback(async () => {
@@ -992,14 +1002,22 @@ export default function MemoryHub() {
       if (clearRes?.error) console.warn('[MemoryHub] clear tiles warning:', clearRes.error)
       setCalibration(null)
 
-      // 2. 保存配置（使用 currentMapId 而非 calResult.mapId）
-      const saveRes = await window.electronAPI?.mapSaveConfig(currentMapId, calResult.nameZh, calResult.config)
+      // 2. 从当前 config 保留分层地图和默认视角
+      const oldCfg = mapConfigRef.current || {}
+      const mergedConfig = {
+        ...calResult.config,
+        layers: oldCfg.layers ? [...oldCfg.layers] : [],
+        ...(oldCfg.defaultView ? { defaultView: { ...oldCfg.defaultView } } : {}),
+      }
+
+      // 3. 保存配置（使用 currentMapId 而非 calResult.mapId）
+      const saveRes = await window.electronAPI?.mapSaveConfig(currentMapId, calResult.nameZh, mergedConfig)
       if (saveRes?.error) throw new Error(saveRes.error)
 
-      // 3. 触发重新切片
+      // 4. 触发重新切片（传入 mergedConfig 确保切片后保留 layers 等字段）
       setSlicing(true)
       setSliceProgress(`正在切片 ${calResult.nameZh}...`)
-      const sliceRes = await window.electronAPI?.mapStartSlice(currentMapId, calResult.srcPath, calResult.config)
+      const sliceRes = await window.electronAPI?.mapStartSlice(currentMapId, calResult.srcPath, mergedConfig)
       if (!sliceRes) throw new Error('切片服务未响应')
       if (sliceRes?.error) throw new Error(`切片失败: ${sliceRes.error}`)
       setSliceProgress(`切片完成: ${sliceRes.processed ?? 0} 片 (${(sliceRes.errors?.length ?? 0) > 0 ? sliceRes.errors.length + ' 个错误' : '无错误'})`)
@@ -1064,6 +1082,74 @@ export default function MemoryHub() {
       alert('生成失败: ' + e.message)
     }
   }, [currentMapId, maps])
+
+  // ── 比例调整：按比例缩放所有标点、文本框和分层地图坐标 ──
+  const handleApplyScale = useCallback(async () => {
+    if (!currentMapId) return
+    const ratio = parseFloat(scaleRatio)
+    if (isNaN(ratio) || !isFinite(ratio) || ratio <= 0) {
+      alert('请输入有效的正数比例值')
+      return
+    }
+    if (ratio === 1) {
+      alert('比例为 1，无需调整')
+      return
+    }
+    if (!window.confirm(`确定按比例 ${ratio.toFixed(4)} 调整所有标点、文本框和分层地图的坐标？\n此操作不可撤销。`)) return
+
+    try {
+      // 1. 更新标点位置
+      const markerRes = await window.electronAPI?.mapExecBaseline(
+        "UPDATE map_marker_placements SET world_x = ROUND(world_x * ?), world_y = ROUND(world_y * ?) WHERE map_id = ?",
+        [ratio, ratio, currentMapId]
+      )
+      if (markerRes?.error) throw new Error('标点更新失败: ' + markerRes.error)
+
+      // 2. 更新文本框位置
+      const tbRes = await window.electronAPI?.mapExecBaseline(
+        "UPDATE map_textboxes SET world_x = ROUND(world_x * ?), world_y = ROUND(world_y * ?) WHERE map_id = ?",
+        [ratio, ratio, currentMapId]
+      )
+      if (tbRes?.error) throw new Error('文本框更新失败: ' + tbRes.error)
+
+      // 3. 更新 config 中的分层地图坐标和尺寸
+      const configRes = await window.electronAPI?.mapGetConfig(currentMapId)
+      if (configRes?.error) throw new Error('读取配置失败: ' + configRes.error)
+      const cfg = configRes?.map?.config || {}
+      const currentMap = maps.find(m => m.id === currentMapId)
+      const nameZh = currentMap?.name_zh || ''
+      if (cfg.layers && cfg.layers.length > 0) {
+        cfg.layers = cfg.layers.map(layer => ({
+          ...layer,
+          worldX: Math.round((layer.worldX || 0) * ratio),
+          worldY: Math.round((layer.worldY || 0) * ratio),
+          width: Math.round((layer.width || 0) * ratio),
+          height: Math.round((layer.height || 0) * ratio),
+        }))
+      }
+      // 同时缩放默认视角的世界坐标
+      if (cfg.defaultView) {
+        cfg.defaultView = {
+          ...cfg.defaultView,
+          x: Math.round((cfg.defaultView.x || 0) * ratio),
+          y: Math.round((cfg.defaultView.y || 0) * ratio),
+        }
+      }
+      const saveRes = await window.electronAPI?.mapSaveConfig(currentMapId, nameZh, cfg)
+      if (saveRes?.error) throw new Error('配置保存失败: ' + saveRes.error)
+
+      // 4. 重新加载数据并更新当前 config 状态
+      await loadMaps()
+      setMapConfig(cfg)
+      mapConfigRef.current = cfg
+      await loadMarkers(currentMapId)
+      setScaleRatio('1.0')
+      alert(`比例调整完成！\n已按 ${ratio.toFixed(4)} 倍调整所有坐标。`)
+    } catch (e) {
+      console.error('[MemoryHub] handleApplyScale error:', e)
+      alert('比例调整失败: ' + e.message)
+    }
+  }, [currentMapId, maps, scaleRatio])
 
   // ── 实时视图写入：matrix 与标注逆缩放变量必须在同一帧提交 ──
   const applyLiveTransform = useCallback((liveZoom, liveViewCenter) => {
@@ -1255,6 +1341,8 @@ export default function MemoryHub() {
     if (!el || loading) return
     const onWheel = (e) => {
       e.preventDefault()
+      // 拖拽期间忽略滚轮缩放，避免误触导致画面跳动
+      if (isDraggingRef.current) return
       isZoomingRef.current = true
       tileQueueRef.current?.pause()
       // 清除队列中残留的旧缩放级别切片，避免恢复后加载非可见 tile
@@ -3641,6 +3729,30 @@ export default function MemoryHub() {
                     }} className="text-[9px] text-surface-500 hover:text-surface-300 underline">恢复默认</button>
                   )}
                   <span className="text-[9px] text-surface-600">鼠标悬停分层地图时放大预览</span>
+                </div>
+              </div>
+
+              {/* ── 坐标比例调整 ── */}
+              <div className="col-span-2 border-t border-white/5 pt-3 mt-1">
+                <p className="text-[11px] text-surface-400 mb-2">坐标比例调整</p>
+                <p className="text-[9px] text-surface-600 mb-2">
+                  按比例缩放当前地图所有标点、文本框和分层地图的坐标及尺寸
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="0.1"
+                    value={scaleRatio}
+                    onChange={(e) => setScaleRatio(e.target.value)}
+                    placeholder="1.0"
+                    className="w-28 px-2.5 py-1.5 rounded-lg bg-surface-800/60 border border-white/10 text-[11px] text-surface-200 placeholder-surface-500 focus:outline-none focus:border-amber-500/40"
+                  />
+                  <span className="text-[10px] text-surface-500">倍</span>
+                  <button onClick={handleApplyScale}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 text-[11px] font-medium hover:bg-amber-500/30 transition-colors">
+                    应用
+                  </button>
                 </div>
               </div>
 
