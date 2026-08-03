@@ -1,12 +1,13 @@
 {
   "name": "silvermoon-terminal",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "SilverMoon Terminal - 银月终端",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test:memoryhub": "node scripts/test-marker-overlap.mjs && node scripts/test-idle-loader.mjs && node scripts/test-map-viewport.mjs",
+    "test:wish": "node scripts/test-wish-analysis.mjs",
     "perf:memoryhub": "env -u ELECTRON_RUN_AS_NODE electron scripts/benchmark-memoryhub-zoom.cjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder --mac --arm64 && bash scripts/fix-mac-quarantine.sh -y",
@@ -109,5 +110,6 @@
       "releaseType": "release",
       "vPrefixedTagName": true
     }
-  }
+  },
+  "versionTag": "beta"
 }

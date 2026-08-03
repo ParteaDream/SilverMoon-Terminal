@@ -564,6 +564,8 @@ function ensureUserDbSchema() {
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS betamemo_tasks (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
     // 北国银行收支记录表（从 user.json 迁移到 user.db）
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS northlandbank_records (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
+    // 北国银行 · 祈愿分析：卡池组合方案表
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS wish_analysis_plans (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
     // 地图：用户放置的标点（非开发者模式写入 user.db）
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS map_marker_placements (
       id TEXT PRIMARY KEY,
@@ -6150,6 +6152,44 @@ ipcMain.handle('northlandbank-migrate-from-json', () => {
   } catch (e) {
     console.error('[northlandbank-migrate] error:', e.message);
     return { migrated: 0, error: e.message };
+  }
+});
+
+// ── 祈愿分析：卡池组合方案 IPC ──
+
+ipcMain.handle('wishanalysis-load-plans', () => {
+  try {
+    if (!userDb) return [];
+    const result = userDb.exec("SELECT id, data_json FROM wish_analysis_plans ORDER BY updated_at DESC");
+    if (!result.length || !result[0].values) return [];
+    return result[0].values.map(row => {
+      try { return JSON.parse(row[1]); } catch { return null; }
+    }).filter(Boolean);
+  } catch (e) {
+    console.error('[wishanalysis-load-plans] error:', e.message);
+    return [];
+  }
+});
+
+ipcMain.handle('wishanalysis-save-plans', (_event, plans) => {
+  try {
+    if (!userDb) throw new Error('userDb not open');
+    if (!Array.isArray(plans)) throw new Error('plans must be an array');
+    userDb.exec("DELETE FROM wish_analysis_plans");
+    const stmt = userDb.prepare(
+      "INSERT OR REPLACE INTO wish_analysis_plans (id, data_json, updated_at) VALUES (?, ?, datetime('now','localtime'))"
+    );
+    for (const plan of plans) {
+      stmt.bind([plan.id, JSON.stringify(plan)]);
+      stmt.step();
+      stmt.reset();
+    }
+    stmt.free();
+    userDbSave();
+    return { success: true };
+  } catch (e) {
+    console.error('[wishanalysis-save-plans] error:', e.message);
+    return { success: false, error: e.message };
   }
 });
 

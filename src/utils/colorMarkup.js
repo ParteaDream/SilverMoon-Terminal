@@ -178,7 +178,80 @@ function flattenChildren(children, baseKey) {
   return result
 }
 
-// ── 预设颜色 ──
+// ── 颜色预设（基础/自定义色，可在 设置 → 颜色 中管理，开发者模式可增删改）──
+// 存储于数据库 settings 表 key='color_presets'；未配置时使用以下默认值。
+export const DEFAULT_COLOR_PRESETS = [
+  { label: '红', color: '#ef4444' },
+  { label: '橙', color: '#f97316' },
+  { label: '黄', color: '#FFD780' },
+  { label: '绿', color: '#22c55e' },
+  { label: '蓝', color: '#3b82f6' },
+  { label: '靛', color: '#6366f1' },
+  { label: '紫', color: '#a855f7' },
+  { label: '灰', color: '#9ca3af' },
+  { label: '白', color: '#f3f4f6' },
+]
+
+// 模块级缓存：null = 尚未从数据库加载（此时使用默认预设）
+let _presetCache = null
+
+/** 预设变更事件名（window CustomEvent），保存/重置后广播，各处 UI 实时刷新 */
+export const COLOR_PRESETS_CHANGED = 'color-presets-changed'
+
+/** 规范化单个预设：label 非空且 color 为合法 hex，否则返回 null */
+function normalizePreset(p) {
+  if (!p || typeof p !== 'object') return null
+  const label = String(p.label || '').trim()
+  const color = String(p.color || '').trim()
+  if (!label || !/^#[0-9a-fA-F]{3,8}$/.test(color)) return null
+  return { label: label.slice(0, 20), color }
+}
+
+/** 同步获取当前预设列表（未加载时返回默认），始终返回副本 */
+export function getColorPresets() {
+  return (_presetCache || DEFAULT_COLOR_PRESETS).map(p => ({ ...p }))
+}
+
+/** 从数据库 settings 表加载颜色预设（key='color_presets'），dbQuery 为 window.electronAPI.dbQuery */
+export async function loadColorPresets(dbQuery) {
+  try {
+    const res = await dbQuery("SELECT value FROM settings WHERE key = 'color_presets'")
+    if (res?.data?.length > 0) {
+      const stored = JSON.parse(res.data[0].value)
+      if (Array.isArray(stored)) {
+        // 空数组也是有效状态（用户已删光预设）；无记录时保持 null → 使用默认
+        _presetCache = stored.map(normalizePreset).filter(Boolean)
+      }
+    }
+  } catch (_) {}
+  return getColorPresets()
+}
+
+/** 保存预设列表到数据库并广播变更事件，返回规范化后的列表 */
+export async function saveColorPresets(dbQuery, list) {
+  const normalized = list.map(normalizePreset).filter(Boolean)
+  _presetCache = normalized
+  try {
+    await dbQuery("INSERT OR REPLACE INTO settings (key, value) VALUES ('color_presets', ?)", [JSON.stringify(normalized)])
+  } catch (_) {}
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(COLOR_PRESETS_CHANGED, { detail: getColorPresets() }))
+  }
+  return getColorPresets()
+}
+
+/** 恢复默认预设（清空数据库记录）并广播变更事件 */
+export async function resetColorPresets(dbQuery) {
+  _presetCache = null
+  try {
+    await dbQuery("DELETE FROM settings WHERE key = 'color_presets'")
+  } catch (_) {}
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(COLOR_PRESETS_CHANGED, { detail: getColorPresets() }))
+  }
+  return getColorPresets()
+}
+
 // ── 预设颜色 ──
 export const PRESET_COLORS = [
   // 元素颜色（可自定义）
@@ -189,16 +262,8 @@ export const PRESET_COLORS = [
   { label: '草', color: '#BEE855' },
   { label: '风', color: '#B7F3CE' },
   { label: '岩', color: '#ECD87B' },
-  // 基础颜色
-  { label: '红', color: '#ef4444' },
-  { label: '橙', color: '#f97316' },
-  { label: '黄', color: '#FFD780' },
-  { label: '绿', color: '#22c55e' },
-  { label: '蓝', color: '#3b82f6' },
-  { label: '靛', color: '#6366f1' },
-  { label: '紫', color: '#a855f7' },
-  { label: '灰', color: '#9ca3af' },
-  { label: '白', color: '#f3f4f6' },
+  // 基础颜色（可配置，默认值见 DEFAULT_COLOR_PRESETS）
+  ...DEFAULT_COLOR_PRESETS,
 ]
 
 /**

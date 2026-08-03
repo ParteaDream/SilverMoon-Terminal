@@ -3,7 +3,8 @@ import { Eraser, Bold, Italic, GripHorizontal, Eye, EyeOff, StickyNote, X, Zap }
 import ColorPicker from './ColorPicker'
 import { expandEffectRefs } from './ColoredText'
 import {
-  PRESET_COLORS, wrapWithColor, unwrapColor,
+  PRESET_COLORS, getColorPresets, loadColorPresets, COLOR_PRESETS_CHANGED,
+  wrapWithColor, unwrapColor,
   wrapWithBold, wrapWithItalic, parseColorMarkup,
   wrapWithNote, unwrapNote, getNoteAtPosition,
   markupToHtml, htmlToMarkup, stripUnknownFormats, stripFormatting,
@@ -43,7 +44,7 @@ export default function ColorTextInput({
   const noteTextareaRef = useRef(null)
   const [noteRows, setNoteRows] = useState(4)
   const noteDragging = useRef(false)
-  const [colors, setColors] = useState(PRESET_COLORS)
+  const [colors, setColors] = useState(() => [...PRESET_COLORS.slice(0, 7), ...getColorPresets()])
   const [elementIcons, setElementIcons] = useState({})
   const [effectsOpen, setEffectsOpen] = useState(false)
   const effectsRef = useRef(null)
@@ -61,7 +62,7 @@ export default function ColorTextInput({
               color: stored[i]?.color || c.color,
               icon: stored[i]?.icon || '',
             }))
-            setColors([...els, ...PRESET_COLORS.slice(7)])
+            setColors([...els, ...getColorPresets()])
             // Load icon previews
             const iconNames = {}
             els.forEach(c => { if (c.icon) iconNames[c.icon] = true })
@@ -79,6 +80,20 @@ export default function ColorTextInput({
     }
     load()
   }, [value])
+
+  // 加载颜色预设（基础/自定义色）并监听实时刷新
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      if (!window.electronAPI?.dbQuery) return
+      const list = await loadColorPresets(window.electronAPI.dbQuery)
+      if (alive) setColors(prev => [...prev.slice(0, 7), ...list])
+    }
+    load()
+    const handler = () => setColors(prev => [...prev.slice(0, 7), ...getColorPresets()])
+    window.addEventListener(COLOR_PRESETS_CHANGED, handler)
+    return () => { alive = false; window.removeEventListener(COLOR_PRESETS_CHANGED, handler) }
+  }, [])
 
   // Load icon image data
   useEffect(() => {
@@ -875,7 +890,7 @@ export default function ColorTextInput({
         <div className="w-px h-5 bg-surface-600 mx-0.5" />
         {colors.slice(7).map(({ label, color }) => (
           <button
-            key={color}
+            key={label + color}
             type="button"
             onClick={() => !preview && applyRichFormat('color', color)}
             disabled={preview}
@@ -1085,7 +1100,7 @@ export default function ColorTextInput({
               })}
               <div className="w-px h-4 bg-surface-600 mx-0.5" />
               {colors.slice(0, 8).map(({ label, color, icon }) => (
-                <button key={label} type="button" onClick={() => applyNoteColor(color)}
+                <button key={label + color} type="button" onClick={() => applyNoteColor(color)}
                   className="w-4 h-4 rounded-full border border-surface-500 hover:scale-125 transition-transform"
                   style={{ backgroundColor: color }} title={`${label}色`} />
               ))}

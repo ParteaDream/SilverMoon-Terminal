@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Pin, X, Check, Image } from 'lucide-react'
+import { getColorPresets, loadColorPresets, COLOR_PRESETS_CHANGED } from '../utils/colorMarkup'
 
 // ═══════════════════════════════════════
 // 标点创建弹窗（开发者模式）
@@ -36,6 +37,18 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
   const [baseFillColor, setBaseFillColor] = useState(initBase.baseFillColor)
   const [baseScale, setBaseScale] = useState(initBase.baseScale)
   const [baseBorderWidth, setBaseBorderWidth] = useState(initBase.baseBorderWidth ?? 2)
+
+  // ── 颜色预设（通用色板,来自 设置 → 颜色）──
+  const [presetColors, setPresetColors] = useState(() => getColorPresets())
+  useEffect(() => {
+    let alive = true
+    if (window.electronAPI?.dbQuery) {
+      loadColorPresets(window.electronAPI.dbQuery).then(list => { if (alive) setPresetColors(list) })
+    }
+    const handler = (e) => setPresetColors(e.detail || getColorPresets())
+    window.addEventListener(COLOR_PRESETS_CHANGED, handler)
+    return () => { alive = false; window.removeEventListener(COLOR_PRESETS_CHANGED, handler) }
+  }, [])
 
   // ── 导入标点图标 ──
   const handleImportIcon = useCallback(async () => {
@@ -147,13 +160,13 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
               <div className="flex gap-3 mb-2">
                 <div className="flex-1">
                   <label className="text-[10px] text-surface-500 block mb-1">边框颜色</label>
-                  <div className="flex gap-1.5">
-                    {['#3375DD', '#E4E4E2', '#4A5366', '#DAD4C9'].map(c => (
-                      <button key={c} onClick={() => setBaseBorderColor(c)}
+                  <div className="flex gap-1.5 flex-wrap">
+                    {presetColors.slice(0, 8).map(p => (
+                      <button key={p.label + p.color} onClick={() => setBaseBorderColor(p.color)}
                         className={`w-6 h-6 rounded-full border-2 transition-all ${
-                          baseBorderColor === c ? 'border-white scale-110' : 'border-transparent'
+                          baseBorderColor === p.color ? 'border-white scale-110' : 'border-transparent'
                         }`}
-                        style={{ backgroundColor: c }} />
+                        style={{ backgroundColor: p.color }} title={p.label} />
                     ))}
                     <input type="color" value={baseBorderColor} onChange={e => setBaseBorderColor(e.target.value)}
                       className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent" />
@@ -161,13 +174,13 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
                 </div>
                 <div className="flex-1">
                   <label className="text-[10px] text-surface-500 block mb-1">填充颜色</label>
-                  <div className="flex gap-1.5">
-                    {['#3375DD', '#E4E4E2', '#4A5366', '#DAD4C9'].map(c => (
-                      <button key={c} onClick={() => setBaseFillColor(c)}
+                  <div className="flex gap-1.5 flex-wrap">
+                    {presetColors.slice(0, 8).map(p => (
+                      <button key={p.label + p.color} onClick={() => setBaseFillColor(p.color)}
                         className={`w-6 h-6 rounded-full border-2 transition-all ${
-                          baseFillColor === c ? 'border-white scale-110' : 'border-transparent'
+                          baseFillColor === p.color ? 'border-white scale-110' : 'border-transparent'
                         }`}
-                        style={{ backgroundColor: c }} />
+                        style={{ backgroundColor: p.color }} title={p.label} />
                     ))}
                     <input type="color" value={baseFillColor} onChange={e => setBaseFillColor(e.target.value)}
                       className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent" />

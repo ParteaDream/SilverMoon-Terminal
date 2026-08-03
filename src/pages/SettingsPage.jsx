@@ -10,9 +10,9 @@ import {
   FolderOpen, RefreshCw, Database, AlertTriangle, CheckCircle2,
   Palette, Type, Image, Upload, Settings, ChevronRight, Sparkles, Paintbrush,
   Wrench, Download, Upload as UploadIcon, FileCode, ShieldAlert,
-  LayoutList, LayoutGrid, List, Info, Images, HardDrive, Save, Pencil, Trash2, Shirt, X, Shield
+  LayoutList, LayoutGrid, List, Info, Images, HardDrive, Save, Pencil, Trash2, Shirt, X, Shield, Plus
 } from 'lucide-react'
-import { PRESET_COLORS } from '../utils/colorMarkup'
+import { PRESET_COLORS, getColorPresets, loadColorPresets, saveColorPresets, resetColorPresets, COLOR_PRESETS_CHANGED } from '../utils/colorMarkup'
 import ColorPicker from '../components/ColorPicker'
 
 // ── Module definitions ──────────────────────────────────────────────
@@ -1459,11 +1459,17 @@ function AppearanceModule() {
 
 // ── Color Presets Module ────────────────────────────────────────────
 function ColorPresetsModule() {
-  const { importImage, readImage } = useDb()
+  const { importImage, readImage, devMode } = useDb()
   const [elementColors, setElementColors] = useState(PRESET_COLORS.slice(0, 7).map(c => ({ ...c, icon: '' })))
   const [colorSaving, setColorSaving] = useState(false)
   const [iconPreviews, setIconPreviews] = useState({})
   const [message, setMessage] = useState(null)
+
+  // ── 颜色预设状态 ──
+  const [presets, setPresets] = useState(() => getColorPresets())
+  const [presetEditor, setPresetEditor] = useState(null) // null | { mode:'add' } | { mode:'edit', index }
+  const [presetForm, setPresetForm] = useState({ label: '', color: '#ef4444' })
+  const [presetSaving, setPresetSaving] = useState(false)
 
   // ── 字体颜色忽略状态 ──
   const [ignoredFontColors, setIgnoredFontColors] = useState(['#e2e8f0', '#cbd5e1'])
@@ -1471,6 +1477,17 @@ function ColorPresetsModule() {
   const ignoredColorInputRef = useRef(null)
 
   useEffect(() => { loadElementColors() }, [])
+
+  // 加载颜色预设 + 监听其他页面修改预设的实时刷新
+  useEffect(() => {
+    let alive = true
+    if (window.electronAPI?.dbQuery) {
+      loadColorPresets(window.electronAPI.dbQuery).then(list => { if (alive) setPresets(list) })
+    }
+    const handler = (e) => setPresets(e.detail || getColorPresets())
+    window.addEventListener(COLOR_PRESETS_CHANGED, handler)
+    return () => { alive = false; window.removeEventListener(COLOR_PRESETS_CHANGED, handler) }
+  }, [])
 
   // 加载字体颜色忽略配置
   useEffect(() => {
@@ -1554,6 +1571,92 @@ function ColorPresetsModule() {
 
   function resetElementColors() {
     setElementColors(prev => PRESET_COLORS.slice(0, 7).map((c, i) => ({ ...c, icon: prev[i]?.icon || '' })))
+  }
+
+  // ── 颜色预设操作 ──
+  const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
+
+  function startAddPreset() {
+    setPresetForm({ label: '', color: '#ef4444' })
+    setPresetEditor({ mode: 'add' })
+  }
+
+  function startEditPreset(index) {
+    const p = presets[index]
+    if (!p) return
+    setPresetForm({ label: p.label, color: p.color })
+    setPresetEditor({ mode: 'edit', index })
+  }
+
+  function cancelPresetEditor() {
+    setPresetEditor(null)
+  }
+
+  async function savePreset() {
+    const label = presetForm.label.trim()
+    let color = presetForm.color.trim()
+    if (!label) { setMessage({ type: 'error', text: '请输入预设名称' }); return }
+    if (color && !color.startsWith('#')) color = '#' + color
+    if (!HEX_RE.test(color)) { setMessage({ type: 'error', text: '请输入合法的 hex 颜色值（如 #ef4444）' }); return }
+    if (!window.electronAPI?.dbQuery) return
+    setPresetSaving(true)
+    try {
+      let next
+      if (presetEditor?.mode === 'edit') {
+        next = presets.map((p, i) => i === presetEditor.index ? { label, color } : p)
+      } else {
+        next = [...presets, { label, color }]
+      }
+      await saveColorPresets(window.electronAPI.dbQuery, next)
+      setPresets(getColorPresets())
+      setPresetEditor(null)
+      setMessage({ type: 'success', text: presetEditor?.mode === 'edit' ? '预设已修改' : '预设已添加' })
+    } catch (e) {
+      setMessage({ type: 'error', text: '保存失败: ' + e.message })
+    } finally {
+      setPresetSaving(false)
+    }
+  }
+
+  async function deletePreset(index) {
+    if (!window.electronAPI?.dbQuery) return
+    const p = presets[index]
+    if (!p) return
+    if (!window.confirm(`确定删除预设颜色「${p.label}」？\n已使用该颜色的数据不受影响。`)) return
+    setPresetSaving(true)
+    try {
+      const next = presets.filter((_, i) => i !== index)
+      await saveColorPresets(window.electronAPI.dbQuery, next)
+      setPresets(getColorPresets())
+      // 编辑表单 index 同步:正在编辑的被删则关闭,否则后续项前移
+      setPresetEditor(prev => {
+        if (!prev || prev.mode !== 'edit') return prev
+        if (prev.index === index) return null
+        if (prev.index > index) return { ...prev, index: prev.index - 1 }
+        return prev
+      })
+      setMessage({ type: 'success', text: '预设已删除' })
+    } catch (e) {
+      setMessage({ type: 'error', text: '删除失败: ' + e.message })
+    } finally {
+      setPresetSaving(false)
+    }
+  }
+
+  async function resetPresets() {
+    if (!window.electronAPI?.dbQuery) return
+    if (!window.confirm('确定恢复默认预设颜色？\n自定义的预设列表将被覆盖。')) return
+    setPresetSaving(true)
+    try {
+      await resetColorPresets(window.electronAPI.dbQuery)
+      setPresets(getColorPresets())
+      setPresetEditor(null)
+      setMessage({ type: 'success', text: '已恢复默认预设' })
+    } catch (e) {
+      setMessage({ type: 'error', text: '恢复失败: ' + e.message })
+    } finally {
+      setPresetSaving(false)
+    }
   }
 
   async function handleImportIcon(idx) {
@@ -1666,6 +1769,105 @@ function ColorPresetsModule() {
             恢复默认
           </button>
         </div>
+      </div>
+
+      {/* ── 颜色预设 ── */}
+      <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <Paintbrush className="w-5 h-5 text-primary-400 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">颜色预设</p>
+            <p className="text-xs text-surface-400 mt-0.5">通用颜色预设,可用于字体编辑器、地图标点底盘颜色等{devMode ? ' · 开发者模式可增删改' : ''}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2.5">
+          {presets.map((p, i) => (
+            <div key={i} className="group relative flex flex-col items-center gap-1">
+              <div
+                onClick={() => devMode && startEditPreset(i)}
+                title={devMode ? `「${p.label}」点击编辑` : p.label}
+                className={`w-9 h-9 rounded-full border-2 border-surface-600 flex items-center justify-center transition-transform ${devMode ? 'cursor-pointer hover:scale-110' : 'cursor-default'}`}
+                style={{ backgroundColor: p.color }}
+              />
+              {devMode && (
+                <button
+                  type="button"
+                  onClick={() => deletePreset(i)}
+                  title="删除预设"
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-surface-700 border border-surface-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/80 hover:border-red-400"
+                >
+                  <X className="w-2.5 h-2.5 text-surface-200" />
+                </button>
+              )}
+              <span className="text-[10px] text-surface-400 leading-none">{p.label}</span>
+            </div>
+          ))}
+          {presets.length === 0 && (
+            <div className="text-xs text-surface-500 py-2">{devMode ? '暂无预设颜色,点击下方「添加预设」创建' : '暂无预设颜色'}</div>
+          )}
+        </div>
+        {/* 添加/编辑表单（开发者模式） */}
+        {devMode && presetEditor && (
+          <div className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-surface-800/50 border border-surface-700">
+            <div className="flex-1 min-w-[140px]">
+              <label className="text-[10px] text-surface-500 block mb-1">名称</label>
+              <input
+                type="text"
+                value={presetForm.label}
+                onChange={e => setPresetForm(f => ({ ...f, label: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') savePreset() }}
+                placeholder="如 米黄"
+                maxLength={20}
+                autoFocus
+                className="w-full px-3 py-1.5 rounded-lg bg-surface-800/50 border border-surface-700 text-xs text-surface-200 placeholder-surface-500 outline-none focus:border-primary-500 transition-colors"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-surface-500">颜色</label>
+              <div className="flex items-center gap-2">
+                <ColorPicker
+                  value={presetForm.color}
+                  onChange={col => setPresetForm(f => ({ ...f, color: col }))}
+                  buttonClassName="w-8 h-8 rounded-lg"
+                />
+                <span className="text-xs font-mono text-surface-300">{presetForm.color}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={savePreset}
+                disabled={presetSaving}
+                className="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 text-xs font-medium text-white transition-colors disabled:opacity-50"
+              >
+                {presetSaving ? '保存中...' : (presetEditor.mode === 'edit' ? '保存修改' : '添加')}
+              </button>
+              <button
+                onClick={cancelPresetEditor}
+                className="px-3 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-surface-300 transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
+        {devMode && (
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={startAddPreset}
+              className="px-4 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-surface-300 transition-colors flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />添加预设
+            </button>
+            <button
+              onClick={resetPresets}
+              disabled={presetSaving}
+              className="px-4 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-xs text-surface-300 transition-colors disabled:opacity-50"
+            >
+              恢复默认
+            </button>
+          </div>
+        )}
+        <p className="text-[10px] text-surface-500">预设颜色为全局通用色板,可被字体编辑器、地图标点底盘颜色等使用;删除预设不影响已应用该颜色的数据。</p>
       </div>
 
       {/* ── 字体颜色忽略设置 ── */}

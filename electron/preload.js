@@ -68,6 +68,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   northlandbankLoadRecords: () => ipcRenderer.invoke('northlandbank-load-records'),
   northlandbankSaveRecords: (records) => ipcRenderer.invoke('northlandbank-save-records', records),
   northlandbankMigrateFromJson: () => ipcRenderer.invoke('northlandbank-migrate-from-json'),
+  // 北国银行 · 祈愿分析：卡池组合方案
+  wishanalysisLoadPlans: () => ipcRenderer.invoke('wishanalysis-load-plans'),
+  wishanalysisSavePlans: (plans) => ipcRenderer.invoke('wishanalysis-save-plans', plans),
   readAlbumTags: () => ipcRenderer.invoke('read-album-tags'),
   saveAlbumTags: (data) => ipcRenderer.invoke('save-album-tags', data),
   setDevMode: (enabled) => ipcRenderer.invoke('set-dev-mode', enabled),

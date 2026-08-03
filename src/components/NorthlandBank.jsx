@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Plus, ArrowLeft, Landmark, Calendar, Trash2, Banknote,
+  Plus, ArrowLeft, Landmark, Calendar, Trash2, Banknote, TrendingUp,
 } from 'lucide-react'
+import WishAnalysis from './WishAnalysis'
 
 // ═══════════════════════════════════════
 // 常量
@@ -10,7 +11,7 @@ import {
 const MATERIALS = [
   { key: 'primogems', label: '原石', imgFile: 'UI_ItemIcon_201.webp', color: 'text-blue-300', bg: 'bg-blue-500/10', border: 'border-blue-500/30' },
   { key: 'intertwinedFates', label: '纠缠之缘', imgFile: 'UI_ItemIcon_223.webp', color: 'text-pink-300', bg: 'bg-pink-500/10', border: 'border-pink-500/30' },
-  { key: 'genesisCrystals', label: '创世结晶', imgFile: 'UI_ItemIcon_203.webp', color: 'text-amber-300', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
+  { key: 'genesisCrystals', label: '创世结晶', imgFile: 'UI_ItemIcon_203.webp', color: 'text-blue-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
   { key: 'starglitter', label: '星辉', imgFile: 'UI_ItemIcon_221.webp', color: 'text-yellow-300', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30' },
 ]
 
@@ -86,6 +87,7 @@ export default function NorthlandBank() {
   const [view, setView] = useState('list')
   const [records, setRecords] = useState([])
   const [selectedRecord, setSelectedRecord] = useState(null)
+  const [analysisPeriod, setAnalysisPeriod] = useState(null) // 祈愿分析所选的收支明细
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { migrateIfNeeded().then(() => loadRecords()).then(r => { setRecords(r); setLoading(false) }) }, [])
@@ -121,6 +123,7 @@ export default function NorthlandBank() {
   const handleBack = useCallback(async () => {
     setView('list')
     setSelectedRecord(null)
+    setAnalysisPeriod(null)
     await refresh()
   }, [refresh])
 
@@ -132,12 +135,25 @@ export default function NorthlandBank() {
     )
   }
 
+  // 祈愿分析视图
+  if (analysisPeriod) {
+    const period = analysisPeriod.period
+    return (
+      <WishAnalysis
+        period={period}
+        recordLabel={`${selectedRecord?.date} · 第 ${period.seq || analysisPeriod.idx + 1} 期`}
+        onBack={() => setAnalysisPeriod(null)}
+      />
+    )
+  }
+
   switch (view) {
     case 'add':
       return <AddRecordView onSave={handleSave} onUpdate={handleUpdate} onBack={handleBack} records={records} />
     case 'detail':
       return selectedRecord
-        ? <DateDetailView record={selectedRecord} onUpdate={handleUpdate} onDelete={handleDelete} onBack={handleBack} />
+        ? <DateDetailView record={selectedRecord} onUpdate={handleUpdate} onDelete={handleDelete} onBack={handleBack}
+            onAnalyze={(period, idx) => setAnalysisPeriod({ period, idx })} />
         : <RecordListView records={records} onSelect={(r) => { setSelectedRecord(r); setView('detail') }} onAdd={() => setView('add')} />
     default:
       return <RecordListView records={records} onSelect={(r) => { setSelectedRecord(r); setView('detail') }} onAdd={() => setView('add')} />
@@ -240,13 +256,13 @@ function DateCard({ record, onClick }) {
               <div key={m.key} className="flex flex-col items-center gap-1 min-w-[40px]">
                 <MaterialThumb imgFile={m.imgFile} className="w-7 h-7 rounded-lg shrink-0" />
                 <div className="text-center">
-                  <span className={`text-xs font-semibold ${m.color}`}>
+                  <div className={`text-xs font-semibold leading-tight ${m.color}`}>
                     {value.toLocaleString()}
-                  </span>
+                  </div>
                   {periodCount >= 2 && delta !== 0 && (
-                    <span className={`text-[10px] font-medium ml-0.5 ${delta > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    <div className={`text-[10px] font-medium leading-tight mt-0.5 ${delta > 0 ? 'text-green-400' : 'text-red-400'}`}>
                       ({delta > 0 ? '+' : ''}{delta.toLocaleString()})
-                    </span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -442,7 +458,7 @@ function AddRecordView({ onSave, onUpdate, onBack, records }) {
 // ═══════════════════════════════════════
 // 日期详情视图（查看各期 + 差额）
 // ═══════════════════════════════════════
-function DateDetailView({ record, onUpdate, onDelete, onBack }) {
+function DateDetailView({ record, onUpdate, onDelete, onBack, onAnalyze }) {
   const [showAdd, setShowAdd] = useState(false)
   const [editingPeriod, setEditingPeriod] = useState(null)
   const [editingDate, setEditingDate] = useState(false)
@@ -621,6 +637,14 @@ function DateDetailView({ record, onUpdate, onDelete, onBack }) {
                       </span>
                     </div>
                     <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => onAnalyze(period, idx)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/25 text-amber-300 text-[10px] font-medium transition-colors"
+                        title="基于本期货币进行祈愿分析"
+                      >
+                        <TrendingUp className="w-3 h-3" />
+                        祈愿分析
+                      </button>
                       <button
                         onClick={() => setEditingPeriod(period)}
                         className="p-1 rounded text-surface-600 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
