@@ -97,6 +97,97 @@ const r5 = analyzePortfolio([chroCfg2], 180, false)
 const c5 = r5.curves.chronicled
 ok('不定轨 180 抽概率 < 定轨', c5.F[180] < c4.F[180], `${c5.F[180]} vs ${c4.F[180]}`)
 
+console.log('== 集录祈愿：角色与武器分别定轨（双定轨）==')
+{
+  // 修复回归：单定轨角色时，武器目标永不产出 → 期望抽数/达成概率恒 0
+  const cfg = {
+    ...chroCfg,
+    targets: [
+      { id: 'c1', name: '优菈', rarity: 5, copies: 1, epitomized: true },
+      { id: 'w1', name: '松籁响起之时', rarity: 5, copies: 1, epitomized: true },
+    ],
+  }
+  // 每个定轨阶段至多 2 次五星（歪 + 命定值必得，各 ≤90 抽）→ 双阶段最坏 360 抽
+  const r = analyzePortfolio([cfg], 360, false)
+  const c = r.curves.chronicled
+  ok('角色+武器双定轨：360 抽内必得（2×180）', c.F[360] > 0.99999, c.F[360])
+  ok('180 抽达成概率合理（~0.4~0.6）', c.F[180] > 0.3 && c.F[180] < 0.7, c.F[180])
+  ok('期望抽数合理（~150~230）', r.perPool[0].need.E > 140 && r.perPool[0].need.E < 240, r.perPool[0].need.E)
+  let mass = 0
+  for (let i = 0; i < c._probs.length; i++) mass += c._probs[i]
+  ok('概率质量守恒', Math.abs(mass - 1) < 1e-6, mass)
+  const sim = simulateOutcomes([cfg], [
+    { poolKey: 'chronicled', name: '优菈', copy: 1 },
+    { poolKey: 'chronicled', name: '松籁响起之时', copy: 1 },
+  ], 360, 20000)
+  const achieved = sim.rows.filter(x => !x.key.startsWith('全部未达成')).reduce((s, x) => s + x.p, 0)
+  ok('双定轨模拟达成概率 ≈ 精确 DP', Math.abs(achieved - c.F[360]) < 0.03, `${achieved} vs ${c.F[360]}`)
+}
+
+console.log('== 集录祈愿：结果分布计歪（小保底歪 = 非定轨五星）==')
+{
+  // 单定轨优菈：歪 = 抽到可莉/甘雨（非定轨角色），最多 1 次（歪后命定值 1 → 必得）
+  const cfg = {
+    ...chroCfg,
+    targets: [{ id: 'c1', name: '优菈', rarity: 5, copies: 1, epitomized: true }],
+  }
+  const sim = simulateOutcomes([cfg], [{ poolKey: 'chronicled', name: '优菈', copy: 1 }], 90, 20000)
+  ok('单定轨：歪仅 0/1', sim.rows.every(r => /歪0|歪1/.test(r.key)), sim.rows.map(r => r.key).join('|'))
+  const w1 = sim.rows.filter(r => /歪1/.test(r.key)).reduce((s, r) => s + r.p, 0)
+  const w0 = sim.rows.filter(r => /歪0/.test(r.key)).reduce((s, r) => s + r.p, 0)
+  ok('小保底歪概率 ≈ 0.5（非定轨五星计入）', w1 > 0.4 && w1 < 0.62, w1)
+  ok('直接命中定轨 ≈ 0.5', w0 > 0.3, w0)
+  // 双定轨（优菈 + 松籁）：每阶段最多 1 次歪 → 合计 ≤ 2
+  const cfg2 = {
+    ...chroCfg,
+    targets: [
+      { id: 'c1', name: '优菈', rarity: 5, copies: 1, epitomized: true },
+      { id: 'w1', name: '松籁响起之时', rarity: 5, copies: 1, epitomized: true },
+    ],
+  }
+  const sim2 = simulateOutcomes([cfg2], [
+    { poolKey: 'chronicled', name: '优菈', copy: 1 },
+    { poolKey: 'chronicled', name: '松籁响起之时', copy: 1 },
+  ], 180, 20000)
+  ok('双定轨：歪 ≤ 2', sim2.rows.every(r => { const m = r.key.match(/歪(\d+)/); return !m || parseInt(m[1]) <= 2 }), sim2.rows.map(r => r.key).join('|'))
+}
+
+console.log('== 集录祈愿：三阶段定轨（角色→武器→角色）==')
+{
+  const cfg = {
+    ...chroCfg,
+    targets: [
+      { id: 'c1', name: '优菈', rarity: 5, copies: 1, epitomized: true },
+      { id: 'w1', name: '松籁响起之时', rarity: 5, copies: 1, epitomized: true },
+      { id: 'c2', name: '可莉', rarity: 5, copies: 1, epitomized: true },
+    ],
+  }
+  // 三个定轨阶段依次进行，各阶段最坏 180 抽 → 总计最坏 540 抽
+  const r = analyzePortfolio([cfg], 540, false)
+  const c = r.curves.chronicled
+  ok('角色→武器→角色 三定轨 540 抽必得', c.F[540] > 0.99999, c.F[540])
+  ok('270 抽达成概率合理（~0.4~0.8）', c.F[270] > 0.3 && c.F[270] < 0.85, c.F[270])
+  ok('三阶段期望抽数合理（~200~330）', r.perPool[0].need.E > 190 && r.perPool[0].need.E < 340, r.perPool[0].need.E)
+  ok('三阶段达成概率非 0', c.F[200] > 0.1, c.F[200])
+}
+
+console.log('== 集录祈愿：垫池与已拥有数量生效 ==')
+{
+  // 垫池：距五星 70 抽 → 期望抽数显著下降、达成概率上升
+  const r0 = analyzePortfolio([chroCfg], 120, false)
+  const r70 = analyzePortfolio([{ ...chroCfg, pity5: 70 }], 120, false)
+  ok('垫池 70 抽：期望抽数显著下降', r70.perPool[0].need.E < r0.perPool[0].need.E * 0.7, `${r70.perPool[0].need.E} vs ${r0.perPool[0].need.E}`)
+  ok('垫池 70 抽：达成概率上升', r70.curves.chronicled.F[90] > r0.curves.chronicled.F[90], `${r70.curves.chronicled.F[90]} vs ${r0.curves.chronicled.F[90]}`)
+  // 已拥有数量：目标角色 7 份 → 星辉产出上升（第 8 份起 25 星辉）
+  const rOwned = analyzePortfolio([{ ...chroCfg, owned: { 优菈: 7 } }], 120, false)
+  ok('已拥有 7 份：期望星辉 > 已拥有 0 份', rOwned.perPool[0].Eg > r0.perPool[0].Eg * 1.1, `${rOwned.perPool[0].Eg} vs ${r0.perPool[0].Eg}`)
+  // 模拟路径同样生效（星辉再生）
+  const order1 = [{ poolKey: 'chronicled', name: '优菈', copy: 1 }]
+  const s0 = simulateRecycling([chroCfg], order1, 120, 0, 15000)
+  const s7 = simulateRecycling([{ ...chroCfg, owned: { 优菈: 7 } }], order1, 120, 0, 15000)
+  ok('模拟：已拥有 7 份产出星辉 > 0 份', s7.glitterE > s0.glitterE * 1.1, `${s7.glitterE} vs ${s0.glitterE}`)
+}
+
 console.log('== 星辉再利用：预算增长 5% 左右 ==')
 const r6 = analyzePortfolio([charCfg2], 300, true)
 ok('再利用后预算 > 初始', r6.budget > 300, r6.budget)

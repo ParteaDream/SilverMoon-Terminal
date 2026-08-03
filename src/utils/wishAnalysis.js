@@ -5,7 +5,8 @@
 //   - 五星软保底概率表（角色 74 抽起 +6%/抽，武器 63 抽起 +7%/抽、74 抽起 +3.5%/抽）
 //   - 四星 10 抽保底 + 四星 UP 歪后必出（gu4 状态）
 //   - 角色池「捕获明光」连保判定（连续 2 次大保底后 47/47/6，3 次后必得）
-//   - 武器池「神铸定轨」、集录祈愿「集录定轨」（命定值 0/1）
+//   - 武器池「神铸定轨」（命定值 0/1）；集录祈愿「集录定轨」角色/武器分别设定，
+//     生效定轨 = 目标顺序中第一个未达成的定轨目标（命定值 0/1）
 //   - 副产物星辉分层（五星角色第 1~7 次 10 星辉、第 8 次起 25 星辉；四星角色同理 2/5）
 //     —— 星辉可按 5:1 再换纠缠之缘，形成「抽卡→星辉→再抽卡」反馈
 // 概率分布采用马尔可夫动态规划（精确值，非蒙特卡洛）。
@@ -545,8 +546,9 @@ function runWeaponDP(cfg, targetN, existing) {
 
 // ═════════════════════════════════════════════════════════════════
 // 集录祈愿：五星 0.6% / 90 保底；「集录定轨」命定值 0/1；
-// 定轨角色则五星只会是池内角色，小保底 50% 定轨目标，歪则 +1 命定值；
-// 不定轨时五星从池内全部五星等概率；四星全部等可能（无 UP 机制）
+// 角色与武器可分别设定定轨（各任意个）；生效定轨 = 目标顺序中第一个未达成的定轨目标，
+// 生效期间五星只会是池内同类型（50% 定轨目标，歪则 +1 命定值，命定值 1 时必得）；
+// 无未达成定轨时五星从池内全部五星等概率；四星全部等可能（无 UP 机制）
 // 基底: b = p5 + 90*(p4 + 10*ft)
 // ═════════════════════════════════════════════════════════════════
 function runChronicledDP(cfg, targetN, existing) {
@@ -556,29 +558,36 @@ function runChronicledDP(cfg, targetN, existing) {
   const t5 = cfg.targets.filter(t => t.rarity === 5)
   const t4 = cfg.targets.filter(t => t.rarity === 4 && t.name !== '__any4__')
   const any4 = cfg.targets.find(t => t.name === '__any4__')
-  const epit = t5.find(t => t.epitomized)
   const n5 = chrono5.length
   const nameIdx = new Map(t5.map((t, i) => [t.name, i]))
   const t4NameIdx = new Map(t4.map((t, i) => [t.name, i]))
   const chrono4TargetIdx = chrono4.map(c => t4NameIdx.has(c.name) ? t4NameIdx.get(c.name) : -1)
   const nonTarget4 = chrono4.filter((_, i) => chrono4TargetIdx[i] < 0).length
   const chrono5TargetIdx = chrono5.map(c => nameIdx.has(c.name) ? nameIdx.get(c.name) : -1)
-  const nonTarget5 = chrono5.filter((_, i) => chrono5TargetIdx[i] < 0).length
+  // 物品类型（目标未显式标注时按池内同名物品回退，避免「同类型仅此一件」误判）
+  const t5Type = (t) => t.type || (chrono5.find(c => c.name === t.name)?.type) || 'char'
+  const t4Type = (t) => t.type || (chrono4.find(c => c.name === t.name)?.type) || 'char'
+  // 定轨目标（角色与武器可分别设定，按目标顺序取「第一个未达成」为生效定轨）；
+  // 每定轨目标对应的同类型其他池内五星（-1 = 非目标，命中仅计歪/命定值）
+  const epitIdxList = t5.map((t, i) => t.epitomized ? i : -1).filter(i => i >= 0)
+  const sameTypeOf = epitIdxList.map(ei => {
+    const items = []
+    for (let k = 0; k < chrono5.length; k++) {
+      const c = chrono5[k]
+      if (c.name !== t5[ei].name && c.type === t5Type(t5[ei])) items.push(chrono5TargetIdx[k])
+    }
+    return items
+  })
 
   const baseTotal = 90 * 10 * 2
   const counterDims = [
-    ...t5.map(t => capFor(t.copies, t.type === 'char') + 1),
+    ...t5.map(t => capFor(t.copies, t5Type(t) === 'char') + 1),
     ...t4.map(t => capFor(t.copies, true) + 1),
     ...(any4 ? [any4.copies + 1] : []),
   ]
   const { counterStrides, counterTotal } = counterLayout(counterDims)
   const nCnt = counterDims.length
   const anyIdx = any4 ? nCnt - 1 : -1
-  const eIdx = epit ? t5.indexOf(epit) : -1
-  // 定轨目标同类型其他五星（歪的目标）
-  const others = epit ? chrono5.filter(c => c.name !== epit.name && c.type === epit.type) : []
-  const othersTIdx = others.map(c => nameIdx.has(c.name) ? nameIdx.get(c.name) : -1)
-  const othersNonTarget = others.filter((_, i) => othersTIdx[i] < 0).length
   const total = baseTotal * counterTotal
 
   const capN = computeCapN(targetN, baseTotal, counterTotal).capN
@@ -598,7 +607,6 @@ function runChronicledDP(cfg, targetN, existing) {
   const hitBase = new Int32Array(baseTotal), wryBase = new Int32Array(baseTotal)
   const epitBase = new Int32Array(baseTotal), c4Base = new Int32Array(baseTotal)
   const r3Base = new Int32Array(baseTotal), ftOf = new Int8Array(baseTotal)
-  const epitHitQ = new Float64Array(baseTotal) // 每基底定轨目标命中概率（未命中占比 colR5-colE）
   for (let p5 = 0; p5 < 90; p5++) {
     for (let p4 = 0; p4 < 10; p4++) {
       const r5v = p5Rate('chronicled', p5 + 1)
@@ -614,7 +622,6 @@ function runChronicledDP(cfg, targetN, existing) {
         epitBase[b] = 0 // 命定值必得：p5→0, ft→0
         c4Base[b] = nP5 + 90 * (0 + 10 * ft)
         r3Base[b] = nP5 + 90 * (nP4 + 10 * ft)
-        epitHitQ[b] = epit ? (ft === 1 ? 1 : (others.length ? 0.5 : 1)) : (t5.length ? 1 / n5 : 0)
       }
     }
   }
@@ -625,36 +632,61 @@ function runChronicledDP(cfg, targetN, existing) {
     for (let ci = 0; ci < counterTotal; ci++) {
       const cArr = decodeTuple(ci, counterDims)
       const base = ci * baseTotal
-      const eOff = eIdx >= 0 ? incOf(cArr, counterDims, counterStrides, eIdx) : 0
       const anyOff = anyIdx >= 0 ? incOf(cArr, counterDims, counterStrides, anyIdx) : 0
-      // 星辉分层随已有数量平移
-      const glitter5 = eIdx >= 0 && epit.type === 'char' ? ((owned[epit.name] || 0) + cArr[eIdx] < 7 ? 10 : 25) : 10
+      // 生效定轨：目标顺序中第一个未达成的定轨目标；全部达成 → 不定轨
+      let actIdx = -1, actPos = -1
+      for (let k = 0; k < epitIdxList.length; k++) {
+        const ei = epitIdxList[k]
+        if (cArr[ei] < t5[ei].copies) { actIdx = ei; actPos = k; break }
+      }
+      const actEpit = actIdx >= 0 ? t5[actIdx] : null
+      const stItems = actPos >= 0 ? sameTypeOf[actPos] : null
+      const eOff = actIdx >= 0 ? incOf(cArr, counterDims, counterStrides, actIdx) : 0
+      // 五星星辉分层随已有数量平移：目标角色 10/25，目标武器与非目标恒 10
+      const t5Glit = (ti) => t5Type(t5[ti]) === 'char' ? ((owned[t5[ti].name] || 0) + cArr[ti] < 7 ? 10 : 25) : 10
+      let eGlit = 0, oGlit = 0
+      if (actEpit) {
+        eGlit = t5Glit(actIdx)
+        if (stItems.length) {
+          const oP = 0.5 / stItems.length
+          for (const ti of stItems) oGlit += oP * (ti >= 0 ? t5Glit(ti) : 10)
+        }
+      } else if (n5 > 0) {
+        const up = 1 / n5
+        for (let k = 0; k < chrono5.length; k++) {
+          const ti = chrono5TargetIdx[k]
+          oGlit += up * (ti >= 0 ? t5Glit(ti) : 10)
+        }
+      }
       const t4Offs = t4.map(t => incOf(cArr, counterDims, counterStrides, t5.length + t4NameIdx.get(t.name)))
-      const t4Glitter = t4.map(t => (t.type === 'char' ? ((owned[t.name] || 0) + cArr[t5.length + t4NameIdx.get(t.name)] < 7 ? 2 : 5) : 2))
+      const t4Glitter = t4.map(t => (t4Type(t) === 'char' ? ((owned[t.name] || 0) + cArr[t5.length + t4NameIdx.get(t.name)] < 7 ? 2 : 5) : 2))
       let colR5 = 0, colR4 = 0, colE = 0
       for (let b = 0; b < baseTotal; b++) {
         const p = probs[base + b]
         if (!p) continue
-        colR5 += p * r5[b]; colR4 += p * r4[b]; colE += p * r5[b] * epitHitQ[b]
+        colR5 += p * r5[b]; colR4 += p * r4[b]
         if (r5[b] > 0) {
           const hitB = epitBase[b]
-          if (epit && ftOf[b] === 1) {
+          if (actEpit && ftOf[b] === 1) {
+            // 命定值 1：必得生效定轨
+            colE += p * r5[b]
             next[(ci + eOff) * baseTotal + hitB] += p * r5[b]
-          } else if (epit) {
-            if (others.length === 0) {
+          } else if (actEpit) {
+            if (stItems.length === 0) {
+              // 池内同类型仅此一件 → 100% 定轨目标
+              colE += p * r5[b]
               next[(ci + eOff) * baseTotal + hitB] += p * r5[b]
             } else {
+              colE += p * r5[b] * 0.5
               next[(ci + eOff) * baseTotal + hitB] += p * r5[b] * 0.5
-              const oP = 0.5 / others.length
-              for (let k = 0; k < others.length; k++) {
-                if (othersTIdx[k] >= 0) {
-                  next[(ci + incOf(cArr, counterDims, counterStrides, othersTIdx[k])) * baseTotal + wryBase[b]] += p * r5[b] * oP
-                }
+              const oP = 0.5 / stItems.length
+              for (const ti of stItems) {
+                if (ti >= 0) next[(ci + incOf(cArr, counterDims, counterStrides, ti)) * baseTotal + wryBase[b]] += p * r5[b] * oP
+                else next[ci * baseTotal + wryBase[b]] += p * r5[b] * oP
               }
-              if (othersNonTarget > 0) next[ci * baseTotal + wryBase[b]] += p * r5[b] * oP * othersNonTarget
             }
           } else if (t5.length > 0) {
-            // 不定轨：目标项命中不计歪，非目标项记歪
+            // 不定轨：目标项命中不计歪（无命定值）
             for (let k = 0; k < chrono5.length; k++) {
               const ti = chrono5TargetIdx[k]
               const off = ti >= 0 ? incOf(cArr, counterDims, counterStrides, ti) : 0
@@ -681,12 +713,12 @@ function runChronicledDP(cfg, targetN, existing) {
         if (r3[b] > 0) next[ci * baseTotal + r3Base[b]] += p * r3[b]
       }
       sum5 += colR5; sum4 += colR4
-      sumG += colE * glitter5 + (colR5 - colE) * 10
+      sumG += colE * eGlit + Math.max(0, colR5 - colE) * oGlit
       if (chrono4.length) {
         const p4 = nonUp4GlitterOf(cfg)
         const perItem = colR4 / chrono4.length
         for (let j = 0; j < t4.length; j++) {
-          if (t4[j].type === 'weapon') { sumG += perItem * 2; continue }
+          if (t4Type(t4[j]) === 'weapon') { sumG += perItem * 2; continue }
           const total = (owned[t4[j].name] || 0) + cArr[t5.length + t4NameIdx.get(t4[j].name)] + 1
           sumG += perItem * (total === 1 ? 0 : p4)
         }
@@ -1002,7 +1034,7 @@ function makeRng(seed) {
 
 // 单抽结算（与 DP 使用同一概率表与机制）：状态更新 + 返回抽到的物品（out 复用对象避免分配）
 // out.r = 星级 3/4/5；out.n = 命中的物品名（具名物品均会给出，用于已拥有分层）
-function simRoll(st, p, bannerChar, out, rng) {
+function simRoll(st, p, bannerChar, cnt, out, rng) {
   const kind = p.kind
   const hard = kind === 'weapon' ? 79 : 89
   const r5 = p5Rate(kind, st.p5 + 1)
@@ -1010,7 +1042,7 @@ function simRoll(st, p, bannerChar, out, rng) {
   const r3 = Math.max(0, 1 - r5 - r4)
   const nP5 = st.p5 >= hard ? 0 : st.p5 + 1
   const nP4 = st.p4 === 9 ? 0 : st.p4 + 1
-  out.r = 0; out.n = null; out.ct = null
+  out.r = 0; out.n = null; out.ct = null; out.lose = false
   const u = rng()
 
   if (u < r5) {
@@ -1043,18 +1075,29 @@ function simRoll(st, p, bannerChar, out, rng) {
         if (u2 < 0.75 && ups.length) out.n = ups[Math.min(ups.length - 1, Math.floor(u2 / (0.75 / ups.length)))]
       }
     } else {
-      // 集录祈愿
-      const epit = p.targets.find(t => t.epitomized && t.rarity === 5)
-      if (st.fate === 1 && epit) {
+      // 集录祈愿：角色/武器可分别定轨；生效定轨 = 目标顺序中第一个未达成的定轨目标
+      let actEpit = null
+      for (const t of p.targets) {
+        if (t.epitomized && t.rarity === 5 && (cnt[t.name] || 0) < t.copies) { actEpit = t; break }
+      }
+      if (st.fate === 1 && actEpit) {
         st.fate = 0
-        out.n = epit.name
-      } else if (epit) {
+        out.n = actEpit.name
+      } else if (actEpit) {
+        const actType = actEpit.type || (p.chrono5 || []).find(c => c.name === actEpit.name)?.type || 'char'
         const u2 = rng()
-        if (u2 < 0.5) { out.n = epit.name }
-        else {
-          st.fate = 1
-          const others = (p.chrono5 || []).filter(c => c.name !== epit.name && c.type === epit.type)
-          if (others.length) out.n = others[Math.floor(rng() * others.length)].name
+        if (u2 < 0.5) {
+          out.n = actEpit.name
+        } else {
+          const others = (p.chrono5 || []).filter(c => c.name !== actEpit.name && c.type === actType)
+          if (others.length) {
+            st.fate = 1
+            out.n = others[Math.floor(rng() * others.length)].name
+            out.lose = true // 小保底歪：抽到非定轨的同类型角色/武器（命定值 +1）
+          } else {
+            // 池内同类型仅此一件：必得，命定值不增加
+            out.n = actEpit.name
+          }
         }
       } else {
         const pool = p.chrono5 || []
@@ -1067,7 +1110,11 @@ function simRoll(st, p, bannerChar, out, rng) {
     out.r = 4
     if (kind === 'chronicled') {
       const pool = p.chrono4 || []
-      if (pool.length) out.n = pool[Math.floor(rng() * pool.length)].name
+      if (pool.length) {
+        const it = pool[Math.floor(rng() * pool.length)]
+        out.n = it.name
+        out.ct = it.type // 四星角色按非UP四星分层（首次 0、其后参数值），与 DP 一致
+      }
       return
     }
     const up4 = p.up4 || []
@@ -1111,7 +1158,9 @@ function rollGlitter(p, rank, name, owned, tierCount, ct) {
   if (rank === 5) {
     // 具名五星角色（目标或池内物品）按已拥有分层；武器与未具名常驻按 10
     const t = name && p.targets.find(x => x.name === name)
-    const type = t ? t.type : ((p.chrono5 || []).find(c => c.name === name)?.type || 'weapon')
+    const type = t
+      ? (t.type || (p.chrono5 || []).find(c => c.name === name)?.type || 'char')
+      : ((p.chrono5 || []).find(c => c.name === name)?.type || 'weapon')
     if (type !== 'weapon' && tierCount !== undefined) {
       return ((owned[name] || 0) + tierCount) >= 8 ? 25 : 10
     }
@@ -1179,12 +1228,14 @@ function runTrial(active, byKey, entries, entryPool, entryCopy, nativeFates, res
     const p = byKey[entryPool[target]]
     const bannerChar = p.kind === 'character' ? (entryCopy[target].name === p.poolB ? p.poolB : p.poolA) : null
     const cnt = itemCnt[entryPool[target]]
-    simRoll(states[entryPool[target]], p, bannerChar, simOut, rng)
+    simRoll(states[entryPool[target]], p, bannerChar, cnt, simOut, rng)
     // 具名物品一律计数（目标与非目标均用于已拥有分层）
     if (simOut.n) {
       if (cnt[simOut.n] === undefined) cnt[simOut.n] = 0
       cnt[simOut.n]++
     } else if (simOut.r === 5) loseTotal++
+    // 歪 = 未命中定轨的五星：集录池抽到非定轨角色/武器（命定值 +1）；角色池/武器池为未具名常驻
+    if (simOut.r === 5 && simOut.lose) loseTotal++
     if (simOut.r === 4 && p.targets.some(t => t.name === '__any4__')) cnt['__any4__']++
     const tierCount = simOut.n ? cnt[simOut.n] : undefined
     const g = rollGlitter(p, simOut.r, simOut.n, p.owned || {}, tierCount, simOut.ct)

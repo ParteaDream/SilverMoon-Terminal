@@ -144,8 +144,10 @@ export default function WishAnalysis({ period, recordLabel, onBack }) {
     let sum = 0, cnt = 0
     for (const a of avatars) {
       const owned = (a.actived_constellation_num || 0) + 1
-      ownedMap[a.name] = owned
-      if (charMap[a.id]?.rarity === 4) {
+      // 已拥有数量以数据库 name_zh 为键（API 返回的角色名随账号服务器语言变化，可能 ≠ 卡池条目名）
+      const dbc = charMap[a.id]
+      ownedMap[dbc?.name_zh || a.name] = owned
+      if (dbc?.rarity === 4) {
         const next = owned + 1
         sum += next === 1 ? 0 : next < 8 ? 2 : 5
         cnt++
@@ -159,7 +161,7 @@ export default function WishAnalysis({ period, recordLabel, onBack }) {
     })
   }, [charMap])
 
-  // 集录祈愿不设四星目标：自动清除历史遗留的四星目标与顺序条目
+  // 集录祈愿不设四星目标：自动清除历史遗留的四星目标、顺序条目与失效定轨
   useEffect(() => {
     const c5 = new Set((plan?.pools?.chronicled?.items5 || []).map(i => i.name))
     setSession(prev => {
@@ -171,8 +173,13 @@ export default function WishAnalysis({ period, recordLabel, onBack }) {
         cleaned[name] = copies
       }
       const order = (prev.order || []).filter(e => !(e.poolKey === 'chronicled' && !c5.has(e.name)))
+      let epitomized = prev.chronicled?.epitomized
+      if (Array.isArray(epitomized)) {
+        const kept = epitomized.filter(n => c5.has(n))
+        if (kept.length !== epitomized.length) { epitomized = kept; changed = true }
+      } else if (epitomized && !c5.has(epitomized)) { epitomized = null; changed = true }
       if (!changed && order.length === (prev.order || []).length) return prev
-      return { ...prev, chronicled: { ...prev.chronicled, targets: cleaned }, order }
+      return { ...prev, chronicled: { ...prev.chronicled, targets: cleaned, epitomized }, order }
     })
   }, [plan?.pools?.chronicled?.items5])
 
@@ -574,10 +581,22 @@ function PoolConfigCard({ poolKey, pool, session, getImg, onSession, onPick4, hi
   const stdTargets = Object.entries(targets).filter(([name, v]) => v > 0 && name !== '__any4__' && !up5.some(i => i.name === name) && !up4Names.has(name))
 
   const setOwned = (name, v) => set({ owned: { ...owned, [name]: v } })
-  // 五星目标数量变化：第一个目标自动成为定轨目标；定轨目标清零时取消定轨
+  // 集录祈愿：角色与武器分别定轨（可多个，按目标顺序切换生效）；武器池保持单一
+  const typeOfName = (name) => (pool.items5 || []).find(i => i.name === name)?.type
+    || (pool.items4 || []).find(i => i.name === name)?.type || 'char'
+  const epitList = poolKey === 'chronicled'
+    ? (Array.isArray(session.epitomized) ? session.epitomized : session.epitomized ? [session.epitomized] : [])
+    : []
+  const isEpit = (name) => poolKey === 'chronicled' ? epitList.includes(name) : session.epitomized === name
+  // 五星目标数量变化：第一个目标自动成为定轨目标（集录祈愿按类型各自定轨）；定轨目标清零时取消定轨
   const setCopies5 = (name, v) => {
     let epitomized = session.epitomized
-    if (poolKey !== 'character') {
+    if (poolKey === 'chronicled') {
+      const list = Array.isArray(epitomized) ? [...epitomized] : epitomized ? [epitomized] : []
+      if (v > 0 && !list.includes(name) && !list.some(nm => typeOfName(nm) === typeOfName(name))) list.push(name)
+      if (v === 0) { const i = list.indexOf(name); if (i >= 0) list.splice(i, 1) }
+      epitomized = list
+    } else if (poolKey !== 'character') {
       if (v > 0 && !epitomized) epitomized = name
       if (v === 0 && epitomized === name) epitomized = null
     }
@@ -611,10 +630,16 @@ function PoolConfigCard({ poolKey, pool, session, getImg, onSession, onPick4, hi
                 return (
                   <TargetChip key={name} label={name} isWeapon={poolKey === 'weapon' || (poolKey === 'chronicled' && item.type === 'weapon')}
                     copies={targets[name] || 0}
-                    epitomized={session.epitomized === name}
+                    epitomized={isEpit(name)}
                     canEpitomize={poolKey !== 'character'}
                     onCopies={v => setCopies5(name, v)}
-                    onEpitomize={() => set({ epitomized: session.epitomized === name ? null : name })}
+                    onEpitomize={() => {
+                      if (poolKey === 'chronicled') {
+                        set({ epitomized: epitList.includes(name) ? epitList.filter(x => x !== name) : [...epitList, name] })
+                      } else {
+                        set({ epitomized: session.epitomized === name ? null : name })
+                      }
+                    }}
                   />
                 )
               })}
@@ -622,9 +647,13 @@ function PoolConfigCard({ poolKey, pool, session, getImg, onSession, onPick4, hi
             </div>
             {poolKey !== 'character' && up5.length > 0 && (
               <div className="text-[9px] text-surface-600 mt-1">
-                {session.epitomized
-                  ? `已定轨「${session.epitomized}」—— 歪后命定值 +1，下次五星必得`
-                  : poolKey === 'chronicled' ? '未定轨：五星从池内等概率，建议定轨以锁定 50% 定向概率' : '未定轨：五星 75% UP 平分、25% 常驻'}
+                {poolKey === 'chronicled'
+                  ? (epitList.length
+                    ? `已定轨：${epitList.join('、')} —— 生效定轨（目标顺序中第一个未达成者）期间 5 星仅出同类型，歪后命定值 +1；达成后自动切换至下一未达成定轨`
+                    : '未定轨：五星从池内等概率；建议角色与武器各设定轨（先设的角色先抽，再依次切换）')
+                  : (session.epitomized
+                    ? `已定轨「${session.epitomized}」—— 歪后命定值 +1，下次五星必得`
+                    : '未定轨：五星 75% UP 平分、25% 常驻')}
               </div>
             )}
           </div>
@@ -949,7 +978,7 @@ function OutcomeSection({ result }) {
               )}
             </tbody>
           </table>
-          <div className="mt-1 text-[8px] text-surface-600">基于 {dist.trials.toLocaleString()} 次模拟（±0.4%），概率为近似值 · 歪 = 抽到非目标的五星</div>
+          <div className="mt-1 text-[8px] text-surface-600">基于 {dist.trials.toLocaleString()} 次模拟（±0.4%），概率为近似值 · 歪 = 抽到非目标/非定轨的五星（集录池小保底歪为非定轨同类型）</div>
         </>
       ) : (
         <div className="text-[10px] text-surface-600 py-1">暂无结果（资源为 0 或未设置目标）</div>
@@ -987,6 +1016,9 @@ function PoolResultCard({ p, curve, recycle, prob }) {
           {cfg.kind === 'character'
             ? (cfg.guaranteed ? '大保底' : '小保底') + (cfg.crStreak ? ` · 连保${cfg.crStreak}` : '')
             : `命定值 ${cfg.fate}`}
+          {cfg.targets?.some(t => t.epitomized) && (
+            <span> · 定轨 {cfg.targets.filter(t => t.epitomized).map(t => t.name).join('、')}</span>
+          )}
           {(() => {
             const itemNames = new Set([
               cfg.poolA, cfg.poolB,
@@ -1646,7 +1678,11 @@ function buildRuntimePools(plan, session, std4Counts, nonUp4Glitter = 5, account
       std4Counts,
       nonUp4Glitter: accountData ? accountData.nonUp4Avg : nonUp4Glitter,
       pity5: s.pity5, pity4: s.pity4, guaranteed: s.guaranteed || 0, crStreak: s.crStreak || 0, fate: s.fate || 0,
-      targets: finalTargets.map(t => ({ ...t, epitomized: s.epitomized === t.name })),
+      targets: finalTargets.map(t => ({
+        ...t,
+        // 集录祈愿可角色/武器分别定轨（数组）；其余池单一
+        epitomized: Array.isArray(s.epitomized) ? s.epitomized.includes(t.name) : s.epitomized === t.name,
+      })),
     })
   }
 
