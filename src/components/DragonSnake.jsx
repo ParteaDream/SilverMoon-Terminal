@@ -565,6 +565,9 @@ export default function DragonSnake() {
   // ═══════════════════════════════════════
   const showOverlay = gameState === 'dead'
 
+  // 当前 tick 间隔（ms）：随分数加速，150 → 60
+  const currentSpeed = (gameState === 'playing' || gameState === 'paused') ? Math.max(60, 150 - score * 2) : 150
+
   return (
     <div className="h-full flex flex-col items-center bg-[#030D20] select-none">
       {/* 顶部信息栏 */}
@@ -577,6 +580,7 @@ export default function DragonSnake() {
             最高纪录 <span className="text-white/70 font-medium ml-1">{highScore}</span>
           </span>
         </div>
+        <SpeedGauge speed={currentSpeed} />
       </div>
 
       {/* 游戏画布 */}
@@ -685,6 +689,67 @@ export default function DragonSnake() {
           100% { background-position: 200% center; }
         }
       `}</style>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════
+// 速度仪表盘（类车辆仪表盘）
+// 速度区间：150ms（慢）→ 60ms（快），初始指针在绿色，随速度增加向红色上限靠近
+// ═══════════════════════════════════════
+function SpeedGauge({ speed }) {
+  const MIN_SPEED = 60
+  const MAX_SPEED = 150
+  // 0（慢/绿）→ 1（快/红）
+  const progress = Math.max(0, Math.min(1, (MAX_SPEED - speed) / (MAX_SPEED - MIN_SPEED)))
+  // 指针角度：-90°（左/绿）→ 90°（右/红）
+  const angle = -90 + progress * 180
+  // 颜色插值：绿 #22c55e → 黄 → 红 #ef4444
+  const color = progress < 0.5
+    ? `rgb(${Math.round(34 + (239 - 34) * progress * 2)}, ${Math.round(197 - (197 - 163) * progress * 2)}, ${Math.round(94 - (94 - 68) * progress * 2)})`
+    : `rgb(${Math.round(239 + (239 - 239) * (progress - 0.5) * 2)}, ${Math.round(163 - (163 - 68) * (progress - 0.5) * 2)}, ${Math.round(68 + (68 - 68) * (progress - 0.5) * 2)})`
+  // 每秒移动格数（更直观）
+  const stepsPerSec = (1000 / speed).toFixed(1)
+
+  return (
+    <div className="flex items-center gap-2" title={`移动间隔 ${speed}ms · 每秒 ${stepsPerSec} 格`}>
+      <span className="text-white/40 text-[10px] shrink-0">速度</span>
+      <svg width="92" height="56" viewBox="0 0 92 56" className="shrink-0">
+        {/* 表盘弧线（绿→黄→红渐变底） */}
+        <defs>
+          <linearGradient id="gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#22c55e" />
+            <stop offset="50%" stopColor="#facc15" />
+            <stop offset="100%" stopColor="#ef4444" />
+          </linearGradient>
+        </defs>
+        {/* 弧线轨道 */}
+        <path d="M 8 46 A 38 38 0 0 1 84 46" fill="none" stroke="url(#gauge-grad)" strokeWidth="6" strokeLinecap="round" opacity="0.25" />
+        {/* 刻度线 */}
+        {[0, 0.25, 0.5, 0.75, 1].map(t => {
+          const a = ((-90 + t * 180) * Math.PI) / 180
+          const r1 = 38, r2 = 32
+          const cx = 46, cy = 46
+          return (
+            <line key={t}
+              x1={cx + r1 * Math.cos(a)} y1={cy + r1 * Math.sin(a)}
+              x2={cx + r2 * Math.cos(a)} y2={cy + r2 * Math.sin(a)}
+              stroke={t === 0 ? '#22c55e' : t === 1 ? '#ef4444' : '#94a3b8'}
+              strokeWidth="2" strokeLinecap="round" opacity="0.8" />
+          )
+        })}
+        {/* 指针 */}
+        <g transform={`rotate(${angle} 46 46)`}>
+          <line x1="46" y1="46" x2="46" y2="12" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+          <line x1="46" y1="46" x2="46" y2="40" stroke={color} strokeWidth="4.5" strokeLinecap="round" opacity="0.35" />
+        </g>
+        {/* 中心轴 */}
+        <circle cx="46" cy="46" r="3.5" fill={color} />
+        <circle cx="46" cy="46" r="1.5" fill="#030D20" />
+      </svg>
+      <span className="text-white/70 text-[10px] font-mono shrink-0" style={{ color }}>
+        {stepsPerSec}格/秒
+      </span>
     </div>
   )
 }

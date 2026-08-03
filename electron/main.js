@@ -566,6 +566,8 @@ function ensureUserDbSchema() {
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS northlandbank_records (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
     // 北国银行 · 祈愿分析：卡池组合方案表
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS wish_analysis_plans (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
+    // 世界树 · 圣遗物练度分析：每个角色的有效副词条组合与权重（按米游社角色ID）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS worldtree_build_configs (character_id INTEGER PRIMARY KEY, effective_subs TEXT NOT NULL, weights TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
     // 地图：用户放置的标点（非开发者模式写入 user.db）
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS map_marker_placements (
       id TEXT PRIMARY KEY,
@@ -8487,6 +8489,36 @@ ipcMain.handle("genshin-delete-account", (_event, uid) => {
     if (!udb) return { success: false, error: "user.db 未初始化" }
     const stmt = udb.prepare("DELETE FROM genshin_accounts WHERE uid = ?")
     stmt.bind([String(uid)]); stmt.step(); stmt.free()
+    userDbSave()
+    return { success: true }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
+// ── 世界树 · 圣遗物练度分析：加载/保存角色有效副词条配置（user.db，按角色ID跨账号生效）──
+ipcMain.handle("worldtree-build-load", (_event, characterId) => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: true, config: null }
+    const stmt = udb.prepare("SELECT effective_subs, weights FROM worldtree_build_configs WHERE character_id = ?")
+    stmt.bind([Number(characterId)])
+    if (stmt.step()) {
+      const row = stmt.getAsObject(); stmt.free()
+      return { success: true, config: { effectiveSubs: JSON.parse(row.effective_subs || '[]'), weights: JSON.parse(row.weights || '{}') } }
+    }
+    stmt.free()
+    return { success: true, config: null }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
+ipcMain.handle("worldtree-build-save", (_event, characterId, config) => {
+  try {
+    const udb = ensureUserDb()
+    if (!udb) return { success: false, error: "user.db 未初始化" }
+    const subs = JSON.stringify(config?.effectiveSubs || [])
+    const weights = JSON.stringify(config?.weights || {})
+    const stmt = udb.prepare(`INSERT OR REPLACE INTO worldtree_build_configs (character_id, effective_subs, weights, updated_at)
+      VALUES (?, ?, ?, datetime('now','localtime'))`)
+    stmt.bind([Number(characterId), subs, weights]); stmt.step(); stmt.free()
     userDbSave()
     return { success: true }
   } catch (e) { return { success: false, error: e.message } }

@@ -140,6 +140,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   genshinDeleteAccount: (uid) => ipcRenderer.invoke('genshin-delete-account', uid),
   genshinRefetchDaily: (uid) => ipcRenderer.invoke('genshin-refetch-daily', uid),
 
+  // 世界树 · 圣遗物练度分析
+  worldtreeBuildLoad: (characterId) => ipcRenderer.invoke('worldtree-build-load', characterId),
+  worldtreeBuildSave: (characterId, config) => ipcRenderer.invoke('worldtree-build-save', characterId, config),
+
   // 祈愿捕捉站 — 祈愿数据
   gachaListArchives: () => ipcRenderer.invoke('gacha-list-archives'),
   gachaGetArchive: (uid) => ipcRenderer.invoke('gacha-get-archive', uid),

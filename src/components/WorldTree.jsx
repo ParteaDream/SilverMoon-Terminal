@@ -6,7 +6,7 @@ import { useTerminal } from '../context/TerminalContext'
 import {
   Globe, Loader2, Plus, Trash2, ArrowLeft, ChevronDown, ChevronUp,
   Users, Swords, Clock, Zap, MapPin, TrendingUp, Award, Activity, Eye,
-  Shield, ChevronRight, ArrowUpDown,
+  Shield, ChevronRight, ArrowUpDown, X,
 } from 'lucide-react'
 
 const EN = { Pyro:'火', Hydro:'水', Anemo:'风', Electro:'雷', Dendro:'草', Cryo:'冰', Geo:'岩' }
@@ -40,8 +40,73 @@ const KNOWN_REGIONS = {
   Enkanomiya: '渊下宫', 'Ancient Sacred Mountain': '远古圣山',
 }
 
+// ═══════════════════════════════════════
+// 圣遗物练度分析
+// ═══════════════════════════════════════
+
+// 副词条 property_type → 四档成长值（数据来源：数据板块「圣遗物成长」词条成长档位表）
+const SUB_TIERS = {
+  2: [209.13, 239.00, 268.88, 298.75],  // 固定生命值
+  3: [4.08, 4.66, 5.25, 5.83],          // 生命值%
+  5: [13.62, 15.56, 17.51, 19.45],      // 固定攻击力
+  6: [4.08, 4.66, 5.25, 5.83],          // 攻击力%
+  8: [16.20, 18.52, 20.83, 23.15],      // 固定防御力
+  9: [5.10, 5.83, 6.56, 7.29],          // 防御力%
+  20: [2.72, 3.11, 3.50, 3.89],         // 暴击率
+  22: [5.44, 6.22, 6.99, 7.77],         // 暴击伤害
+  23: [4.53, 5.18, 5.83, 6.48],         // 元素充能效率
+  28: [16.32, 18.65, 20.98, 23.31],     // 元素精通
+}
+const SUB_NAMES = { 2: '固定生命值', 3: '生命值%', 5: '固定攻击力', 6: '攻击力%', 8: '固定防御力', 9: '防御力%', 20: '暴击率', 22: '暴击伤害', 23: '充能效率', 28: '元素精通' }
+// 档位 → 标准副词条换算（4档=1.0，3档=0.9，2档=0.8，1档=0.7）
+const TIER_FACTOR = [0.7, 0.8, 0.9, 1.0]
+// 默认评级标准（分从高到低）
+const DEFAULT_RATINGS = { SSS: 26, S: 21, A: 18, B: 15, C: 10 }
+const RATING_STYLES = {
+  SSS: 'text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-amber-300 to-fuchsia-400 animate-shimmer font-extrabold',
+  S: 'text-amber-400 font-extrabold',
+  A: 'text-purple-400 font-extrabold',
+  B: 'text-blue-400 font-extrabold',
+  C: 'text-green-400 font-extrabold',
+}
+
+// 根据副词条显示值与强化次数，反推各档位组合（初始值 + 每次强化 = times+1 个档位）
+// 返回档位数组（0~3 对应 1~4 档），无法匹配返回 null
+function matchTiers(value, times, tiers) {
+  const count = times + 1
+  if (count < 1 || count > 6) return null
+  const isPct = typeof value === 'string' && value.includes('%')
+  const target = parseFloat(value)
+  if (isNaN(target)) return null
+  // 百分比显示一位小数（容差0.051），固定值显示整数（容差0.5）
+  const tolerance = isPct ? 0.051 : 0.5
+  let best = null, bestDiff = Infinity
+  function rec(idx, sum, combo) {
+    if (idx === count) {
+      const diff = Math.abs(sum - target)
+      if (diff < bestDiff) { bestDiff = diff; best = [...combo] }
+      return
+    }
+    for (let t = 0; t < 4; t++) rec(idx + 1, sum + tiers[t], [...combo, t])
+  }
+  rec(0, 0, [])
+  return bestDiff <= tolerance ? best : null
+}
+
+// 计算单个圣遗物副条目的词条数（按档位微调后）
+// 4星档位 = 5星 × 0.8，3星 = 5星 × 0.6
+function substatCount(sub, rarity) {
+  const tiers = SUB_TIERS[sub.property_type]
+  if (!tiers) return null
+  const scale = rarity >= 5 ? 1 : rarity === 4 ? 0.8 : 0.6
+  const scaled = tiers.map(t => t * scale)
+  const matched = matchTiers(sub.value, sub.times || 0, scaled)
+  if (!matched) return null
+  return matched.reduce((a, t) => a + TIER_FACTOR[t], 0)
+}
+
 export default function WorldTree() {
-  const { query } = useDb()
+  const { query, devMode } = useDb()
   const { closeApp } = useTerminal()
   const [view, setView] = useState('home')
   const [accounts, setAccounts] = useState([])
@@ -79,8 +144,17 @@ export default function WorldTree() {
   useEffect(() => { if(!activeUid)return;const t=setInterval(async()=>{try{const r=await window.electronAPI?.genshinRefetchDaily(String(activeUid));if(r?.success&&r.daily)setDailyData(r.daily)}catch(_){}},60000);return()=>clearInterval(t) }, [activeUid])
   useEffect(() => { if(error){const t=setTimeout(()=>setError(''),6000);return()=>clearTimeout(t)} }, [error])
 
+  // 开发者模式：练度评析设置弹窗（渲染在 WorldTree 根容器内，限定于小程序内容区）
+  const [showBuildModal, setShowBuildModal] = useState(false)
+  const [buildModalCharId, setBuildModalCharId] = useState(null) // 从练度栏跳转时预选的角色
+
+  const openBuildModal = useCallback((charId) => {
+    setBuildModalCharId(charId ?? null)
+    setShowBuildModal(true)
+  }, [])
+
   return (
-    <div className="flex flex-col h-full bg-surface-900/95 text-surface-100 select-none" style={{fontSize:'clamp(10px,0.7vw + 6px,16px)'}}>
+    <div className="relative flex flex-col h-full bg-surface-900/95 text-surface-100 select-none" style={{fontSize:'clamp(10px,0.7vw + 6px,16px)'}}>
       {error && <div className="mx-3 mt-1 px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-[10px] text-red-400">{error}</div>}
       <div className="flex flex-1 overflow-hidden">
         {view === 'account' && activeData && (
@@ -88,10 +162,11 @@ export default function WorldTree() {
         )}
         <div className="flex-1 overflow-y-auto">
           {loading && <div className="flex flex-col items-center justify-center py-16 gap-2"><Loader2 className="w-6 h-6 text-green-400 animate-spin" /><span className="text-xs text-surface-500">{loadingHint}</span></div>}
-          {!loading && view === 'home' && <HomePage accounts={accounts} onLogin={handleLogin} onPasswordLogin={handlePasswordLogin} onDelete={handleDelete} onSelect={loadAccountDetail} loading={loading} />}
-          {!loading && view === 'account' && activeData && <MainContent data={activeData.data||{}} charDBMap={charDBMap} dailyData={dailyData} />}
+          {!loading && view === 'home' && <HomePage accounts={accounts} onLogin={handleLogin} onPasswordLogin={handlePasswordLogin} onDelete={handleDelete} onSelect={loadAccountDetail} loading={loading} devMode={devMode} onOpenBuildModal={() => openBuildModal(null)} />}
+          {!loading && view === 'account' && activeData && <MainContent data={activeData.data||{}} charDBMap={charDBMap} dailyData={dailyData} onOpenBuildSettings={openBuildModal} />}
         </div>
       </div>
+      {showBuildModal && <BuildDefaultsModal query={query} onClose={() => setShowBuildModal(false)} initialCharId={buildModalCharId} />}
     </div>
   )
 }
@@ -118,10 +193,21 @@ function Sidebar({ account, data, onBack, onDelete }) {
   )
 }
 
-function HomePage({ accounts, onLogin, onPasswordLogin, onDelete, onSelect, loading }) {
+function HomePage({ accounts, onLogin, onPasswordLogin, onDelete, onSelect, loading, devMode, onOpenBuildModal }) {
   if(!accounts.length) return <div className="flex flex-col items-center justify-center h-full gap-3"><Globe className="w-10 h-10 text-surface-600"/><p className="text-[10px] text-surface-500">登录并爬取数据</p><div className="flex gap-2"><button onClick={onLogin} disabled={loading} className="px-4 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-[10px] flex items-center gap-1">{loading?<Loader2 className="w-3 h-3 animate-spin"/>:<Plus className="w-3 h-3"/>}扫码登录</button><button onClick={onPasswordLogin} disabled={loading} className="px-4 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 disabled:opacity-50 text-surface-200 text-[10px] flex items-center gap-1">账号登录</button></div></div>
   return (
     <div className="p-3 space-y-1.5 max-w-md mx-auto">
+      {devMode && (
+        <button onClick={onOpenBuildModal}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 transition-colors text-left">
+          <Swords className="w-4 h-4 text-purple-400 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-medium text-purple-300">角色练度评析设置</div>
+            <div className="text-[9px] text-surface-500">调整角色默认有效副词条组合、收益权重与评分评级标准</div>
+          </div>
+          <ChevronRight className="w-3.5 h-3.5 text-surface-500" />
+        </button>
+      )}
       <div className="flex justify-between mb-1"><span className="text-[9px] text-surface-500">{accounts.length} 个账号</span>
         <div className="flex gap-1">
           <button onClick={onLogin} disabled={loading} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-50">{loading?<Loader2 className="w-2.5 h-2.5 animate-spin"/>:<Plus className="w-2.5 h-2.5"/>}扫码</button>
@@ -140,8 +226,242 @@ function HomePage({ accounts, onLogin, onPasswordLogin, onDelete, onSelect, load
   )
 }
 
+// ─── 开发者模式：角色练度评析设置弹窗 ───
+// ─── 开发者模式：角色练度评析设置弹窗 ───
+// 元素 ID → 颜色圆点（角色列表标识）
+const ELEM_DOT = { 1:'bg-red-400', 2:'bg-blue-400', 3:'bg-cyan-400', 4:'bg-purple-400', 5:'bg-green-400', 6:'bg-sky-400', 7:'bg-yellow-400' }
+
+function BuildDefaultsModal({ query, onClose, initialCharId }) {
+  const [charList, setCharList] = useState([])
+  const [charId, setCharId] = useState(null)
+  const [config, setConfig] = useState(null) // { effectiveSubs, weights }
+  const [defaultsMap, setDefaultsMap] = useState({}) // charId → 已保存配置
+  const [globalRatings, setGlobalRatings] = useState({ ...DEFAULT_RATINGS }) // 全局默认评级（回退用）
+  const [ratings, setRatings] = useState({ ...DEFAULT_RATINGS }) // 当前角色评级
+  const [dirty, setDirty] = useState(false)
+  const [saved, setSaved] = useState(null)
+
+  // 加载角色列表 + 已有默认配置 + 全局评级默认值（均存基准库 settings 表），并预选初始角色
+  useEffect(() => {
+    (async () => {
+      try {
+        const [charRes, defaultsRes, ratingRes] = await Promise.all([
+          query(`SELECT id, name_zh, rarity, element_id FROM characters ORDER BY id`),
+          query(`SELECT value FROM settings WHERE key = 'worldtree_build_defaults'`),
+          query(`SELECT value FROM settings WHERE key = 'worldtree_rating_standards'`),
+        ])
+        const chars = charRes?.data || []
+        setCharList(chars)
+        let defaults = {}
+        try { defaults = JSON.parse(defaultsRes?.data?.[0]?.value || '{}') } catch (_) {}
+        setDefaultsMap(defaults)
+        let gRatings = { ...DEFAULT_RATINGS }
+        try {
+          const r = JSON.parse(ratingRes?.data?.[0]?.value || 'null')
+          if (r) gRatings = r
+        } catch (_) {}
+        setGlobalRatings(gRatings)
+        // 预选角色（从练度栏跳转）：加载该角色的配置与评级
+        const targetId = initialCharId != null && chars.some(c => c.id === initialCharId) ? initialCharId : null
+        if (targetId != null) {
+          setCharId(targetId)
+          if (defaults[targetId]) {
+            setConfig({ effectiveSubs: [...(defaults[targetId].effectiveSubs || [])], weights: { ...(defaults[targetId].weights || {}) } })
+            if (defaults[targetId].ratings) setRatings({ ...defaults[targetId].ratings })
+            else setRatings({ ...gRatings })
+          } else {
+            setConfig({ effectiveSubs: [20, 22], weights: {} })
+            setRatings({ ...gRatings })
+          }
+        } else {
+          setRatings({ ...gRatings })
+        }
+      } catch (_) {}
+    })()
+  }, [query])
+
+  // 切换角色时加载该角色默认配置与评级（未保存修改则提醒）
+  const selectChar = async (id) => {
+    if (id === charId) return
+    if (dirty && !confirm('当前角色的修改尚未保存，切换后将丢失，是否继续？')) return
+    setCharId(id)
+    setConfig(null)
+    setDirty(false)
+    try {
+      const res = await query(`SELECT value FROM settings WHERE key = 'worldtree_build_defaults'`)
+      const defaults = JSON.parse(res?.data?.[0]?.value || '{}')
+      setDefaultsMap(defaults)
+      // 无默认配置时：初始带上暴击率/暴击伤害（大多数角色通用），在此基础上调整
+      if (defaults[id]) {
+        setConfig({ effectiveSubs: [...(defaults[id].effectiveSubs || [])], weights: { ...(defaults[id].weights || {}) } })
+        if (defaults[id].ratings) setRatings({ ...defaults[id].ratings })
+        else setRatings({ ...globalRatings })
+      } else {
+        setConfig({ effectiveSubs: [20, 22], weights: {} })
+        setRatings({ ...globalRatings })
+      }
+    } catch (_) {}
+  }
+
+  // 关闭前检查未保存修改
+  const requestClose = () => {
+    if (dirty && !confirm('当前角色的修改尚未保存，退出后将丢失，是否退出？')) return
+    onClose()
+  }
+
+  const toggleSub = (type) => {
+    const cur = config || { effectiveSubs: [], weights: {} }
+    const next = cur.effectiveSubs.includes(type)
+      ? cur.effectiveSubs.filter(t => t !== type)
+      : [...cur.effectiveSubs, type]
+    setConfig({ effectiveSubs: next, weights: { ...(cur.weights || {}) } })
+    setDirty(true)
+  }
+
+  const setWeight = (type, w) => {
+    const cur = config || { effectiveSubs: [], weights: {} }
+    const next = Math.max(0, Math.min(1, Math.round((Number(w) || 0) * 100) / 100))
+    setConfig({ effectiveSubs: cur.effectiveSubs, weights: { ...(cur.weights || {}), [type]: next } })
+    setDirty(true)
+  }
+
+  // 保存：写入基准库 settings 表（开发者模式直写基准库）
+  const handleSave = async () => {
+    try {
+      const [defaultsRes] = await Promise.all([
+        query(`SELECT value FROM settings WHERE key = 'worldtree_build_defaults'`),
+      ])
+      const defaults = JSON.parse(defaultsRes?.data?.[0]?.value || '{}')
+      if (charId != null) {
+        // 合并当前角色配置 + 该角色评级标准
+        const cur = defaults[charId] || { effectiveSubs: [], weights: {} }
+        defaults[charId] = { ...cur, ...(config || {}), ratings: { ...ratings } }
+      }
+      await query(`INSERT OR REPLACE INTO settings (key, value) VALUES ('worldtree_build_defaults', ?)`, [JSON.stringify(defaults)])
+      setDefaultsMap(defaults)
+      setDirty(false)
+      setSaved({ type: 'ok', text: '已保存到基准库' })
+    } catch (e) {
+      setSaved({ type: 'err', text: '保存失败: ' + e.message })
+    }
+  }
+
+  const effectiveSubs = config?.effectiveSubs || []
+  const weights = config?.weights || {}
+  const selectedChar = charList.find(c => c.id === charId)
+
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3" onClick={requestClose}>
+      <div className="w-[560px] max-w-full max-h-full flex flex-col rounded-xl bg-surface-900 border border-white/10 shadow-2xl animate-scale-in"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 shrink-0">
+          <span className="text-xs font-medium text-surface-200 flex items-center gap-2">
+            角色练度评析设置
+            {dirty && <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">未保存</span>}
+          </span>
+          <button onClick={requestClose} className="p-1 rounded-lg hover:bg-white/10 text-surface-500 hover:text-white transition-colors"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="flex flex-1 overflow-hidden">
+          {/* 左侧：角色列表 */}
+          <div className="w-40 shrink-0 border-r border-white/10 flex flex-col">
+            <p className="px-3 pt-2.5 pb-1.5 text-[9px] text-surface-500">选择角色</p>
+            <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
+              {charList.map(c => {
+                const active = c.id === charId
+                const hasConfig = !!defaultsMap[c.id]
+                return (
+                  <button key={c.id} onClick={() => selectChar(c.id)}
+                    className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] transition-colors text-left ${
+                      active ? 'bg-purple-500/20 text-purple-200 border border-purple-500/40' : 'text-surface-300 hover:bg-white/5 border border-transparent'
+                    }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ELEM_DOT[c.element_id] || 'bg-surface-600'}`} />
+                    <span className="flex-1 truncate">{c.name_zh}</span>
+                    {hasConfig && <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" title="已配置" />}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          {/* 右侧：设置面板 */}
+          <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {!charId ? (
+                <div className="flex flex-col items-center justify-center py-16 text-surface-600">
+                  <Swords className="w-8 h-8 mb-2 opacity-40" />
+                  <p className="text-[10px]">从左侧选择角色以编辑默认配置</p>
+                </div>
+              ) : (
+                <>
+                  {/* 当前角色 */}
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-medium text-surface-200">{selectedChar?.name_zh || charId}</p>
+                    {defaultsMap[charId] && <span className="text-[8px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">已有默认配置</span>}
+                  </div>
+                  {/* 有效副词条 */}
+                  <div>
+                    <p className="text-[9px] text-surface-500 mb-1">默认有效副词条</p>
+                    <div className="flex flex-wrap gap-1">
+                      {Object.entries(SUB_NAMES).map(([type, name]) => {
+                        const active = effectiveSubs.includes(Number(type))
+                        return (
+                          <button key={type} onClick={() => toggleSub(Number(type))}
+                            className={`px-1.5 py-0.5 rounded text-[9px] transition-colors ${active ? 'bg-green-500/20 text-green-300 border border-green-500/40' : 'bg-surface-800/60 text-surface-500 border border-surface-700/40 hover:text-surface-300'}`}>
+                            {name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  {/* 权重 */}
+                  {effectiveSubs.length > 0 && (
+                    <div>
+                      <p className="text-[9px] text-surface-500 mb-1">默认收益权重（0~1，仅可下调）</p>
+                      <div className="space-y-1">
+                        {effectiveSubs.map(type => (
+                          <div key={type} className="flex items-center gap-2">
+                            <span className="text-[9px] text-green-400 w-14 shrink-0 truncate">{SUB_NAMES[type]}</span>
+                            <input type="range" min={0} max={1} step={0.05} value={weights[type] ?? 1}
+                              onChange={e => setWeight(type, e.target.value)}
+                              className="flex-1 accent-green-500 h-1" />
+                            <span className="text-[9px] text-surface-400 font-mono w-10 text-right shrink-0">{(weights[type] ?? 1).toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 评级标准（全局） */}
+                  <div className="pt-2 border-t border-white/10">
+                    <p className="text-[9px] text-surface-500 mb-1">评分评级标准（当前角色，达到该分数即评级，从高到低）</p>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {['SSS', 'S', 'A', 'B', 'C'].map(key => (
+                        <div key={key} className="flex flex-col items-center gap-0.5 rounded-lg bg-surface-800/60 border border-surface-700/40 px-1 py-1.5">
+                          <span className={`text-[12px] ${RATING_STYLES[key]}`}>{key}</span>
+                          <input type="number" min={0} step={1} value={ratings[key] ?? 0}
+                            onChange={e => { setRatings(prev => ({ ...prev, [key]: Math.max(0, Math.round(Number(e.target.value) || 0)) })); setDirty(true) }}
+                            className="w-full text-center bg-surface-700/50 border border-surface-600 rounded px-1 py-0.5 text-[10px] text-surface-100 focus:outline-none" />
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[8px] text-surface-600 mt-1">例：评分 ≥ SSS 分数显示 SSS，否则依次比较 S/A/B/C</p>
+                  </div>
+                  {saved && <div className={`px-2 py-1.5 rounded text-[10px] ${saved.type === 'ok' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>{saved.text}</div>}
+                </>
+              )}
+            </div>
+            <div className="px-3 py-2.5 border-t border-white/10 flex justify-end gap-2 shrink-0">
+              <button onClick={requestClose} className="px-3 py-1.5 rounded-lg text-[10px] bg-surface-800 hover:bg-surface-700 text-surface-300 transition-colors">取消</button>
+              <button onClick={handleSave} disabled={!charId}
+                className="px-3 py-1.5 rounded-lg text-[10px] bg-purple-600 hover:bg-purple-500 text-white transition-colors disabled:opacity-40">保存到基准库</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── 主内容 ───
-function MainContent({ data, charDBMap, dailyData }) {
+function MainContent({ data, charDBMap, dailyData, onOpenBuildSettings }) {
   const [tab, setTab] = useState('overview')
   const [selectedChar, setSelectedChar] = useState(null)
   const index = data.index?.data||{}
@@ -186,13 +506,13 @@ function MainContent({ data, charDBMap, dailyData }) {
           stats={stats}
           charDBMap={charDBMap}
         />}
-        {tab==='characters'&&!selectedChar&&<CharacterGrid avatars={avatars} charsList={charsList} charDBMap={charDBMap} onSelect={setSelectedChar}/>}
-        {tab==='characters'&&selectedChar&&<div className="flex gap-2">
-          <div className="flex-[3] min-w-0 overflow-visible">
-            <CharacterGrid avatars={avatars} charsList={charsList} charDBMap={charDBMap} onSelect={setSelectedChar} selectedId={selectedChar.id} />
+        {tab==='characters'&&!selectedChar&&<CharacterGrid avatars={avatars} charsList={charsList} charDBMap={charDBMap} onSelect={setSelectedChar} cdMap={cdMap}/>}
+        {tab==='characters'&&selectedChar&&<div className="flex gap-3 items-start">
+          <div className="flex-1 min-w-0 overflow-visible">
+            <CharacterGrid avatars={avatars} charsList={charsList} charDBMap={charDBMap} onSelect={setSelectedChar} selectedId={selectedChar.id} cdMap={cdMap} />
           </div>
-          <div className="flex-[2] min-w-[240px] shrink-0 overflow-visible border-l border-surface-700/30 pl-2">
-            <CharacterDetail char={selectedChar} charDetail={cdMap[selectedChar.id]} charDBMap={charDBMap} onBack={()=>setSelectedChar(null)} sidePanel />
+          <div className="w-[400px] min-w-0 shrink-0 max-w-[min(520px,60%)] overflow-visible border-l border-surface-700/30 pl-3">
+            <CharacterDetail char={selectedChar} charDetail={cdMap[selectedChar.id]} charDBMap={charDBMap} onBack={()=>setSelectedChar(null)} sidePanel onOpenBuildSettings={onOpenBuildSettings} />
           </div>
         </div>}
       </div>
@@ -391,20 +711,122 @@ function SubArea({ name, pct, compact }) {
 }
 
 // ─── 角色网格 ───
-function CharacterGrid({ avatars, charsList, charDBMap, onSelect, selectedId }) {
+function CharacterGrid({ avatars, charsList, charDBMap, onSelect, selectedId, cdMap }) {
+  const { query, devMode } = useDb()
   const [search,setSearch]=useState('');const[elemFilter,setElemFilter]=useState('');const[sortBy,setSortBy]=useState('default');const[imgs,setImgs]=useState({})
+  const [ratingsMap, setRatingsMap] = useState(null) // { id: { score, rating } } — 练度评级缓存
+  const [ratingsLoading, setRatingsLoading] = useState(false)
+  const [restoreAllState, setRestoreAllState] = useState(null) // { loading: bool, msg: string }
   useEffect(()=>{const load=async()=>{const m={};for(const c of avatars){const dbc=charDBMap[c.id];const art=dbc?.card_art;if(art){const r=await window.electronAPI?.readImage?.(art.replace('.png',''));if(r?.data){m[c.id]=r.data;continue}}m[c.id]=null}setImgs(m)};load()},[avatars,charDBMap])
+
+  // 计算全部角色的练度评级（配置来自 user.db + 基准库默认/评级标准）
+  const ensureRatings = async () => {
+    if (ratingsMap || ratingsLoading) return
+    setRatingsLoading(true)
+    try {
+      const [defaultsRes, ratingRes] = await Promise.all([
+        query(`SELECT value FROM settings WHERE key = 'worldtree_build_defaults'`),
+        query(`SELECT value FROM settings WHERE key = 'worldtree_rating_standards'`),
+      ])
+      let defaults = {}
+      try { defaults = JSON.parse(defaultsRes?.data?.[0]?.value || '{}') } catch (_) {}
+      let globalRatings = DEFAULT_RATINGS
+      try { const r = JSON.parse(ratingRes?.data?.[0]?.value || 'null'); if (r) globalRatings = r } catch (_) {}
+      const map = {}
+      await Promise.all(avatars.map(async (c) => {
+        // 1) 加载该角色用户配置（无则用默认配置，再无则默认暴击/爆伤）
+        let cfg = null
+        try { const r = await window.electronAPI?.worldtreeBuildLoad(c.id); if (r?.success) cfg = r.config } catch (_) {}
+        if (!cfg && defaults[c.id]) cfg = { effectiveSubs: [...(defaults[c.id].effectiveSubs || [])], weights: { ...(defaults[c.id].weights || {}) } }
+        if (!cfg) cfg = { effectiveSubs: [20, 22], weights: {} }
+        // 2) 评级标准：角色独有 → 全局
+        const standards = defaults[c.id]?.ratings || globalRatings
+        // 3) 统计圣遗物有效副词条评分
+        const relics = cdMap?.[c.id]?.relics || []
+        let score = 0
+        for (const r of relics) {
+          for (const s of (r.sub_property_list || r.subs || r.sub || [])) {
+            if (!cfg.effectiveSubs.includes(s.property_type)) continue
+            const cnt = substatCount(s, r.rarity)
+            if (cnt == null) continue
+            score += cnt * (cfg.weights[s.property_type] ?? 1)
+          }
+        }
+        score = Math.round(score * 100) / 100
+        let rating = null
+        for (const key of ['SSS', 'S', 'A', 'B', 'C']) {
+          if (standards[key] != null && score >= standards[key]) { rating = key; break }
+        }
+        map[c.id] = { score, rating }
+      }))
+      setRatingsMap(map)
+    } catch (_) {} finally { setRatingsLoading(false) }
+  }
+
+  const cycleSort = () => {
+    const order = ['default', 'id', 'rating']
+    const next = order[(order.indexOf(sortBy) + 1) % order.length]
+    setSortBy(next)
+    if (next === 'rating') ensureRatings()
+  }
+
+  // 开发者模式：一键将全部角色恢复为各自的默认配置（有默认→开发者默认，无默认→内置暴击/爆伤）
+  const restoreAllDefaults = async () => {
+    if (!confirm(`将全部 ${avatars.length} 个角色恢复为各自的默认有效副词条配置？\n（无默认配置的角色将恢复为暴击率+暴击伤害）`)) return
+    setRestoreAllState({ loading: true, msg: '' })
+    try {
+      const [defaultsRes] = await Promise.all([
+        query(`SELECT value FROM settings WHERE key = 'worldtree_build_defaults'`),
+      ])
+      const defaults = JSON.parse(defaultsRes?.data?.[0]?.value || '{}')
+      let done = 0
+      for (const c of avatars) {
+        const d = defaults[c.id]
+        const cfg = d
+          ? { effectiveSubs: [...(d.effectiveSubs || [])], weights: { ...(d.weights || {}) } }
+          : { effectiveSubs: [20, 22], weights: {} }
+        try { await window.electronAPI?.worldtreeBuildSave(c.id, cfg) } catch (_) {}
+        done++
+        if (done % 10 === 0 || done === avatars.length) {
+          setRestoreAllState({ loading: true, msg: `已处理 ${done}/${avatars.length}` })
+        }
+      }
+      setRestoreAllState({ loading: false, msg: `已恢复全部 ${avatars.length} 个角色` })
+      setTimeout(() => setRestoreAllState(null), 3000)
+    } catch (e) {
+      setRestoreAllState({ loading: false, msg: '恢复失败: ' + (e.message || '未知错误') })
+      setTimeout(() => setRestoreAllState(null), 4000)
+    }
+  }
+
   let fil=[...avatars];if(search)fil=fil.filter(c=>c.name.includes(search));if(elemFilter)fil=fil.filter(c=>c.element===elemFilter)
   if(sortBy==='id')fil.sort((a,b)=>a.id-b.id)
+  if(sortBy==='rating') {
+    const order = { SSS: 5, S: 4, A: 3, B: 2, C: 1, null: 0 }
+    fil.sort((a,b) => (order[(ratingsMap?.[b.id]?.rating) ?? null] - order[(ratingsMap?.[a.id]?.rating) ?? null]) || (a.id - b.id))
+  }
+  const ratingLabel = { SSS: 'SSS', S: 'S', A: 'A', B: 'B', C: 'C' }
   return <div className="space-y-2">
-    <div className="flex gap-1.5 sticky top-0 z-10"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜索..." className="flex-1 px-2 py-1 rounded bg-surface-800 border border-surface-600 text-[10px] text-surface-100 placeholder-surface-500 focus:outline-none focus:border-green-500"/>
-    <select value={elemFilter} onChange={e=>setElemFilter(e.target.value)} className="px-1.5 py-1 rounded bg-surface-800 border border-surface-600 text-[10px] text-surface-300"><option value="">元素</option>{[...new Set(avatars.map(c=>c.element).filter(Boolean))].map(e=><option key={e} value={e}>{EN[e]}</option>)}</select>
-    <button onClick={()=>setSortBy(s=>s==='default'?'id':'default')} className={`px-1.5 py-1 rounded border text-[10px] flex items-center gap-0.5 transition-colors ${sortBy==='id'?'bg-green-500/20 border-green-500/50 text-green-400':'bg-surface-800 border-surface-600 text-surface-300 hover:text-surface-200'}`}><ArrowUpDown className="w-2.5 h-2.5" />{sortBy==='default'?'默认':'ID'}</button></div>
+    <div className="flex gap-1.5 sticky top-0 z-10 items-center"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜索..." className="flex-1 min-w-0 px-2 py-1 rounded bg-surface-800 border border-surface-600 text-[10px] text-surface-100 placeholder-surface-500 focus:outline-none focus:border-green-500"/>
+    <select value={elemFilter} onChange={e=>setElemFilter(e.target.value)} className="shrink-0 px-1.5 py-1 rounded bg-surface-800 border border-surface-600 text-[10px] text-surface-300 max-w-[70px]"><option value="">元素</option>{[...new Set(avatars.map(c=>c.element).filter(Boolean))].map(e=><option key={e} value={e}>{EN[e]}</option>)}</select>
+    <button onClick={cycleSort} className={`shrink-0 whitespace-nowrap px-1.5 py-1 rounded border text-[10px] flex items-center gap-0.5 transition-colors ${sortBy!=='default'?'bg-green-500/20 border-green-500/50 text-green-400':'bg-surface-800 border-surface-600 text-surface-300 hover:text-surface-200'}`} title="点击切换排序：默认 → ID → 练度评级">
+      <ArrowUpDown className="w-2.5 h-2.5" />{sortBy==='default'?'默认':sortBy==='id'?'ID':(ratingsLoading?'评级…':'评级')}
+    </button>
+    {devMode && (
+      <button onClick={restoreAllDefaults} disabled={restoreAllState?.loading}
+        className={`shrink-0 whitespace-nowrap px-1.5 py-1 rounded border text-[10px] flex items-center gap-0.5 transition-colors disabled:opacity-50 ${restoreAllState?.loading ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-purple-500/15 border-purple-500/40 text-purple-300 hover:bg-purple-500/25'}`}
+        title="将全部角色恢复为各自的默认配置（无默认的角色恢复为暴击率+暴击伤害）">
+        {restoreAllState?.loading ? '恢复中…' : '全部恢复默认'}
+      </button>
+    )}</div>
+    {restoreAllState?.msg && <div className={`px-2 py-1 rounded text-[9px] ${restoreAllState.loading ? 'text-amber-400 bg-amber-500/10' : 'text-green-400 bg-green-500/10'}`}>{restoreAllState.msg}</div>}
     <div className="grid grid-cols-5 sm:grid-cols-7 md:grid-cols-9 lg:grid-cols-11 gap-1">{fil.map(c=>{const img=imgs[c.id]
+      const rating = ratingsMap?.[c.id]?.rating
       return <div key={c.id} onClick={()=>{const f=charsList.find(ch=>ch.id===c.id)||c;onSelect({...f,element:c.element,avatar_level:c.level,constellation:c.actived_constellation_num})}}
-        className={`rounded-lg border overflow-hidden cursor-pointer group ${selectedId===c.id?'border-green-500/60 bg-surface-700/50':'border-surface-700/30 bg-surface-800/40 hover:border-green-500/40 hover:bg-surface-700/40'}`}>
+        className={`relative rounded-lg border overflow-hidden cursor-pointer group ${selectedId===c.id?'border-green-500/60 bg-surface-700/50':'border-surface-700/30 bg-surface-800/40 hover:border-green-500/40 hover:bg-surface-700/40'}`}>
         <div className="aspect-square bg-surface-900/50 flex items-center justify-center overflow-hidden">{img?<img src={img} className="w-full h-full object-cover" loading="lazy"/>:<span className="text-xl font-bold text-surface-600">{c.name[0]}</span>}</div>
         <div className="px-1 py-1 text-center bg-surface-800/60"><div className="text-[9px] font-medium truncate">{c.name}</div><div className="flex items-center justify-center gap-0.5 text-[7px] text-surface-400"><span>Lv.{c.level}</span>{c.actived_constellation_num>0&&<span className="text-purple-400">C{c.actived_constellation_num}</span>}</div></div>
+        {sortBy==='rating' && rating && <span className={`absolute top-0.5 right-0.5 px-1 rounded text-[8px] ${RATING_STYLES[rating]}`}>{ratingLabel[rating]}</span>}
       </div>})}
     </div>
     {fil.length===0&&<div className="text-center py-8 text-[10px] text-surface-500">无匹配</div>}
@@ -413,7 +835,7 @@ function CharacterGrid({ avatars, charsList, charDBMap, onSelect, selectedId }) 
 
 // ─── 角色详情（横向排版优化）───
 // ─── 角色详情（修复头像、武器紧凑、圣遗物排版、命座行内）───
-function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel }) {
+function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel, onOpenBuildSettings }) {
   const navigate = useNavigate()
   const dbc = charDBMap[char.id]
   const w = charDetail?.weapon||char.weapon
@@ -428,6 +850,83 @@ function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel }) {
   const [tipPos, setTipPos] = useState(null) // {top, left} for fixed-position tooltip
   const iconRefs = useRef({})
 
+  // ── 练度分析：有效副词条配置（user.db）+ 默认配置/评级标准（基准库 settings）──
+  const { query } = useDb()
+  const [buildConfig, setBuildConfig] = useState(null) // { effectiveSubs: [], weights: {} }
+  const [defaultConfig, setDefaultConfig] = useState(null) // 开发者设置的默认配置
+  const [ratingStandards, setRatingStandards] = useState(null) // { SSS:36, S:30, ... }
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const [cfgRes, defaultsRes, ratingRes] = await Promise.all([
+          window.electronAPI?.worldtreeBuildLoad(char.id),
+          query(`SELECT value FROM settings WHERE key = 'worldtree_build_defaults'`),
+          query(`SELECT value FROM settings WHERE key = 'worldtree_rating_standards'`),
+        ])
+        if (!mounted) return
+        let defaults = {}
+        try { defaults = JSON.parse(defaultsRes?.data?.[0]?.value || '{}') } catch (_) {}
+        // 无用户配置时：自动应用开发者默认（若有），否则默认带上暴击率/暴击伤害
+        let cfg = cfgRes?.success ? cfgRes.config : null
+        if (!cfg && defaults[char.id]) {
+          cfg = {
+            effectiveSubs: [...(defaults[char.id].effectiveSubs || [])],
+            weights: { ...(defaults[char.id].weights || {}) },
+          }
+        }
+        if (!cfg) cfg = { effectiveSubs: [20, 22], weights: {} }
+        setBuildConfig(cfg)
+        // 始终重置默认配置缓存（无默认配置时为 null，避免继承上一个角色的默认配置）
+        setDefaultConfig(defaults[char.id] || null)
+        // 评级标准：优先该角色配置中的 ratings，其次全局默认值
+        if (defaults[char.id]?.ratings) {
+          setRatingStandards(defaults[char.id].ratings)
+        } else {
+          try {
+            const ratings = JSON.parse(ratingRes?.data?.[0]?.value || 'null')
+            if (ratings) setRatingStandards(ratings)
+          } catch (_) {}
+        }
+      } catch (_) {}
+    })()
+    return () => { mounted = false }
+  }, [char.id, query])
+
+  // 保存/更新有效副词条配置到 user.db
+  const updateBuildConfig = useCallback((next) => {
+    setBuildConfig(next)
+    window.electronAPI?.worldtreeBuildSave(char.id, next).catch(() => {})
+  }, [char.id])
+
+  // 恢复默认配置（含该角色默认评级标准）
+  // 实时查询基准库最新默认配置，避免使用挂载时的旧缓存（设置页修改后能立即生效）
+  // 无默认配置的角色：恢复为内置默认（暴击率+暴击伤害，评级用全局默认）
+  const restoreDefaultBuild = useCallback(async () => {
+    try {
+      const [defaultsRes, ratingRes] = await Promise.all([
+        query(`SELECT value FROM settings WHERE key = 'worldtree_build_defaults'`),
+        query(`SELECT value FROM settings WHERE key = 'worldtree_rating_standards'`),
+      ])
+      const defaults = JSON.parse(defaultsRes?.data?.[0]?.value || '{}')
+      const d = defaults[char.id]
+      const next = d
+        ? { effectiveSubs: [...(d.effectiveSubs || [])], weights: { ...(d.weights || {}) } }
+        : { effectiveSubs: [20, 22], weights: {} }
+      updateBuildConfig(next)
+      if (d?.ratings) {
+        setRatingStandards({ ...d.ratings })
+      } else {
+        try {
+          const ratings = JSON.parse(ratingRes?.data?.[0]?.value || 'null')
+          if (ratings) setRatingStandards(ratings)
+        } catch (_) {}
+      }
+      setDefaultConfig(d || null)
+    } catch (_) {}
+  }, [char.id, query, updateBuildConfig])
+
   useLayoutEffect(() => {
     const active = hoverSkill !== null ? { idx: hoverSkill, isCon: false } : hoverCon !== null ? { idx: hoverCon, isCon: true } : null
     if (!active) { setTipPos(null); return }
@@ -436,8 +935,8 @@ function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel }) {
     if (!iconEl) { setTipPos(null); return }
     const ir = iconEl.getBoundingClientRect()
     // 临时渲染测量提示窗大小
-    const tipW = active.isCon ? Math.min(220, window.innerWidth - 16) : Math.min(200, window.innerWidth - 16)
-    const tipH = Math.min(window.innerHeight * 0.6, 300)
+    const tipW = active.isCon ? Math.min(280, window.innerWidth - 16) : Math.min(260, window.innerWidth - 16)
+    const tipH = Math.min(window.innerHeight * 0.6, 400)
     let left = ir.left + ir.width / 2 - tipW / 2
     let top = ir.bottom + 4
     if (left + tipW > window.innerWidth - 8) left = window.innerWidth - tipW - 8
@@ -505,34 +1004,34 @@ function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel }) {
   // 仅有效的战斗技能（skill_type=1 的前3个：普攻、E、Q）
   const combatSkills = skills.filter(s => s.skill_type === 1).slice(0,3)
 
-  return <div className="space-y-2 text-[9px] lg:text-[11px]">
-    {!sidePanel && <button onClick={onBack} className="flex items-center gap-0.5 text-[10px] text-surface-400 hover:text-surface-200 mb-1"><ArrowLeft className="w-3 h-3"/>返回</button>}
+  return <div className="space-y-2.5 text-[11px] lg:text-[13px]">
+    {!sidePanel && <button onClick={onBack} className="flex items-center gap-0.5 text-[12px] text-surface-400 hover:text-surface-200 mb-1"><ArrowLeft className="w-3.5 h-3.5"/>返回</button>}
 
     {/* 第一行：头像 + 基本信息 + 武器 */}
-    <div className="flex items-center gap-2">
-      <div className="w-10 h-10 rounded-lg overflow-hidden border border-surface-600/50 shrink-0 bg-surface-800/80 flex items-center justify-center cursor-pointer hover:border-green-500/50"
+    <div className="flex items-center gap-2.5">
+      <div className="w-14 h-14 rounded-lg overflow-hidden border border-surface-600/50 shrink-0 bg-surface-800/80 flex items-center justify-center cursor-pointer hover:border-green-500/50"
         onClick={() => { if(char.id) navigate('/characters/' + char.id) }} title="打开角色详情">
-        {avatarImg ? <img src={avatarImg} className="w-full h-full object-cover" alt=""/> : <span className="text-lg font-bold text-surface-600">{char.name[0]}</span>}
+        {avatarImg ? <img src={avatarImg} className="w-full h-full object-cover" alt=""/> : <span className="text-xl font-bold text-surface-600">{char.name[0]}</span>}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] font-bold text-surface-200">{char.name}</span>
-          {dbc?.name_zh && dbc.name_zh !== char.name && <span className="text-[8px] text-surface-400">{dbc.name_zh}</span>}
-          {char.element&&<span className={`px-1 py-0 rounded ${elemBg} ${elemColor} text-[8px]`}>{EN[char.element]}</span>}
+          <span className="text-[14px] font-bold text-surface-200">{char.name}</span>
+          {dbc?.name_zh && dbc.name_zh !== char.name && <span className="text-[10px] text-surface-400">{dbc.name_zh}</span>}
+          {char.element&&<span className={`px-1.5 py-0 rounded ${elemBg} ${elemColor} text-[10px]`}>{EN[char.element]}</span>}
         </div>
-        <div className="flex items-center gap-1.5 text-[8px] text-surface-400">
+        <div className="flex items-center gap-1.5 text-[10px] text-surface-400">
           <span>Lv.{char.avatar_level||char.level}</span>
           <span className="text-amber-400">{'★'.repeat(char.rarity)}</span>
         </div>
-        <div className="text-[8px] text-surface-400 mt-0.5">
+        <div className="text-[10px] text-surface-400 mt-0.5">
           <span>好感{char.fetter}</span>
           {(charDetail?.base?.actived_constellation_num||char.actived_constellation_num||0) > 0 && <span className="ml-2 text-purple-400">C{charDetail?.base?.actived_constellation_num||char.actived_constellation_num}</span>}
         </div>
       </div>
-      {w&&<div className="flex items-center gap-1.5 shrink-0 cursor-pointer hover:bg-surface-700/30 rounded px-1.5 py-0.5"
+      {w&&<div className="flex items-center gap-2 shrink-0 cursor-pointer hover:bg-surface-700/30 rounded px-2 py-1"
         onClick={() => { if(w?.id) navigate('/weapons/' + w.id) }} title="打开武器详情">
-        <img src={w.icon} className="w-6 h-6 lg:w-8 lg:h-8 rounded" alt=""/>
-        <div className="text-[8px] lg:text-[10px] leading-tight">
+        <img src={w.icon} className="w-9 h-9 lg:w-11 lg:h-11 rounded" alt=""/>
+        <div className="text-[10px] lg:text-[12px] leading-tight">
           <div className="font-medium text-surface-300">{w.name}</div>
           <div className="text-surface-500">Lv.{w.level}</div>
           <div className="flex items-center gap-1"><span className="text-amber-400">{'★'.repeat(w.rarity)}</span><span className="text-purple-400">精{w.affix_level}</span></div>
@@ -541,45 +1040,45 @@ function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel }) {
     </div>
 
     {/* 第二行：技能天赋图标 + 命之座图标 */}
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-2 flex-wrap">
       {/* 技能天赋图标 */}
       {combatSkills.length>0&&combatSkills.map((s,si) => {
         const levels = [s.level, ...(s.is_enhanced ? [s.level] : [])]
         return <div key={si} className="relative">
-          <div ref={el=>iconRefs.current['s'+si]=el} className="w-6 h-6 lg:w-7 lg:h-7 rounded-full bg-surface-800/60 flex items-center justify-center cursor-pointer hover:bg-surface-700/60 border border-surface-700/40 overflow-hidden"
+          <div ref={el=>iconRefs.current['s'+si]=el} className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-surface-800/60 flex items-center justify-center cursor-pointer hover:bg-surface-700/60 border border-surface-700/40 overflow-hidden"
             onMouseEnter={() => setHoverSkill(si)}
             onMouseLeave={() => setHoverSkill(null)}>
-            {s.icon ? <img src={s.icon} className="w-5 h-5" alt=""/> : <span className="text-[6px]">{si+1}</span>}
+            {s.icon ? <img src={s.icon} className="w-7 h-7" alt=""/> : <span className="text-[9px]">{si+1}</span>}
           </div>
-          <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-surface-900 flex items-center justify-center text-[5px] text-surface-400 border border-surface-600">{s.level}</span>
+          <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-surface-900 flex items-center justify-center text-[7px] text-surface-400 border border-surface-600">{s.level}</span>
           {hoverSkill === si && tipPos && !tipPos.isCon && createPortal(<div style={{position:'fixed',top:tipPos.top,left:tipPos.left,width:tipPos.w,zIndex:9999,pointerEvents:'none'}}>
-            <div className="bg-surface-800 border border-surface-600 rounded-lg p-2.5 shadow-xl" style={{maxHeight:'60vh',overflow:'auto'}}>
-              <div className="text-[10px] font-semibold text-surface-200 mb-1"
+            <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 shadow-xl" style={{maxHeight:'60vh',overflow:'auto'}}>
+              <div className="text-[12px] font-semibold text-surface-200 mb-1.5"
                 dangerouslySetInnerHTML={{__html: formatDesc(s.name)}}/>
-              <div className="text-[8px] text-surface-400 leading-relaxed"
+              <div className="text-[10px] text-surface-400 leading-relaxed"
                 dangerouslySetInnerHTML={{__html: formatDesc(s.desc)}}/>
             </div>
           </div>, document.body)}
         </div>
       })}
       {/* 分隔线 */}
-      {combatSkills.length>0 && consts.length>0 && <span className="text-surface-600 mx-0.5">|</span>}
+      {combatSkills.length>0 && consts.length>0 && <span className="text-surface-600 mx-1">|</span>}
       {/* 命之座图标 */}
-      {consts.length>0&&<div className="flex items-center gap-0.5">
+      {consts.length>0&&<div className="flex items-center gap-1">
         {consts.map((con,i) => {
           const active = i < (char.actived_constellation_num||0)
           return <div key={i} className="relative">
-            <div ref={el=>iconRefs.current['c'+i]=el} className={`w-5 h-5 lg:w-6 lg:h-6 rounded flex items-center justify-center cursor-pointer transition-colors ${active ? elemBg : 'bg-surface-800/40 opacity-40'}`}
+            <div ref={el=>iconRefs.current['c'+i]=el} className={`w-7 h-7 lg:w-8 lg:h-8 rounded flex items-center justify-center cursor-pointer transition-colors ${active ? elemBg : 'bg-surface-800/40 opacity-40'}`}
               onMouseEnter={() => setHoverCon(i)}
               onMouseLeave={() => setHoverCon(null)}>
-              {con.icon ? <img src={con.icon} className={`w-3.5 h-3.5 ${active ? '' : 'grayscale'}`} alt=""/>
-                : <span className={`text-[7px] ${active ? elemColor : 'text-surface-500'}`}>{i+1}</span>}
+              {con.icon ? <img src={con.icon} className={`w-5 h-5 ${active ? '' : 'grayscale'}`} alt=""/>
+                : <span className={`text-[10px] ${active ? elemColor : 'text-surface-500'}`}>{i+1}</span>}
             </div>
             {hoverCon === i && tipPos && tipPos.isCon && createPortal(<div style={{position:'fixed',top:tipPos.top,left:tipPos.left,width:tipPos.w,zIndex:9999,pointerEvents:'none'}}>
-              <div className="bg-surface-800 border border-surface-600 rounded-lg p-2.5 shadow-xl" style={{maxHeight:'60vh',overflow:'auto'}}>
-                <div className="text-[10px] font-semibold text-surface-200 mb-1"
+              <div className="bg-surface-800 border border-surface-600 rounded-lg p-3 shadow-xl" style={{maxHeight:'60vh',overflow:'auto'}}>
+                <div className="text-[12px] font-semibold text-surface-200 mb-1.5"
                   dangerouslySetInnerHTML={{__html: formatDesc(con.name)}}/>
-                {con.effect && <div className="text-[8px] text-surface-400 leading-relaxed"
+                {con.effect && <div className="text-[10px] text-surface-400 leading-relaxed"
                   dangerouslySetInnerHTML={{__html: formatDesc(con.effect)}}/>}
               </div>
             </div>, document.body)}
@@ -589,62 +1088,69 @@ function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel }) {
     </div>
 
     {/* 面板属性：常驻显示 + 详请按钮 */}
-    {props.length>0&&<div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2">
-      <div className="flex items-center justify-between mb-1">
-        <h4 className="text-[7px] lg:text-[9px] text-surface-500 uppercase">面板属性</h4>
-        <button onClick={() => setShowAllProps(!showAllProps)} className="text-[7px] px-1.5 py-0.5 rounded bg-surface-700/50 text-surface-400 hover:text-surface-200 hover:bg-surface-600/50">
+    {props.length>0&&<div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2.5">
+      <div className="flex items-center justify-between mb-1.5">
+        <h4 className="text-[10px] lg:text-[11px] text-surface-500 uppercase">面板属性</h4>
+        <button onClick={() => setShowAllProps(!showAllProps)} className="text-[9px] px-2 py-0.5 rounded bg-surface-700/50 text-surface-400 hover:text-surface-200 hover:bg-surface-600/50">
           {showAllProps ? '精简' : '详情'}
         </button>
       </div>
       {/* 精简模式：只显示常驻属性 */}
-      {!showAllProps && <div className="grid grid-cols-4 gap-1">{alwaysProps.map((p,i)=>{
+      {!showAllProps && <div className="grid grid-cols-4 gap-1.5">{alwaysProps.map((p,i)=>{
         const name=PT[p.property_type]||`类型${p.property_type}`;const val=p.final||''
         const isBase = p.property_type===2000||p.property_type===2001||p.property_type===2002
-        return <div key={i} className="p-1 rounded bg-surface-800/60 text-center relative group">
-          <div className="text-[8px] font-medium text-surface-200">{val}</div>
-          <div className="text-[6px] text-surface-500">{name}</div>
+        return <div key={i} className="p-1.5 rounded bg-surface-800/60 text-center relative group">
+          <div className="text-[10px] font-medium text-surface-200">{val}</div>
+          <div className="text-[8px] text-surface-500">{name}</div>
           {isBase && p.base!=null && p.add!=null &&
           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 z-10 hidden group-hover:block pointer-events-none">
-            <span className="text-[7px] text-surface-400 bg-surface-800 px-1 py-0.5 rounded whitespace-nowrap">={p.base}+{p.add}</span>
+            <span className="text-[9px] text-surface-400 bg-surface-800 px-1.5 py-0.5 rounded whitespace-nowrap">={p.base}+{p.add}</span>
           </div>}
         </div>
       })}</div>}
       {/* 详情模式：只显示分类详情（不显示汇总） */}
-      {showAllProps && <div className="space-y-1.5">
-        <div><div className="text-[7px] lg:text-[9px] text-surface-500 mb-0.5">基础属性</div><div className="grid grid-cols-4 gap-1 lg:gap-1.5">{buildDetailRow(ALL_BASE_TYPES).map((p,i) => <PropCell key={i} p={p} isBase={p.property_type===2000||p.property_type===2001||p.property_type===2002} />)}</div></div>
-        <div><div className="text-[7px] lg:text-[9px] text-surface-500 mb-0.5">进阶属性</div><div className="grid grid-cols-4 gap-1 lg:gap-1.5">{buildDetailRow(ALL_ADV_TYPES).map((p,i) => <PropCell key={i} p={p} isBase={false} />)}</div></div>
-        <div><div className="text-[7px] lg:text-[9px] text-surface-500 mb-0.5">元素属性</div><div className="grid grid-cols-4 gap-1 lg:gap-1.5">{buildDetailRow(ALL_ELEM_TYPES).map((p,i) => <PropCell key={i} p={p} isBase={false} />)}</div></div>
+      {showAllProps && <div className="space-y-2">
+        <div><div className="text-[10px] lg:text-[11px] text-surface-500 mb-1">基础属性</div><div className="grid grid-cols-4 gap-1.5 lg:gap-2">{buildDetailRow(ALL_BASE_TYPES).map((p,i) => <PropCell key={i} p={p} isBase={p.property_type===2000||p.property_type===2001||p.property_type===2002} />)}</div></div>
+        <div><div className="text-[10px] lg:text-[11px] text-surface-500 mb-1">进阶属性</div><div className="grid grid-cols-4 gap-1.5 lg:gap-2">{buildDetailRow(ALL_ADV_TYPES).map((p,i) => <PropCell key={i} p={p} isBase={false} />)}</div></div>
+        <div><div className="text-[10px] lg:text-[11px] text-surface-500 mb-1">元素属性</div><div className="grid grid-cols-4 gap-1.5 lg:gap-2">{buildDetailRow(ALL_ELEM_TYPES).map((p,i) => <PropCell key={i} p={p} isBase={false} />)}</div></div>
       </div>}
     </div>}
 
     {/* 圣遗物：5件并排 */}
-    {relics.length>0&&<div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2">
-      <h4 className="text-[7px] lg:text-[9px] text-surface-500 uppercase mb-1">圣遗物</h4>
-      <div className="flex flex-wrap gap-1.5 lg:gap-2">{relics.map((r,i)=>{
+    {relics.length>0&&<div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2.5">
+      <h4 className="text-[10px] lg:text-[11px] text-surface-500 uppercase mb-1.5">圣遗物</h4>
+      <div className="flex flex-wrap gap-2">{relics.map((r,i)=>{
         const mainName = r.main_property ? (PT[r.main_property.property_type]||'') : (r.main?.name||'')
         const mainVal = r.main_property ? r.main_property.value : (r.main?.val||'')
         const subs = (r.sub_property_list||r.subs||r.sub||[]).slice(0,5)
-        return <div key={i} className="rounded bg-surface-800/60 p-1.5 cursor-pointer hover:bg-surface-700/60 flex-1" style={{flexBasis:'calc(20% - 6px)',minWidth:'95px'}}
+        return <div key={i} className="rounded bg-surface-800/60 p-2 cursor-pointer hover:bg-surface-700/60 flex-1" style={{flexBasis:'calc(20% - 6px)',minWidth:'110px'}}
           onClick={() => {}} title="打开圣遗物详情">
-          <div className="flex items-center gap-0.5 mb-0.5">
-            <img src={r.icon} className="w-5 h-5 rounded shrink-0" alt=""/>
-            <span className="text-[7px] text-amber-400">{'★'.repeat(r.rarity)}</span>
-            <span className="text-[7px] text-surface-500">+{r.level}</span>
+          <div className="flex items-center gap-1 mb-1">
+            <img src={r.icon} className="w-7 h-7 rounded shrink-0" alt=""/>
+            <span className="text-[9px] text-amber-400">{'★'.repeat(r.rarity)}</span>
+            <span className="text-[9px] text-surface-500">+{r.level}</span>
           </div>
-          <div className="text-[7px] text-surface-400 truncate mb-0.5">{PN[r.pos]||r.name||''}</div>
-          <div className="text-[8px] font-medium text-surface-300 truncate">{mainName} {mainVal}</div>
+          <div className="text-[9px] text-surface-400 truncate mb-1">{PN[r.pos]||r.name||''}</div>
+          <div className="text-[10px] font-medium text-surface-300 truncate">{mainName} {mainVal}</div>
           {subs.map((s,si) => {
             const sName = PT[s.property_type]||s.name||s.stat_name||''
             const sVal = s.value||s.val||s.stat_value||''
             const times = s.times||0
-            return <div key={si} className="text-[7px] text-surface-500 leading-snug flex items-center gap-1 whitespace-nowrap">
+            const effective = buildConfig?.effectiveSubs?.includes(s.property_type)
+            return <div key={si} className={`text-[9px] leading-snug flex items-center gap-1 whitespace-nowrap rounded px-0.5 ${effective ? 'text-green-400 bg-green-500/10 font-medium' : 'text-surface-500'}`}>
               <span>{sName} {sVal}</span>
-              {times > 0 && <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-amber-500/20 text-[7px] font-medium text-amber-400">{times}</span>}
+              {times > 0 && <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-medium ${effective ? 'bg-green-500/25 text-green-300' : 'bg-amber-500/20 text-amber-400'}`}>{times}</span>}
             </div>
           })}
         </div>
       })}</div>
     </div>}
+
+    {/* 练度分析栏 */}
+    <BuildAnalysis charId={char.id} charName={char.name} relics={relics}
+      buildConfig={buildConfig} updateBuildConfig={updateBuildConfig}
+      defaultConfig={defaultConfig} restoreDefaultBuild={restoreDefaultBuild}
+      ratingStandards={ratingStandards} onOpenBuildSettings={onOpenBuildSettings} />
   </div>
 }
 
@@ -652,14 +1158,174 @@ function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel }) {
 function PropCell({ p, isBase }) {
   const name = PT[p.property_type]||''
   const val = p.final||''
-  return <div className="p-1 rounded bg-surface-800/60 text-center relative group">
-    <div className="text-[8px] lg:text-[10px] font-medium text-surface-200">{val}</div>
-    <div className="text-[6px] lg:text-[7px] text-surface-500">{name}</div>
+  return <div className="p-1.5 rounded bg-surface-800/60 text-center relative group">
+    <div className="text-[10px] lg:text-[12px] font-medium text-surface-200">{val}</div>
+    <div className="text-[8px] lg:text-[9px] text-surface-500">{name}</div>
     {isBase && p.base!=null&&p.add!=null&&
     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 z-10 hidden group-hover:block pointer-events-none">
-      <span className="text-[7px] text-surface-400 bg-surface-800 px-1 py-0.5 rounded whitespace-nowrap">={p.base}+{p.add}</span>
+      <span className="text-[9px] text-surface-400 bg-surface-800 px-1.5 py-0.5 rounded whitespace-nowrap">={p.base}+{p.add}</span>
     </div>}
   </div>
+}
+
+// ─── 圣遗物练度分析栏 ───
+function BuildAnalysis({ charId, charName, relics, buildConfig, updateBuildConfig, defaultConfig, restoreDefaultBuild, ratingStandards, onOpenBuildSettings }) {
+  const { devMode } = useDb()
+  const [savedTip, setSavedTip] = useState(null)
+
+  // 未加载完成时展示占位（避免闪烁）
+  if (!buildConfig) {
+    return <div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-3">
+      <h4 className="text-[10px] lg:text-[11px] text-surface-500 uppercase mb-1">练度分析</h4>
+      <p className="text-[9px] text-surface-600">正在加载有效副词条配置...</p>
+    </div>
+  }
+
+  const effectiveSubs = buildConfig.effectiveSubs || []
+  const weights = buildConfig.weights || {}
+  const standards = ratingStandards || DEFAULT_RATINGS
+
+  // 遍历全部圣遗物副词条：有效词条合计（按档位微调）与评分（词条数×权重）
+  let totalCount = 0
+  let score = 0
+  let countedSubs = 0
+  for (const r of relics) {
+    for (const s of (r.sub_property_list || r.subs || r.sub || [])) {
+      if (!effectiveSubs.includes(s.property_type)) continue
+      const cnt = substatCount(s, r.rarity)
+      if (cnt == null) continue
+      const w = weights[s.property_type] ?? 1
+      totalCount += cnt
+      score += cnt * w
+      countedSubs++
+    }
+  }
+  score = Math.round(score * 100) / 100
+
+  // 评级：从高到低匹配（SSS/S/A/B/C）
+  let rating = null
+  for (const key of ['SSS', 'S', 'A', 'B', 'C']) {
+    if (standards[key] != null && score >= standards[key]) { rating = key; break }
+  }
+
+  const toggleSub = (type) => {
+    const next = effectiveSubs.includes(type)
+      ? effectiveSubs.filter(t => t !== type)
+      : [...effectiveSubs, type]
+    updateBuildConfig({ effectiveSubs: next, weights: { ...weights } })
+  }
+
+  const setWeight = (type, w) => {
+    const next = Math.max(0, Math.min(1, Math.round((Number(w) || 0) * 100) / 100))
+    updateBuildConfig({ effectiveSubs, weights: { ...weights, [type]: next } })
+  }
+
+  const hasDefault = !!defaultConfig
+
+  // 每种有效副词条类型在所有圣遗物中的总词条数（按档位微调后）
+  const typeCounts = {}
+  for (const r of relics) {
+    for (const s of (r.sub_property_list || r.subs || r.sub || [])) {
+      if (!effectiveSubs.includes(s.property_type)) continue
+      const cnt = substatCount(s, r.rarity)
+      if (cnt == null) continue
+      typeCounts[s.property_type] = (typeCounts[s.property_type] || 0) + cnt
+    }
+  }
+  const fmtCnt = (n) => { const r = Math.round(n * 10) / 10; return r % 1 === 0 ? r.toFixed(1) : r }
+
+  return (
+    <div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2.5">
+      {/* 标题行：评分 + 评级 + 恢复默认 */}
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-[10px] lg:text-[11px] text-surface-500 uppercase flex items-center gap-2">
+          练度分析
+          <span className="text-[10px] text-surface-400 normal-case font-normal">
+            有效词条 <span className="text-green-400 font-semibold">{Math.round(totalCount * 10) / 10}</span>
+          </span>
+          <span className="text-[10px] text-surface-400 normal-case font-normal">
+            评分 <span className="text-amber-400 font-semibold">{score}</span>
+          </span>
+          {rating && <span className={`text-[13px] ${RATING_STYLES[rating]}`}>{rating}</span>}
+        </h4>
+        <div className="flex items-center gap-1.5">
+          {devMode && onOpenBuildSettings && (
+            <button onClick={() => onOpenBuildSettings(charId)}
+              className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 hover:bg-purple-500/25 border border-purple-500/30"
+              title="打开该角色的练度评析设置">
+              <Swords className="w-2.5 h-2.5 inline-block mr-0.5 -mt-0.5" />设置
+            </button>
+          )}
+          <button onClick={() => { restoreDefaultBuild(); setSavedTip({ type: 'ok', text: hasDefault ? '已恢复默认配置' : '已恢复为默认（暴击率+暴击伤害）' }) }}
+            className="text-[9px] px-1.5 py-0.5 rounded bg-surface-700/50 text-surface-400 hover:text-surface-200 hover:bg-surface-600/50"
+            title={hasDefault ? '恢复为该角色的开发者默认配置' : '恢复为默认配置（暴击率+暴击伤害，评级用全局标准）'}>
+            恢复默认
+          </button>
+        </div>
+      </div>
+
+      {/* 有效副词条选择（chips） */}
+      <div className="flex flex-wrap gap-1 mb-1.5">
+        {Object.entries(SUB_NAMES).map(([type, name]) => {
+          const active = effectiveSubs.includes(Number(type))
+          return (
+            <button key={type} onClick={() => toggleSub(Number(type))}
+              className={`px-1.5 py-0.5 rounded text-[9px] transition-colors ${active ? 'bg-green-500/20 text-green-300 border border-green-500/40' : 'bg-surface-800/60 text-surface-500 border border-surface-700/40 hover:text-surface-300'}`}>
+              {name}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* 权重调整：每个有效副词条一行（默认1，只能下调 0~1 两位小数） */}
+      {effectiveSubs.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {effectiveSubs.map(type => (
+            <div key={type} className="flex items-center gap-2">
+              <span className="text-[9px] text-green-400 w-14 shrink-0 truncate">{SUB_NAMES[type]}</span>
+              <input type="range" min={0} max={1} step={0.05} value={weights[type] ?? 1}
+                onChange={e => setWeight(type, e.target.value)}
+                className="flex-1 accent-green-500 h-1" />
+              <span className="text-[9px] text-surface-400 font-mono w-20 text-right shrink-0">
+                {(typeCounts[type] || 0) > 0 ? `${fmtCnt(typeCounts[type])} × ${(weights[type] ?? 1).toFixed(2)}` : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 每件圣遗物的有效词条明细 */}
+      {relics.length > 0 && (
+        <div className="space-y-1">
+          {relics.map((r, ri) => {
+            const subs = (r.sub_property_list || r.subs || r.sub || []).filter(s => effectiveSubs.includes(s.property_type))
+            if (subs.length === 0) return null
+            const cnt = subs.reduce((a, s) => {
+              const c = substatCount(s, r.rarity)
+              return a + (c == null ? 0 : c)
+            }, 0)
+            const wSum = subs.reduce((a, s) => a + (substatCount(s, r.rarity) == null ? 0 : (substatCount(s, r.rarity) * (weights[s.property_type] ?? 1))), 0)
+            if (cnt === 0 && wSum === 0) return null
+            return (
+              <div key={ri} className="flex items-center gap-2 rounded bg-surface-800/50 px-1.5 py-1">
+                <img src={r.icon} className="w-5 h-5 rounded shrink-0" alt="" />
+                <span className="text-[9px] text-surface-400 flex-1 truncate">{PN[r.pos]||r.name||''}</span>
+                <span className="text-[9px] text-green-400 font-medium">{Math.round(cnt * 10) / 10} 词条</span>
+                <span className="text-[9px] text-amber-400 font-mono">{Math.round(wSum * 100) / 100} 分</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* 保存提示 */}
+      {savedTip && (
+        <div className={`mt-2 px-1.5 py-1 rounded text-[9px] ${savedTip.type === 'ok' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
+          {savedTip.text}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ─── 挑战整合（深境 + 剧诗 + 危战） ───

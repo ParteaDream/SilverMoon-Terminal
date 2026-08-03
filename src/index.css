@@ -464,6 +464,18 @@ img[src^="data:image/"]:not(.no-fade-in) {
   animation: shimmerFlow 2s linear infinite;
 }
 
+@keyframes shimmerText {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, #f87171, #fbbf24, #34d399, #60a5fa, #c084fc, #f87171);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shimmerText 2.5s linear infinite;
+}
+
 /* ── 标点底盘 ── */
 .marker-base {
   position: absolute;

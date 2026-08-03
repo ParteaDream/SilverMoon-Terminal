@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useDb } from '../context/DbContext'
-import { Search, RefreshCw, ChevronDown, ChevronUp, Minimize2 } from 'lucide-react'
+import { Search, RefreshCw, ChevronDown, ChevronUp, Minimize2, User, X, Loader2 } from 'lucide-react'
+
+// 账号数据中的元素英文名 → TrainCalc 元素ID（用于旅行者元素变体匹配）
+const ACCOUNT_ELEM_TO_ID = { Pyro: 1, Hydro: 2, Anemo: 3, Electro: 4, Dendro: 5, Cryo: 6, Geo: 7 }
+
+// 固有天赋使普通攻击等级 +1 的角色（目前仅达达利亚「永无谢幕」）
+const NORMAL_ATK_PLUS_ONE_CHARS = ['达达利亚']
 
 // ═══════════════════════════════════════
 // 等级区间 / 材料数据
@@ -89,6 +95,45 @@ const TRAVELER_ELEMENTS = [
 ]
 const TRAVELER_MATS_BY_ELEM = {}
 for (const e of TRAVELER_ELEMENTS) TRAVELER_MATS_BY_ELEM[e.id] = e
+
+// ═══════════════════════════════════════
+// 填入账号数据（世界树联动）辅助函数
+// ═══════════════════════════════════════
+
+// 在账号数据中查找与当前角色匹配的角色（旅行者特判：按元素变体匹配）
+function findAccountChar(accountData, selectedChar, travelerElement) {
+  const list = accountData?.characters?.data?.list || []
+  if (!list.length) return null
+  const name = selectedChar?.name_zh || ''
+  const isTraveler = selectedChar?.character_type === 'traveler' || name.startsWith('旅行者')
+  if (isTraveler) {
+    const travelers = list.filter(c => (c.name || '').includes('旅行者') || c.name === '空' || c.name === '荧')
+    if (!travelers.length) return null
+    // 优先匹配当前选中的元素变体
+    const preferred = travelers.find(c => ACCOUNT_ELEM_TO_ID[c.element] === travelerElement)
+    return preferred || travelers[0]
+  }
+  return list.find(c => (c.name || '') === name) || null
+}
+
+// 角色等级映射到进度条节点索引（取不超过实际等级的最大节点）
+function nodeIndexForLevel(nodes, level) {
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    if (level >= nodes[i]) return i
+  }
+  return 0
+}
+
+// 基础技能等级 = 账号显示等级 - 命座加成（-3）- 固有天赋加成（-1）
+// 命座3 使元素战技 +3，命座5 使元素爆发 +3（slotIdx: 0=普攻 1=战技 2=爆发）
+// 固有天赋（如达达利亚「永无谢幕」）使普通攻击 +1（slotIdx 0 且 normalPassiveBonus 为真时扣除）
+function baseSkillLevel(level, slotIdx, constellation, normalPassiveBonus) {
+  let lv = Number(level) || 1
+  if (slotIdx === 0 && normalPassiveBonus) lv -= 1
+  if (slotIdx === 1 && constellation >= 3) lv -= 3
+  if (slotIdx === 2 && constellation >= 5) lv -= 3
+  return Math.max(1, Math.min(10, lv))
+}
 
 // ═══════════════════════════════════════
 // 双端范围滑块
@@ -188,6 +233,19 @@ export default function TrainCalc({ initialData }) {
 
   const [showList, setShowList] = useState(true)
   const [showCalcHelp, setShowCalcHelp] = useState(false)
+
+  // 填入账号数据（世界树联动）
+  const [showAccountPicker, setShowAccountPicker] = useState(false)
+  const [accounts, setAccounts] = useState([])
+  const [loadingAccounts, setLoadingAccounts] = useState(false)
+  const [fillingAccount, setFillingAccount] = useState(null) // 正在处理的 uid
+  const [fillNotice, setFillNotice] = useState(null) // { type: 'success'|'error', text }
+
+  useEffect(() => {
+    if (!fillNotice) return
+    const t = setTimeout(() => setFillNotice(null), 5000)
+    return () => clearTimeout(t)
+  }, [fillNotice])
 
   // 精简模式状态（默认开启，从 user.json 恢复）
   const [compact, setCompact] = useState(() => {
@@ -386,8 +444,65 @@ export default function TrainCalc({ initialData }) {
     window.open(`#/materials/${id}`, '_self')
   }
 
+  // 重置全部进度条端点到默认值（1→上限）
+  function resetRanges() {
+    setLevelRange([0, LEVEL_NODES.length - 1])
+    setNormalRange([0, TALENT_NODES.length - 1])
+    setSkillRange([0, TALENT_NODES.length - 1])
+    setBurstRange([0, TALENT_NODES.length - 1])
+  }
+
+  // ── 填入账号数据（世界树联动）──
+  async function openAccountPicker() {
+    setFillNotice(null)
+    setShowAccountPicker(true)
+    setLoadingAccounts(true)
+    try {
+      const r = await window.electronAPI?.genshinListAccounts()
+      setAccounts(r?.accounts || [])
+    } catch (_) { setAccounts([]) }
+    setLoadingAccounts(false)
+  }
+
+  async function applyAccountData(uid) {
+    setFillingAccount(uid)
+    try {
+      const r = await window.electronAPI?.genshinGetAccount(String(uid))
+      if (!r?.success) { setFillNotice({ type: 'error', text: '读取账号数据失败' }); setShowAccountPicker(false); return }
+      const account = r.account || {}
+      const data = account.data || {}
+      const char = findAccountChar(data, selectedChar, travelerElement)
+      if (!char) {
+        setFillNotice({ type: 'error', text: `账号「${account.nickname || uid}」中没有「${selectedChar.name_zh}」` })
+        setShowAccountPicker(false)
+        return
+      }
+      // 角色等级：95/100 级一律视为 90 级（90 以上无需额外材料）
+      const level = Math.min(Number(char.avatar_level || char.level) || 1, 90)
+      const lvIdx = nodeIndexForLevel(LEVEL_NODES, level)
+      // 技能等级：去掉命座3/命座5 带来的 +3 加成，以及固有天赋（如达达利亚）带来的普攻 +1 加成
+      const constellation = Number(char.actived_constellation_num) || 0
+      const normalPassiveBonus = NORMAL_ATK_PLUS_ONE_CHARS.includes(char.name) || NORMAL_ATK_PLUS_ONE_CHARS.includes(selectedChar.name_zh)
+      const detailList = data?.characterDetail?.data?.list || []
+      const detail = detailList.find(d => d?.base && String(d.base.id) === String(char.id))
+      const skills = (detail?.skills || []).filter(s => s.skill_type === 1).slice(0, 3)
+      // 填入左端点，右端点保持不变
+      setLevelRange([lvIdx, levelRange[1]])
+      if (skills[0]) setNormalRange([baseSkillLevel(skills[0].level, 0, constellation, normalPassiveBonus) - 1, normalRange[1]])
+      if (skills[1]) setSkillRange([baseSkillLevel(skills[1].level, 1, constellation) - 1, skillRange[1]])
+      if (skills[2]) setBurstRange([baseSkillLevel(skills[2].level, 2, constellation) - 1, burstRange[1]])
+      setShowAccountPicker(false)
+      setFillNotice({ type: 'success', text: `已填入「${selectedChar.name_zh}」账号数据（Lv.${level}${constellation > 0 ? ` · C${constellation}` : ''}）` })
+    } catch (e) {
+      setFillNotice({ type: 'error', text: '填入失败: ' + (e.message || '未知错误') })
+      setShowAccountPicker(false)
+    } finally {
+      setFillingAccount(null)
+    }
+  }
+
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden relative">
       {!selectedChar ? (
         <>
           <div className="px-4 py-3 border-b border-white/5 bg-surface-800/30">
@@ -425,9 +540,16 @@ export default function TrainCalc({ initialData }) {
             <div className="flex-1">
               <p className="text-sm font-medium text-white">{selectedChar.name_zh}</p>
             </div>
-            <button onClick={() => setSelectedChar(null)}
+            <button onClick={() => { resetRanges(); setFillNotice(null); setSelectedChar(null) }}
               className="px-2.5 py-1 rounded-lg text-xs bg-white/10 hover:bg-white/20 text-surface-300 transition-colors flex items-center gap-1">
               <RefreshCw className="w-3 h-3" />重新选择
+            </button>
+            <button
+              onClick={openAccountPicker}
+              className="px-2.5 py-1 rounded-lg text-xs bg-white/10 hover:bg-white/20 text-surface-300 transition-colors flex items-center gap-1"
+              title="从世界树账号数据填入角色等级与技能等级作为左端点"
+            >
+              <User className="w-3 h-3" />填入账号数据
             </button>
             <button
               onClick={async () => {
@@ -453,6 +575,18 @@ export default function TrainCalc({ initialData }) {
               <span className="text-[11px] font-bold leading-none">i</span>
             </button>
           </div>
+
+          {/* 填入账号数据结果提示 */}
+          {fillNotice && (
+            <div className={`px-4 py-1.5 text-[11px] border-b animate-fade-in flex items-center gap-1.5 ${
+              fillNotice.type === 'error'
+                ? 'text-red-400 bg-red-500/10 border-red-500/20'
+                : 'text-green-400 bg-green-500/10 border-green-500/20'
+            }`}>
+              {fillNotice.type === 'error' ? <X className="w-3 h-3 shrink-0" /> : <User className="w-3 h-3 shrink-0" />}
+              <span className="truncate">{fillNotice.text}</span>
+            </div>
+          )}
 
           {/* 旅行者元素选择 */}
           {selectedChar.character_type === 'traveler' && selectedChar.id !== 10000117 && selectedChar.id !== 10000118 && travelerElements.length > 0 && (
@@ -485,8 +619,8 @@ export default function TrainCalc({ initialData }) {
             <SliderBlock label="元素战技" nodes={TALENT_NODES} values={skillRange} onChange={setSkillRange} compact={compact} />
             <SliderBlock label="元素爆发" nodes={TALENT_NODES} values={burstRange} onChange={setBurstRange} compact={compact} />
 
-            {/* 材料总计 */}
-            {totals && totals.length > 0 ? (
+          {/* 材料总计 */}
+          {totals && totals.length > 0 ? (
               <div className="pt-3 border-t border-white/10">
                 <p className="text-xs text-surface-500 mb-2">所需材料总计</p>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
@@ -507,6 +641,54 @@ export default function TrainCalc({ initialData }) {
                 <p className="text-xs text-surface-500">此角色无需培养材料</p>
               </div>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* 选择世界树账号弹窗 */}
+      {showAccountPicker && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowAccountPicker(false)}>
+          <div className="w-72 max-h-96 flex flex-col rounded-xl bg-surface-900 border border-white/10 shadow-2xl animate-scale-in"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/5 shrink-0">
+              <span className="text-xs font-medium text-surface-300">选择世界树账号</span>
+              <button onClick={() => setShowAccountPicker(false)}
+                className="p-1 rounded-lg hover:bg-white/10 text-surface-500 hover:text-white transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-2 space-y-1">
+              {loadingAccounts ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-surface-500">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-[11px]">加载中...</span>
+                </div>
+              ) : accounts.length === 0 ? (
+                <div className="py-8 px-4 text-center space-y-1">
+                  <p className="text-[11px] text-surface-500">暂无世界树账号</p>
+                  <p className="text-[10px] text-surface-600">请先在「终端 → 世界树」登录并爬取数据</p>
+                </div>
+              ) : (
+                accounts.map(acc => (
+                  <button key={acc.uid} onClick={() => applyAccountData(acc.uid)} disabled={fillingAccount !== null}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-white/5 transition-colors text-left disabled:opacity-60">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500/20 to-emerald-700/20 border border-green-500/30 flex items-center justify-center shrink-0">
+                      <span className="text-sm font-bold text-green-400">{(acc.nickname || '?')[0]}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-medium text-surface-200 truncate">{acc.nickname || '旅行者'}</p>
+                      <p className="text-[9px] text-surface-500">UID {acc.uid}</p>
+                    </div>
+                    {fillingAccount === acc.uid ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-primary-400 shrink-0" />
+                    ) : (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 shrink-0">Lv.{acc.level}</span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}

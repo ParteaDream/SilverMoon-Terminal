@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useTerminal } from '../context/TerminalContext'
-import { APPS } from '../components/TerminalDock'
+import { APPS } from '../components/appRegistry'
 import TrainCalc from '../components/TrainCalc'
 import BetaMemo from '../components/BetaMemo'
 import DragonSnake from '../components/DragonSnake'
@@ -25,7 +25,7 @@ const GRID_CELL = 110
 // ═══════════════════════════════════════════════
 // 桌面图标组件（自由拖拽 + 松手对齐网格）
 // ═══════════════════════════════════════════════
-function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occupiedCells, gridCols, isSelected, onDragStart, onDragMove, groupDragOffset }) {
+function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occupiedCells, gridCols, isSelected, onDragStart, onDragMove, groupDragOffset, onRemove }) {
   const [dragging, setDragging] = useState(false)
   const [dragPos, setDragPos] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
@@ -178,6 +178,13 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             打开
+          </button>
+          <button
+            onClick={() => { onRemove?.(app); setContextMenu(null) }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-surface-400 hover:bg-white/10 hover:text-surface-200 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            收起
           </button>
         </div>
       )}
@@ -351,28 +358,153 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp) }
   }, [dragging, resizing])
 
-  // 隐藏/唤起动画：genie 神奇效果（吸入/弹出 Dock）
+  // 隐藏/唤起动画：折叠到 Dock 对应图标位置（模仿 macOS 神奇效果）
+  // 统一动画时长；支持动画中途切换方向（隐藏中唤起 / 唤起中隐藏）
   const [hideAnimating, setHideAnimating] = useState(false)
   const [summoning, setSummoning] = useState(false)
   const [actuallyHidden, setActuallyHidden] = useState(hidden)
   const hideTimerRef = useRef(null)
+  const animRef = useRef(null)
+  const dockTransformRef = useRef(null) // 隐藏时保存的收起 transform 参数（唤起反向播放用）
+  const prevHiddenRef = useRef(hidden)  // 上一次 hidden 值，用于检测切换方向
+  const HIDE_MS = 500
+  const SUMMON_MS = 500
 
+  // 计算窗口到 Dock 图标的 transform（按窗口中心与图标中心对齐）
+  const getDockTransform = useCallback(() => {
+    const el = windowRef.current
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    const dockEl = document.querySelector(`.terminal-dock-icon[data-app-id="${app.id}"]`)
+    const dockRect = dockEl?.getBoundingClientRect()
+    const dx = dockRect ? (dockRect.left + dockRect.width / 2) - (rect.left + rect.width / 2) : 0
+    const dy = dockRect ? (dockRect.top + dockRect.height / 2) - (rect.top + rect.height / 2) : rect.height / 2
+    const sx = dockRect ? dockRect.width / rect.width : 0.2
+    const sy = dockRect ? dockRect.height / rect.height : 0.02
+    return { dx, dy, sx, sy }
+  }, [app.id])
+
+  // 取消当前动画且不触发其 settle 回调（用于方向切换时接管动画）
+  const cancelCurrentAnimation = useCallback(() => {
+    const prev = animRef.current
+    if (prev) {
+      prev.onfinish = null
+      prev.oncancel = null
+      prev.cancel()
+    }
+    animRef.current = null
+  }, [])
+
+  // 隐藏：折叠到 Dock 图标（保存 transform 参数供唤起反向使用）
+  // 起点 inline 为正常显示；fill:'both' 使动画完成保留收起、被 cancel 时回到正常 inline
+  const playHideAnimation = useCallback(() => {
+    const el = windowRef.current
+    cancelCurrentAnimation()
+    clearTimeout(hideTimerRef.current)
+    const t = getDockTransform()
+    if (el && t) {
+      dockTransformRef.current = t
+      const prevOrigin = el.style.transformOrigin
+      const settle = () => {
+        // 先 cancel 动画对象，移除 fill 效果，防止残留动画覆盖终态
+        const anim = animRef.current
+        animRef.current = null
+        if (anim) { anim.onfinish = null; anim.oncancel = null; anim.cancel() }
+        el.style.transform = `translate(${t.dx}px, ${t.dy}px) scale(${t.sx}, ${t.sy})`
+        el.style.opacity = '0'
+        el.style.transformOrigin = prevOrigin
+        setHideAnimating(false)
+        setActuallyHidden(true)
+      }
+      // 起点：正常显示（动画对象 fill:'both' 会覆盖为第一帧，cancel 时回到此状态）
+      el.style.transformOrigin = 'center center'
+      el.style.transform = ''
+      el.style.opacity = '1'
+      void el.offsetWidth
+      const anim = el.animate([
+        { transform: 'translate(0, 0) scale(1, 1)', opacity: 1 },
+        { transform: `translate(${t.dx}px, ${t.dy}px) scale(${t.sx}, ${t.sy})`, opacity: 0 },
+      ], { duration: HIDE_MS, easing: 'cubic-bezier(0.2, 0.8, 0.3, 1)', fill: 'both' })
+      anim.onfinish = settle
+      anim.oncancel = settle
+      animRef.current = anim
+      return
+    }
+    hideTimerRef.current = setTimeout(() => {
+      setHideAnimating(false)
+      setActuallyHidden(true)
+    }, HIDE_MS)
+  }, [getDockTransform, cancelCurrentAnimation])
+
+  // 唤起：从 Dock 图标位置展开（使用隐藏时保存的 transform，避免测量收起后矩形）
+  // 起点 inline 为正常显示；fill:'both' 使动画完成保留正常、被 cancel 时也回到正常 inline
+  const playSummonAnimation = useCallback(() => {
+    const el = windowRef.current
+    cancelCurrentAnimation()
+    const t = dockTransformRef.current
+    if (el && t) {
+      const prevOrigin = el.style.transformOrigin
+      const settle = () => {
+        // 先 cancel 动画对象，移除 fill 效果，防止残留动画覆盖终态
+        const anim = animRef.current
+        animRef.current = null
+        if (anim) { anim.onfinish = null; anim.oncancel = null; anim.cancel() }
+        el.style.transformOrigin = prevOrigin
+        el.style.transform = ''
+        el.style.opacity = '1'
+        setActuallyHidden(false) // 双重保险：确保窗口显示
+        setSummoning(false)
+      }
+      // 起点：正常显示（动画对象 fill:'both' 会覆盖为收起第一帧，cancel 时回到此状态）
+      el.style.transformOrigin = 'center center'
+      el.style.transform = ''
+      el.style.opacity = '1'
+      void el.offsetWidth
+      const anim = el.animate([
+        { transform: `translate(${t.dx}px, ${t.dy}px) scale(${t.sx}, ${t.sy})`, opacity: 0 },
+        { transform: 'translate(0, 0) scale(1, 1)', opacity: 1 },
+      ], { duration: SUMMON_MS, easing: 'cubic-bezier(0.2, 0.8, 0.3, 1)', fill: 'both' })
+      anim.onfinish = settle
+      anim.oncancel = settle
+      animRef.current = anim
+      return
+    }
+    // 无收起参数（从未隐藏过等）：直接显示
+    if (el) {
+      el.style.transform = ''
+      el.style.opacity = '1'
+    }
+    setActuallyHidden(false)
+    setSummoning(false)
+  }, [cancelCurrentAnimation])
+
+  // 状态驱动：仅在 hidden 变化时切换动画方向，动画中途可反向
   useEffect(() => {
-    if (hidden && !actuallyHidden) {
+    const wasHidden = prevHiddenRef.current
+    prevHiddenRef.current = hidden
+
+    if (hidden && !wasHidden) {
+      // 请求隐藏：取消当前动画（若正在唤起），从头播放收起动画
       setHideAnimating(true)
       setSummoning(false)
-      hideTimerRef.current = setTimeout(() => {
-        setActuallyHidden(true)
-        setHideAnimating(false)
-      }, 350)
-    } else if (!hidden && actuallyHidden) {
+      playHideAnimation()
+    } else if (!hidden && wasHidden) {
+      // 请求唤起：恢复显示（若尚未显示），然后从 Dock 位置展开
       clearTimeout(hideTimerRef.current)
-      setActuallyHidden(false)
+      if (actuallyHidden) setActuallyHidden(false)
       setSummoning(true)
-      setTimeout(() => setSummoning(false), 400)
     }
-    return () => clearTimeout(hideTimerRef.current)
-  }, [hidden, actuallyHidden])
+  }, [hidden, actuallyHidden, playHideAnimation])
+
+  // 组件卸载时清理
+  useEffect(() => {
+    return () => { clearTimeout(hideTimerRef.current); animRef.current?.cancel() }
+  }, [])
+
+  // 唤起动画：display 恢复后（DOM 已提交）同步播放，避免 rAF 延迟
+  useLayoutEffect(() => {
+    if (summoning) playSummonAnimation()
+  }, [summoning, playSummonAnimation])
 
   // 关闭淡出
   const [closing, setClosing] = useState(false)
@@ -382,20 +514,20 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
     setTimeout(() => onClose(), 120)
   }, [closing, onClose])
 
-  if (actuallyHidden) return null
-  const animClass = hideAnimating ? 'animate-genie-in' : (summoning ? 'animate-genie-out' : '')
+  // 隐藏时保持组件挂载（display:none），重新打开时状态不丢失
   const closeClass = closing ? 'animate-fade-out' : ''
   const AppIcon = app.icon
   const isPageVisible = pageVisible !== false // 默认可见
+  const displayNone = actuallyHidden || !isPageVisible
 
   return (
     <div ref={windowRef}
-      className={`no-drag ${maximizing ? 'terminal-window-maximizing' : ''} ${animClass} ${closeClass}`}
-      style={{ ...((fullscreen ? fullscreenStyle : { position: 'fixed', left, top, width, height, zIndex })), display: isPageVisible ? undefined : 'none', transformOrigin: 'center bottom' }}
+      className={`no-drag ${maximizing ? 'terminal-window-maximizing' : ''} ${closeClass}`}
+      style={{ ...((fullscreen ? fullscreenStyle : { position: 'fixed', left, top, width, height, zIndex })), display: displayNone ? 'none' : undefined, opacity: displayNone ? 0 : 1, transformOrigin: 'center bottom' }}
       onMouseDown={handleWindowClick}
     >
       <div className={`h-full flex flex-col overflow-hidden border border-white/10 shadow-2xl bg-surface-900/90 backdrop-blur-xl transition-all duration-150 ${fullscreen ? 'rounded-none border-0' : 'rounded-xl'}`}>
-        <div className="flex items-center bg-surface-800/60 backdrop-blur-sm border-b border-white/5 select-none no-drag" style={{ minHeight: 38 }} onMouseDown={fullscreen ? handleFullscreenTitleMouseDown : handleTitleMouseDown} onDoubleClick={handleTitleDoubleClick}>
+        <div className="relative z-50 flex items-center bg-surface-800/60 backdrop-blur-sm border-b border-white/5 select-none no-drag" style={{ minHeight: 38 }} onMouseDown={fullscreen ? handleFullscreenTitleMouseDown : handleTitleMouseDown} onDoubleClick={handleTitleDoubleClick}>
           {fullscreen && isMac && <div style={{ width: Math.max(0, 72 - sidebarWidth), flexShrink: 0 }} />}
           <TrafficLights onClose={handleClose} onHide={onHide} onFullscreen={() => onUpdateState({ fullscreen: !fullscreen })} isFullscreen={fullscreen} />
           <div className="flex-1 flex items-center gap-2 justify-center">
@@ -409,16 +541,16 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
         </div>
         {!fullscreen && (
           <>
-            {/* 角落 */}
-            <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize z-10" onMouseDown={e => handleResizeStart(e, 'nw')} />
-            <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize z-10" onMouseDown={e => handleResizeStart(e, 'ne')} />
-            <div className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize z-10" onMouseDown={e => handleResizeStart(e, 'sw')} />
-            <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize z-10" onMouseDown={e => handleResizeStart(e, 'se')} />
+            {/* 角落（z 高于标题栏 z-50，确保可拖拽调窗） */}
+            <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize z-[60]" onMouseDown={e => handleResizeStart(e, 'nw')} />
+            <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize z-[60]" onMouseDown={e => handleResizeStart(e, 'ne')} />
+            <div className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize z-[60]" onMouseDown={e => handleResizeStart(e, 'sw')} />
+            <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize z-[60]" onMouseDown={e => handleResizeStart(e, 'se')} />
             {/* 边缘 */}
-            <div className="absolute top-0 left-3 right-3 h-1 cursor-n-resize" onMouseDown={e => handleResizeStart(e, 'n')} />
-            <div className="absolute bottom-0 left-3 right-3 h-1 cursor-s-resize" onMouseDown={e => handleResizeStart(e, 's')} />
-            <div className="absolute left-0 top-3 bottom-3 w-1 cursor-w-resize" onMouseDown={e => handleResizeStart(e, 'w')} />
-            <div className="absolute right-0 top-3 bottom-3 w-1 cursor-e-resize" onMouseDown={e => handleResizeStart(e, 'e')} />
+            <div className="absolute top-0 left-3 right-3 h-1 cursor-n-resize z-[60]" onMouseDown={e => handleResizeStart(e, 'n')} />
+            <div className="absolute bottom-0 left-3 right-3 h-1 cursor-s-resize z-[60]" onMouseDown={e => handleResizeStart(e, 's')} />
+            <div className="absolute left-0 top-3 bottom-3 w-1 cursor-w-resize z-[60]" onMouseDown={e => handleResizeStart(e, 'w')} />
+            <div className="absolute right-0 top-3 bottom-3 w-1 cursor-e-resize z-[60]" onMouseDown={e => handleResizeStart(e, 'e')} />
           </>
         )}
       </div>
@@ -779,9 +911,123 @@ function CustomizationTool() {
           </div>
         )}
         {tab === 'general' && (
-          <div className="flex items-center justify-center h-40 text-surface-500 text-xs"><div className="text-center"><PaintBucket className="w-10 h-10 mx-auto mb-2 opacity-30" /><p>更多自定义选项即将推出</p></div></div>
+          <ShortcutSettings />
         )}
       </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════
+// 快捷键设置（自定义-通用）
+// ═══════════════════════════════════════════════
+function ShortcutSettings() {
+  const [shortcut, setShortcut] = useState('ctrl+tab')
+  const [capturing, setCapturing] = useState(false)
+  const [savedMsg, setSavedMsg] = useState(null)
+  const isMac = !/Win/i.test(navigator.platform || '')
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.electronAPI?.getUserConfig()
+        if (res?.config?.libraryShortcut) setShortcut(res.config.libraryShortcut)
+      } catch (_) {}
+    })()
+  }, [])
+
+  // 格式化显示：ctrl+tab → ⌃Tab / Ctrl+Tab
+  function formatShortcut(s) {
+    const parts = String(s || '').split('+').filter(Boolean)
+    const mods = []
+    for (const p of parts.slice(0, -1)) {
+      if (p === 'ctrl') mods.push(isMac ? '⌃' : 'Ctrl')
+      else if (p === 'alt') mods.push(isMac ? '⌥' : 'Alt')
+      else if (p === 'shift') mods.push(isMac ? '⇧' : 'Shift')
+      else if (p === 'meta') mods.push(isMac ? '⌘' : 'Win')
+    }
+    const key = parts[parts.length - 1]
+    const keyLabel = key === 'tab' ? 'Tab' : key === 'space' ? 'Space' : key.toUpperCase()
+    return [...mods, keyLabel].join(isMac ? '' : '+')
+  }
+
+  // 开始捕获快捷键
+  function startCapture() {
+    setCapturing(true)
+    setSavedMsg(null)
+  }
+
+  useEffect(() => {
+    if (!capturing) return
+    const handler = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      // 至少一个修饰键或特殊键
+      const key = e.key.toLowerCase()
+      const isModifier = ['control', 'alt', 'shift', 'meta'].includes(key)
+      if (isModifier) return // 忽略纯修饰键
+      if (!e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+        if (key === 'escape') { setCapturing(false); return }
+        return // 必须有修饰键（防误触）
+      }
+      const parts = []
+      if (e.ctrlKey) parts.push('ctrl')
+      if (e.altKey) parts.push('alt')
+      if (e.shiftKey) parts.push('shift')
+      if (e.metaKey) parts.push('meta')
+      parts.push(key === ' ' ? 'space' : key)
+      const next = parts.join('+')
+      setShortcut(next)
+      setCapturing(false)
+      ;(async () => {
+        try {
+          await window.electronAPI?.setUserConfig('libraryShortcut', next)
+          window.dispatchEvent(new CustomEvent('library-shortcut-changed', { detail: next }))
+          setSavedMsg({ type: 'ok', text: '快捷键已保存' })
+        } catch (_) { setSavedMsg({ type: 'err', text: '保存失败' }) }
+      })()
+    }
+    const keyup = (e) => { if (e.key === 'Escape') setCapturing(false) }
+    window.addEventListener('keydown', handler, true)
+    window.addEventListener('keyup', keyup)
+    return () => {
+      window.removeEventListener('keydown', handler, true)
+      window.removeEventListener('keyup', keyup)
+    }
+  }, [capturing])
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h3 className="text-sm font-semibold text-white">快捷键</h3>
+        <p className="text-xs text-surface-500 mt-1">设置唤起「资源库」的全局快捷键</p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-surface-400 shrink-0">资源库快捷键</span>
+        <button
+          onClick={startCapture}
+          disabled={capturing}
+          className={`px-4 py-2 rounded-xl border text-sm font-mono transition-all min-w-[120px] text-center ${
+            capturing
+              ? 'bg-sky-500/15 border-sky-500/40 text-sky-300 animate-pulse'
+              : 'bg-surface-800/70 border-surface-600 text-surface-200 hover:border-surface-400'
+          }`}
+        >
+          {capturing ? '按下新组合...' : formatShortcut(shortcut)}
+        </button>
+        <button onClick={startCapture} disabled={capturing}
+          className="px-3 py-2 rounded-xl text-xs bg-white/10 hover:bg-white/20 text-surface-300 transition-all disabled:opacity-50">
+          修改
+        </button>
+      </div>
+      <p className="text-[10px] text-surface-600">仅支持带修饰键的组合（Ctrl/⌃、Alt/⌥、Shift/⇧、⌘/Win + 任意键），Esc 取消</p>
+
+      {savedMsg && (
+        <div className={`px-3 py-2 rounded-xl text-xs ${savedMsg.type === 'ok' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'}`}>
+          {savedMsg.text}
+        </div>
+      )}
     </div>
   )
 }
@@ -898,7 +1144,13 @@ export default function TerminalPage() {
         const result = await window.electronAPI?.readUserImage(config.terminalWallpaper, 0)
         if (result?.data) setWallpaper(result.data)
       }
-      if (config.terminalDesktopIcons) setDesktopIcons(config.terminalDesktopIcons)
+      if (config.terminalDesktopIcons) {
+        setDesktopIcons(config.terminalDesktopIcons)
+      }
+      // 首次初始化：桌面默认为空（小程序只出现在资源库，需手动拖入桌面）
+      else {
+        setDesktopIcons({})
+      }
     } catch (_) {}
   }
 
@@ -945,6 +1197,49 @@ export default function TerminalPage() {
     }
   }
 
+  // 收起：从桌面移除图标（程序仍保留在资源库，可再次拖回）
+  function handleIconRemove(app) {
+    setSelectedAppIds(prev => prev.filter(id => id !== app.id))
+    const next = { ...desktopIcons }
+    delete next[app.id]
+    saveDesktopIcons(next)
+  }
+
+  // 从资源库拖入：添加程序到桌面（已存在则不重复添加）
+  function handleDesktopDrop(e) {
+    // 支持两种数据格式：自定义 MIME 类型 + text/plain 前缀标记（兼容 Chromium 类型规范化）
+    let appId = e.dataTransfer?.getData('application/x-app-id')
+    if (!appId) {
+      const plain = e.dataTransfer?.getData('text/plain') || ''
+      if (plain.startsWith('library-app:')) appId = plain.slice('library-app:'.length)
+    }
+    if (!appId) return
+    e.preventDefault()
+    if (desktopIcons[appId]) return // 已在桌面，不重复添加
+    const rect = desktopRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    let col = Math.max(0, Math.min(gridCols - 1, Math.floor(x / GRID_CELL)))
+    let row = Math.max(0, Math.floor(y / GRID_CELL))
+    // 避免重叠：如果目标格被占用，找最近空格
+    const occ = getOccupiedCells()
+    if (occ[`${col},${row}`]) {
+      let bestCol = col, bestRow = row, bestDist = Infinity
+      for (let r = 0; r < 20; r++) {
+        for (let c = 0; c < gridCols; c++) {
+          if (!occ[`${c},${r}`]) {
+            const dist = Math.abs(c - col) + Math.abs(r - row)
+            if (dist < bestDist) { bestDist = dist; bestCol = c; bestRow = r }
+          }
+        }
+      }
+      col = bestCol; row = bestRow
+    }
+    const next = { ...desktopIcons, [appId]: { col, row } }
+    saveDesktopIcons(next)
+  }
+
   function handleIconDragMove(appId, clientX, clientY) {
     if (groupDragOffset !== null && selectedAppIds.includes(appId)) {
       const dx = clientX - groupDragStartMouse.current.x
@@ -959,7 +1254,9 @@ export default function TerminalPage() {
     return getIconPosition(app, idx >= 0 ? idx : 0)
   }
 
+  // 位置：只在 desktopIcons 中存在时返回（无则返回 null，不显示在桌面）
   function getIconPosition(app, index) {
+    if (!desktopIcons[app.id]) return null
     return desktopIcons[app.id] || { col: index % gridCols, row: Math.floor(index / gridCols) }
   }
 
@@ -1005,8 +1302,10 @@ export default function TerminalPage() {
       const desktopRect = desktopRef.current?.getBoundingClientRect()
       if (!desktopRect) return
       const ids = APPS
+        .filter(app => desktopIcons[app.id])
         .filter(app => {
           const pos = getIconPosition(app, 0)
+          if (!pos) return false
           const col = pos.col
           const row = pos.row
           const ix = desktopRect.left + col * GRID_CELL + (GRID_CELL - 80) / 2
@@ -1026,20 +1325,12 @@ export default function TerminalPage() {
     }
   }, [selecting, setSelectedAppIds])
 
-  // 当前已占用的格子
+  // 当前已占用的格子（仅桌面上的程序）
   function getOccupiedCells() {
     const occ = {}
     for (const [id, pos] of Object.entries(desktopIcons)) {
       occ[`${pos.col},${pos.row}`] = id
     }
-    // 兜底默认位置
-    APPS.forEach((app, i) => {
-      if (!desktopIcons[app.id]) {
-        const defCol = i % gridCols
-        const defRow = Math.floor(i / gridCols)
-        occ[`${defCol},${defRow}`] = app.id
-      }
-    })
     return occ
   }
 
@@ -1051,13 +1342,16 @@ export default function TerminalPage() {
           <div className="absolute inset-0 bg-black/40 pointer-events-none" />
         </>
       )}
-      <div ref={desktopRef} className="flex-1 relative overflow-hidden" onMouseDown={handleDesktopMouseDown}>
+      <div ref={desktopRef} className="flex-1 relative overflow-hidden" onMouseDown={handleDesktopMouseDown}
+        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
+        onDrop={handleDesktopDrop}>
         <div className="absolute inset-0 p-1 desktop-bg-area">
-          {APPS.map((app, i) => (
+          {APPS.filter(app => desktopIcons[app.id]).map((app, i) => (
             <DesktopIcon key={app.id} app={app} position={getIconPosition(app, i)}
               onClick={launchApp} onDragEnd={handleIconDragEnd} onDragStart={handleIconDragStart} onDragMove={handleIconDragMove}
               gridRef={desktopRef} settled={settled} occupiedCells={getOccupiedCells} gridCols={gridCols}
-              isSelected={selectedAppIds.includes(app.id)} groupDragOffset={groupDragOffset} />
+              isSelected={selectedAppIds.includes(app.id)} groupDragOffset={groupDragOffset}
+              onRemove={handleIconRemove} />
           ))}
         </div>
         {/* 选择框 */}

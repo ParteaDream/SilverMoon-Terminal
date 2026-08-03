@@ -2,34 +2,15 @@ import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTerminal } from '../context/TerminalContext'
 import { useDb } from '../context/DbContext'
-import {
-  Calculator, FileText, FolderOpen, Settings2, Play, X, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass
-} from 'lucide-react'
-
-/** 应用程序注册表 — 终端板块的权威定义 */
-export const APPS = [
-  { id: 'traincalc', name: '养成计算器', icon: Calculator, placeholder: false, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
-  { id: 'betamemo', name: 'Beta备忘录', icon: FileText, placeholder: false, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
-  { id: 'dragonsnake', name: '非完备证明', icon: Swords, placeholder: false, color: 'from-emerald-700 to-teal-400', iconClass: 'text-white drop-shadow-md' },
-  { id: 'worldtree', name: '世界树', icon: Globe, placeholder: false, color: 'from-green-600 to-emerald-400', iconClass: 'text-white drop-shadow-sm' },
-  { id: 'album', name: '切片辖域·鸽', icon: Images, placeholder: false, color: 'from-pink-500 to-rose-600', iconClass: 'text-white drop-shadow-md' },
-  { id: 'ratefetcher', name: 'RateFetcher', icon: BarChart3, placeholder: false, color: 'from-cyan-700 to-blue-400', iconClass: 'text-white drop-shadow-md' },
-  { id: 'northlandbank', name: '北国银行', icon: Landmark, placeholder: false, color: 'from-amber-700 to-yellow-500', iconClass: 'text-white drop-shadow-md' },
-  { id: 'gachastation', name: '祈愿捕捉站', icon: Star, placeholder: false, color: 'from-blue-600 to-cyan-400', iconClass: 'text-white drop-shadow-md' },
-  { id: 'memoryhub', name: '摹忆中枢', icon: Compass, placeholder: false, color: 'from-amber-500 to-yellow-400', iconClass: 'text-white drop-shadow-md' },
-  { id: 'hourglass', name: '时之沙', icon: Hourglass, placeholder: false, color: 'from-indigo-600 to-violet-500', iconClass: 'text-white drop-shadow-md' },
-]
-
-export const SYS_TOOLS = [
-  { id: 'resources', name: '资源', icon: FolderOpen, system: true, color: 'from-blue-500 to-sky-300', iconClass: 'text-white drop-shadow-md' },
-  { id: 'customize', name: '自定义', icon: Settings2, system: true, color: 'from-purple-500 to-pink-400', iconClass: 'text-white drop-shadow-md' },
-]
+import AppLibrary from './AppLibrary'
+import { APPS, SYS_TOOLS, matchShortcut } from './appRegistry'
+import { Play, X } from 'lucide-react'
 
 /**
  * 底部 Dock 菜单栏
  */
 export default function TerminalDock({ visible }) {
-  const { runningApps, toggleApp, closeApp, hasRunningNonSystem, summonApp } = useTerminal()
+  const { runningApps, toggleApp, closeApp, hasRunningNonSystem, summonApp, updateAppState } = useTerminal()
   const { devMode } = useDb()
   const location = useLocation()
   const [hovered, setHovered] = useState(null)
@@ -40,6 +21,8 @@ export default function TerminalDock({ visible }) {
   const [contextMenu, setContextMenu] = useState(null)
   const menuJustOpened = useRef(false)
   const dockRef = useRef(null)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [libraryShortcut, setLibraryShortcut] = useState('ctrl+tab')
 
   const isOnTerminal = location.pathname === '/terminal'
   const dockItems = [...SYS_TOOLS, ...runningApps.filter(a => !a.system)]
@@ -54,6 +37,44 @@ export default function TerminalDock({ visible }) {
     }
     window.addEventListener('sidebar-toggled', updateWidth)
     return () => window.removeEventListener('sidebar-toggled', updateWidth)
+  }, [])
+
+  // 加载资源库快捷键配置（user.json）
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.electronAPI?.getUserConfig()
+        if (res?.config?.libraryShortcut) setLibraryShortcut(res.config.libraryShortcut)
+      } catch (_) {}
+    })()
+  }, [])
+
+  // 清理历史遗留的 library 窗口（资源库是系统工具，不应作为窗口存在）
+  useEffect(() => {
+    const existing = runningApps.find(a => a.id === 'library')
+    if (existing) closeApp('library')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 全局快捷键唤起资源库
+  useEffect(() => {
+    const handler = (e) => {
+      if (matchShortcut(e, libraryShortcut)) {
+        e.preventDefault()
+        setLibraryOpen(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [libraryShortcut])
+
+  // 快捷键配置变化时同步（自定义面板修改后，事件直接携带新值，避免防抖写入未完成读到旧值）
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail) setLibraryShortcut(e.detail)
+    }
+    window.addEventListener('library-shortcut-changed', handler)
+    return () => window.removeEventListener('library-shortcut-changed', handler)
   }, [])
 
   // 关闭右键菜单（仅监听 click，延迟添加避免打开立即关闭）
@@ -78,23 +99,48 @@ export default function TerminalDock({ visible }) {
     const page = a.state?.showOnPage || '/terminal'
     return page === '*' || page === location.pathname
   })
-  if (!visible && !isOnTerminal && !hasRunningNonSystem && runningApps.length === 0) return null
-  if (anyFullscreenVisible) return null
+  if (!libraryOpen && !visible && !isOnTerminal && !hasRunningNonSystem && runningApps.length === 0) return null
+  if (!libraryOpen && anyFullscreenVisible) return null
 
   // ── 事件处理 ──
 
+  // 该程序是否正显示在当前板块（可见状态）
+  function isVisibleOnCurrentPage(app) {
+    const existing = runningApps.find(a => a.id === app.id)
+    if (!existing || existing.state?.hidden) return false
+    const page = existing.state?.showOnPage || '/terminal'
+    return page === '*' || page === location.pathname
+  }
+
   function handleClick(app) {
     setContextMenu(null)
+    if (app.id === 'library') {
+      // 资源库：切换展开小窗
+      setLibraryOpen(prev => !prev)
+      return
+    }
+    // 点击其他程序/工具：先关闭资源库面板（在 click 完成后再卸载 Dock，避免事件丢失）
+    setLibraryOpen(false)
     if (app.system) {
       // 系统工具：如果已在当前页面可见则隐藏，否则召唤到当前页面
-      const existing = runningApps.find(a => a.id === app.id)
-      if (existing && !existing.state?.hidden && (existing.state?.showOnPage === '*' || existing.state?.showOnPage === location.pathname)) {
+      if (isVisibleOnCurrentPage(app)) {
         toggleApp(app)  // 隐藏
       } else {
         summonApp(app, location.pathname)  // 召唤到当前页面
       }
       return
     }
+    // 普通程序：当前板块可见 → 隐藏（带吸入动画）；不可见 → 召唤到当前板块并显示
+    if (isVisibleOnCurrentPage(app)) {
+      updateAppState(app.id, { hidden: true })
+    } else {
+      summonApp(app, location.pathname)
+    }
+  }
+
+  // 资源库：点击程序 → 打开并收起小窗
+  function handleLibraryOpen(app) {
+    setLibraryOpen(false)
     summonApp(app, location.pathname)
   }
 
@@ -102,11 +148,17 @@ export default function TerminalDock({ visible }) {
     e.preventDefault()
     e.stopPropagation()
     const existing = runningApps.find(a => a.id === app.id)
+    setLibraryOpen(false) // 右键时关闭资源库面板
     setContextMenu({ x: e.clientX, y: e.clientY, app, isRunning: !!existing })
   }
 
   function handleOpenApp(app) {
     setContextMenu(null)
+    // 资源库不能作为窗口打开，改为展开资源库面板
+    if (app.id === 'library') {
+      setLibraryOpen(true)
+      return
+    }
     summonApp(app, location.pathname)
   }
 
@@ -133,7 +185,9 @@ export default function TerminalDock({ visible }) {
             const AppIcon = app.icon
             const isHovered = hovered === app.id
             const running = runningApps.find(a => a.id === app.id)
-            const isRunning = running && !running.state?.hidden
+            // 资源库面板打开时图标亮起（视为运行中）
+            const isRunning = app.id === 'library' ? libraryOpen : (running && !running.state?.hidden)
+            const showDot = app.id === 'library' ? libraryOpen : !!running
             return (
               <div
                 key={app.id}
@@ -149,7 +203,8 @@ export default function TerminalDock({ visible }) {
                 <button
                   onClick={() => handleClick(app)}
                   onContextMenu={(e) => handleContextMenu(e, app)}
-                  className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-150
+                  data-app-id={app.id}
+                  className={`terminal-dock-icon w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-150
                     ${isHovered ? 'scale-125 -translate-y-2' : ''}
                     ${isRunning ? `bg-gradient-to-br ${app.color || 'from-white/15 to-white/10'} border border-white/20` : 'bg-white/5 border border-white/10'}
                     hover:bg-white/20 hover:shadow-lg`}
@@ -157,14 +212,23 @@ export default function TerminalDock({ visible }) {
                 >
                   <AppIcon className={`w-6 h-6 ${app.iconClass || (isRunning ? 'text-white/90' : 'text-white/60')}`} />
                 </button>
-                {running && (
-                  <div className={`w-1 h-1 rounded-full mt-1 ${running.state?.hidden ? 'bg-white/20' : 'bg-white/60'}`} />
+                {showDot && (
+                  <div className={`w-1 h-1 rounded-full mt-1 ${running?.state?.hidden ? 'bg-white/20' : 'bg-white/60'}`} />
                 )}
               </div>
             )
           })}
         </div>
       </div>
+
+      {/* 资源库面板（从 Dock 图标位置展开） */}
+      {libraryOpen && (
+        <AppLibrary
+          onClose={() => setLibraryOpen(false)}
+          onOpenApp={handleLibraryOpen}
+          dockBottom={devMode ? 40 + 76 : 76}
+        />
+      )}
 
       {/* 右键菜单 */}
       {contextMenu && (

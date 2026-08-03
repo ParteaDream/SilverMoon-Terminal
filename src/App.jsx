@@ -182,7 +182,6 @@ function GlobalWindows() {
   return runningApps.map(app => {
     const page = app.state?.showOnPage || '/terminal'
     const pageVisible = page === '*' || page === location.pathname
-    if (!pageVisible && app.state?.hidden) return null
     return (
       <TerminalWindow
         key={app.id}
