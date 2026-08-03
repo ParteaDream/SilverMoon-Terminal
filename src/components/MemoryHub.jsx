@@ -75,6 +75,8 @@ const TileImage = memo(({ src, worldCol, worldRow, tileSize }) => {
 
 // 切片发布使用自己的局部 revision。新增/升级切片时只重渲染这一层，
 // 不让 560+ 标点与文本框跟着每个切片批次重新走一遍 React render。
+// 拖拽/惯性期间从 dragLiveTilesRef 取实时可见切片，仅本层随视口移动重渲染，
+// 使进入视口的切片在拖拽过程中即可挂载并显示，无需等松手。
 const TileLayer = memo(({
   visibleTiles,
   publishedCacheRef,
@@ -82,6 +84,9 @@ const TileLayer = memo(({
   tileLayerReady,
   refreshRef,
   commitAckRef,
+  dragLiveTilesRef,
+  isDraggingRef,
+  inertiaRunningRef,
 }) => {
   const [, setRevision] = useState(0)
   useLayoutEffect(() => {
@@ -96,6 +101,10 @@ const TileLayer = memo(({
   })
 
   const tileSize = mapConfigRef.current?.tileSize || TILE_SIZE
+  // 交互移动期间（React state 不更新）用实时 ref 切片集合渲染
+  const liveTiles = (isDraggingRef.current || inertiaRunningRef.current)
+    ? (dragLiveTilesRef.current || visibleTiles)
+    : visibleTiles
   return (
     <div style={{
       position: 'relative',
@@ -105,7 +114,7 @@ const TileLayer = memo(({
       willChange: 'opacity',
       pointerEvents: 'none',
     }}>
-      {visibleTiles.map(({ worldRow, worldCol }) => {
+      {liveTiles.map(({ worldRow, worldCol }) => {
         const key = `${worldRow}_${worldCol}`
         const cached = publishedCacheRef.current.get(key)
         const src = typeof cached === 'string' ? cached : cached?.data
@@ -253,6 +262,9 @@ export default function MemoryHub() {
   const loadingTiles = useRef(new Map())     // "row_col" → 在途请求宽度
   const desiredTileWidthsRef = useRef(new Map()) // "row_col" → 当前视图要求的最高宽度
   const missingTiles = useRef(new Set())     // "row_col" — 确认不存在的切片，不再重试
+  const queuedTileKeysRef = useRef(new Set()) // "row_col" — 已推入空闲队列的切片（拖拽期间去重，避免重复入队）
+  const dragLiveTilesRef = useRef([])          // 拖拽/惯性期间实时可见切片（供 TileLayer 渲染）
+  const dragLiveTilesKeysRef = useRef(new Set()) // 已渲染的实时切片 key 集合（变化时才触发本层重渲染）
   const containerSize = useRef({ w: 800, h: 600 })
   const zoomRef = useRef(zoom)
   const settledZoomRef = useRef(zoom)
@@ -278,6 +290,7 @@ export default function MemoryHub() {
   const evictPendingRef = useRef(false)
   const evictIdleRef = useRef(null)
   const tileLayerReadyRef = useRef(false)  // 同步 ref，供 loadTile 闭包使用
+  const syncDragTileLoadingRef = useRef(null) // 拖拽/惯性期间同步加载视口切片的入口
   const currentMapIdRef = useRef(currentMapId)
   useEffect(() => { currentMapIdRef.current = currentMapId }, [currentMapId])
   const mapGenerationRef = useRef(0)
@@ -425,20 +438,14 @@ export default function MemoryHub() {
     if (
       tilePublishRafRef.current !== null
       || tilePublishAwaitingCommitRef.current
-      || isDraggingRef.current
       || isZoomingRef.current
-      || inertiaRunningRef.current
     ) return
 
     const generation = mapGenerationRef.current
     const flush = () => {
       tilePublishRafRef.current = null
       if (mapGenerationRef.current !== generation) return
-      if (
-        isDraggingRef.current
-        || isZoomingRef.current
-        || inertiaRunningRef.current
-      ) return
+      if (isZoomingRef.current) return
 
       const visibleKeys = actualVisibleTileKeysRef.current
       let publishedCount = 0
@@ -525,6 +532,8 @@ export default function MemoryHub() {
   const [fullImageSrc, setFullImageSrc] = useState(null)
   const [useFullImage, setUseFullImage] = useState(false)
   const fullImageRef = useRef(null)
+  const useFullImageRef = useRef(useFullImage)
+  useEffect(() => { useFullImageRef.current = useFullImage }, [useFullImage])
   const pendingViewRef = useRef(null)        // rAF 节流：待更新的 view 状态
   const rafViewRef = useRef(null)            // rAF 句柄
 
@@ -628,6 +637,8 @@ export default function MemoryHub() {
   }
   const effectiveMarkerSize = userMapConfig.markerSize ?? mapConfig?.markerSize ?? globalDefaults.markerSize ?? 32
   const effectiveFullImgThreshold = userMapConfig.fullImgThreshold ?? mapConfig?.fullImgThreshold ?? globalDefaults.fullImgThreshold ?? 0.10
+  const fullImageThresholdRef = useRef(effectiveFullImgThreshold)
+  useEffect(() => { fullImageThresholdRef.current = effectiveFullImgThreshold }, [effectiveFullImgThreshold])
 
   const effectiveInertiaEnabled = userMapConfig.inertiaEnabled ?? mapConfig?.inertiaEnabled ?? globalDefaults.inertiaEnabled ?? true
   const effectiveInertiaFriction = userMapConfig.inertiaFriction ?? mapConfig?.inertiaFriction ?? globalDefaults.inertiaFriction ?? 0.05
@@ -853,6 +864,7 @@ export default function MemoryHub() {
     loadingTiles.current.clear()
     desiredTileWidthsRef.current.clear()
     tileQueueRef.current?.clear()
+    queuedTileKeysRef.current.clear()
     mapGenerationRef.current += 1
     currentMapIdRef.current = mapId
     tileLayerReadyRef.current = false
@@ -948,6 +960,7 @@ export default function MemoryHub() {
         loadingTiles.current.clear()
         desiredTileWidthsRef.current.clear()
         tileQueueRef.current?.clear()
+        queuedTileKeysRef.current.clear()
         mapGenerationRef.current += 1
         tileLayerReadyRef.current = false
         setTileLayerReady(false)
@@ -1035,6 +1048,7 @@ export default function MemoryHub() {
       loadingTiles.current.clear()
       desiredTileWidthsRef.current.clear()
       tileQueueRef.current?.clear()
+      queuedTileKeysRef.current.clear()
       mapGenerationRef.current += 1
       tileLayerReadyRef.current = false
       setTileLayerReady(false)
@@ -1290,6 +1304,7 @@ export default function MemoryHub() {
     tileQueueRef.current?.pause()
     // 清除队列中残留的旧缩放级别切片，避免恢复后加载非可见 tile
     tileQueueRef.current?.clear()
+    queuedTileKeysRef.current.clear()
     desiredTileWidthsRef.current.clear()
     if (delayedTileIdleRef.current !== null) {
       cancelIdleCallback(delayedTileIdleRef.current)
@@ -1347,6 +1362,7 @@ export default function MemoryHub() {
       tileQueueRef.current?.pause()
       // 清除队列中残留的旧缩放级别切片，避免恢复后加载非可见 tile
       tileQueueRef.current?.clear()
+      queuedTileKeysRef.current.clear()
       desiredTileWidthsRef.current.clear()
       // 新一轮缩放，取消待执行的延迟 idle 任务
       if (delayedTileIdleRef.current !== null) {
@@ -1427,9 +1443,10 @@ export default function MemoryHub() {
     inertiaRunningRef.current = false
     dragPositionsRef.current = []
     dragSpeedRef.current = { vx: 0, vy: 0 }
-    // 暂停 idle queue，拖拽期间避免 tile 完成触发 React 重渲染
-    tileQueueRef.current?.pause()
+    // 拖拽期间不暂停 idle queue：进入视口的切片在浏览器空闲间隙继续加载，
+    // 长按拖拽不松手时新区域切片也能就绪，松手后即刻呈现，避免空白等待。
     tileQueueRef.current?.clear()
+    queuedTileKeysRef.current.clear()
     desiredTileWidthsRef.current.clear()
     // 取消等待中的延迟 idle 任务（拖拽期间不需要）
     if (delayedTileIdleRef.current !== null) {
@@ -1473,6 +1490,8 @@ export default function MemoryHub() {
         dragRafRef.current = null
         applyLiveTransform(zoomRef.current, viewCenterRef.current)
         refreshAnnotationWindow(zoomRef.current, viewCenterRef.current)
+        // 拖拽中实时把进入视口的切片推入空闲队列加载
+        syncDragTileLoadingRef.current?.()
       })
     }
   }, [applyLiveTransform, constrainViewCenterForMap, refreshAnnotationWindow])
@@ -1514,6 +1533,8 @@ export default function MemoryHub() {
 
     applyLiveTransform(zoomRef.current, viewCenterRef.current)
     refreshAnnotationWindow(zoomRef.current, viewCenterRef.current)
+    // 惯性滑行期间同样继续加载进入视口的切片
+    syncDragTileLoadingRef.current?.()
 
     inertiaRafRef.current = requestAnimationFrame(inertiaTick)
   }
@@ -2072,6 +2093,69 @@ export default function MemoryHub() {
     return tiles.slice(0, MAX_TILES)
   }, [])
 
+  // ── 拖拽/惯性滑行期间：实时把进入视口的切片推入空闲队列加载 ──
+  // 长按拖拽不松手时 React state 不更新（visibleTiles 由 tilesTick 驱动），
+  // 这里直接用 ref 实时值计算可视切片，并更新可见集合供发布/淘汰逻辑使用，
+  // 同时把实时切片集合喂给 TileLayer 渲染（变化时才触发本层重渲染）。
+  const syncDragTileLoading = useCallback(() => {
+    const q = tileQueueRef.current
+    const mc = mapConfigRef.current
+    if (!q || !mc || !currentMapIdRef.current) return
+    const tileSize = mc.tileSize || TILE_SIZE
+    // 全图仍覆盖切片时无需加载（与正式加载通道阈值一致）
+    if (useFullImageRef.current && zoomRef.current < fullImageThresholdRef.current * 0.7) {
+      if (dragLiveTilesRef.current.length > 0) {
+        dragLiveTilesRef.current = []
+        dragLiveTilesKeysRef.current.clear()
+        tileLayerRefreshRef.current?.()
+      }
+      return
+    }
+    const tiles = getVisibleTiles()
+    actualVisibleTileKeysRef.current = new Set(
+      tiles.map(({ worldRow, worldCol }) => `${worldRow}_${worldCol}`),
+    )
+    // 可见切片集合变化时才让 TileLayer 重渲染（仅本层，不牵动标注树）
+    const liveKeys = dragLiveTilesKeysRef.current
+    let liveChanged = tiles.length !== liveKeys.size
+    if (!liveChanged) {
+      for (const { worldRow, worldCol } of tiles) {
+        if (!liveKeys.has(`${worldRow}_${worldCol}`)) { liveChanged = true; break }
+      }
+    }
+    if (liveChanged) {
+      dragLiveTilesKeysRef.current = new Set(tiles.map(({ worldRow, worldCol }) => `${worldRow}_${worldCol}`))
+      dragLiveTilesRef.current = tiles
+      tileLayerRefreshRef.current?.()
+    }
+    const requestedWidth = getTilePreloadRequestWidth({
+      tileSize,
+      zoom: zoomRef.current,
+      devicePixelRatio: window.devicePixelRatio,
+      useFullImage: useFullImageRef.current,
+      fullImageThreshold: fullImageThresholdRef.current,
+    })
+    for (const { worldRow, worldCol } of tiles) {
+      const key = `${worldRow}_${worldCol}`
+      if (tileCacheSatisfies(tileCache.current.get(key), requestedWidth, tileSize)) continue
+      if (
+        loadingTiles.current.has(key)
+        || missingTiles.current.has(key)
+        || queuedTileKeysRef.current.has(key)
+      ) continue
+      queuedTileKeysRef.current.add(key)
+      desiredTileWidthsRef.current.set(
+        key,
+        Math.max(desiredTileWidthsRef.current.get(key) || 0, requestedWidth || tileSize),
+      )
+      q.push(() => {
+        queuedTileKeysRef.current.delete(key)
+        return loadTile(worldRow, worldCol, requestedWidth)
+      })
+    }
+  }, [getVisibleTiles, loadTile])
+  syncDragTileLoadingRef.current = syncDragTileLoading
+
   // ── 初始化空闲加载队列 ──
   useEffect(() => {
     tileQueueRef.current = createIdleQueue({ timeout: 300 })
@@ -2085,6 +2169,9 @@ export default function MemoryHub() {
     actualVisibleTileKeysRef.current.clear()
     tileLayerCommitAckRef.current = null
     decodedTilePreloadsRef.current.clear()
+    queuedTileKeysRef.current.clear()
+    dragLiveTilesRef.current = []
+    dragLiveTilesKeysRef.current.clear()
   }, [cancelActiveInteraction])
   // ── 同步 React state → DOM transform（缩放/拖拽停止后确保 transform 对齐） ──
   useLayoutEffect(() => {
@@ -2141,8 +2228,9 @@ export default function MemoryHub() {
     if (useFullImage && zoom < preloadThreshold) return
     const q = tileQueueRef.current
     if (!q) return
-    // 缩放或拖拽期间暂停切片加载，确保交互流畅
-    if (isZoomingRef.current || isDraggingRef.current || inertiaRunningRef.current) { q.pause(); return }
+    // 仅缩放期间暂停切片加载（缩放改变目标分辨率）；
+    // 拖拽/惯性期间队列保持运行，进入视口的切片由 syncDragTileLoading 推入。
+    if (isZoomingRef.current) { q.pause(); return }
     q.resume()
     needsReloadRef.current = false
     const vc = viewCenterRef.current
@@ -2168,6 +2256,7 @@ export default function MemoryHub() {
         !tileCacheSatisfies(tileCache.current.get(key), requestedWidth, tileSize)
         && !loadingTiles.current.has(key)
         && !missingTiles.current.has(key)
+        && !queuedTileKeysRef.current.has(key)
       )
     })
     if (tiles.length === 0) return
@@ -2182,7 +2271,12 @@ export default function MemoryHub() {
     throttledSetTileRemaining(tileRemainingRef.current)
     // 推入空闲队列串行加载（已按中心优先排序，队列串行执行保证足够的中断间隙）
     for (const tile of tiles) {
-      q.push(() => loadTile(tile.worldRow, tile.worldCol, requestedWidth))
+      const key = `${tile.worldRow}_${tile.worldCol}`
+      queuedTileKeysRef.current.add(key)
+      q.push(() => {
+        queuedTileKeysRef.current.delete(key)
+        return loadTile(tile.worldRow, tile.worldCol, requestedWidth)
+      })
     }
   }, [visibleTiles, currentMapId, loadTile, useFullImage, zoom])
 
@@ -2491,6 +2585,9 @@ export default function MemoryHub() {
               tileLayerReady={tileLayerReady}
               refreshRef={tileLayerRefreshRef}
               commitAckRef={tileLayerCommitAckRef}
+              dragLiveTilesRef={dragLiveTilesRef}
+              isDraggingRef={isDraggingRef}
+              inertiaRunningRef={inertiaRunningRef}
             />
 
             {/* ── 分层地图模式：G 层变暗覆盖（匹配 FullMapImage 坐标：left=-ax*scale, top=-ay*scale, w=mapW*scale, h=mapH*scale） ── */}
@@ -2982,36 +3079,6 @@ export default function MemoryHub() {
         </>
       )}
 
-      {/* ── tooltip 详情弹窗（portal → body） ── */}
-      {detailModal && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setDetailModal(null)}>
-          <div className="bg-surface-900 border border-white/10 rounded-2xl shadow-2xl max-w-xl w-full mx-6 max-h-[85vh] flex flex-col overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
-            {/* 头部 */}
-            <div className="flex items-center gap-3 p-5 border-b border-white/10 shrink-0">
-              {detailModal.imageFilename && (
-                <img src={`local-media://${(detailModal.imageFilename || '').trim()}`} className="w-10 h-10 rounded-lg object-cover shrink-0" />
-              )}
-              <p className="text-base font-semibold text-white truncate flex-1">{detailModal.name}</p>
-              <button onClick={() => setDetailModal(null)} className="text-white/50 hover:text-white shrink-0">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            {/* 内容区 */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {detailModal.detailImage && (
-                <img src={`local-media://${(detailModal.detailImage || '').trim()}`} className="w-full max-h-72 rounded-xl object-cover" />
-              )}
-              {detailModal.body ? (
-                <p className="text-sm text-surface-300 whitespace-pre-wrap leading-relaxed">{detailModal.body}</p>
-              ) : (
-                <p className="text-sm text-surface-500 italic">暂无详情描述</p>
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
       {/* ── 标定弹窗 ── */}
       {calibration && (
         <MapCalibration
@@ -3089,6 +3156,36 @@ export default function MemoryHub() {
         )
       })()}
       </div>
+
+      {/* ── tooltip 详情弹窗（位于地图容器外：覆盖整个摹忆中枢小程序内容区，
+            滚轮只作用于弹窗滚动条，不会透传给地图缩放；不覆盖窗口标题栏） ── */}
+      {detailModal && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setDetailModal(null)}>
+          <div className="bg-surface-900 border border-white/10 rounded-2xl shadow-2xl max-w-xl w-full mx-6 max-h-full flex flex-col overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
+            {/* 头部 */}
+            <div className="flex items-center gap-3 p-5 border-b border-white/10 shrink-0">
+              {detailModal.imageFilename && (
+                <img src={`local-media://${(detailModal.imageFilename || '').trim()}`} className="w-10 h-10 rounded-lg object-cover shrink-0" />
+              )}
+              <p className="text-base font-semibold text-white truncate flex-1">{detailModal.name}</p>
+              <button onClick={() => setDetailModal(null)} className="text-white/50 hover:text-white shrink-0">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* 内容区 */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {detailModal.detailImage && (
+                <img src={`local-media://${(detailModal.detailImage || '').trim()}`} className="w-full max-h-72 rounded-xl object-cover" />
+              )}
+              {detailModal.body ? (
+                <p className="text-sm text-surface-300 whitespace-pre-wrap leading-relaxed">{detailModal.body}</p>
+              ) : (
+                <p className="text-sm text-surface-500 italic">暂无详情描述</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 分层地图悬停名称提示（右上角） ── */}
       {/* ── 切片加载提示（固定居中的系统提示，不受地图变换影响） ── */}

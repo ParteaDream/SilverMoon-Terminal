@@ -219,7 +219,7 @@ function HomePage({ archives, onFetch, onDelete, onSelect, loading }) {
               <span className="text-[11px] font-semibold truncate">{acc.nickname || `UID ${acc.uid}`}</span>
               <span className="text-[8px] px-1 py-0 rounded bg-surface-700/50 text-surface-400">{acc.item_count || 0} 条</span>
             </div>
-            <div className="text-[9px] text-surface-500">UID {acc.uid} · {acc.updated_at?.slice(0, 10) || '未知'}</div>
+            <div className="text-[9px] text-surface-500">UID {acc.uid} · 最近更新 {acc.updated_at?.slice(0, 19) || '未知'}</div>
           </div>
           <button onClick={e => { e.stopPropagation(); onFetch(acc.uid) }} disabled={loading}
             className="p-0.5 rounded text-surface-500 hover:text-blue-400 hover:bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity" title="更新">

@@ -267,7 +267,7 @@ try {
     database,
     'SELECT id, base_config FROM map_markers ORDER BY sort_order, name_zh',
   )
-  assert.equal(currentScaleMarkers.length, 767, '提瓦特 v6.7 fixture placement count')
+  assert.equal(currentScaleMarkers.length, 799, '提瓦特 v6.7 fixture placement count')
 
   const currentOptions = {
     placedMarkers: currentScaleMarkers,
