@@ -522,12 +522,13 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
 
   return (
     <div ref={windowRef}
+      data-window-root="true"
       className={`no-drag ${maximizing ? 'terminal-window-maximizing' : ''} ${closeClass}`}
       style={{ ...((fullscreen ? fullscreenStyle : { position: 'fixed', left, top, width, height, zIndex })), display: displayNone ? 'none' : undefined, opacity: displayNone ? 0 : 1, transformOrigin: 'center bottom' }}
       onMouseDown={handleWindowClick}
     >
       <div className={`h-full flex flex-col overflow-hidden border border-white/10 shadow-2xl bg-surface-900/90 backdrop-blur-xl transition-all duration-150 ${fullscreen ? 'rounded-none border-0' : 'rounded-xl'}`}>
-        <div className="relative z-50 flex items-center bg-surface-800/60 backdrop-blur-sm border-b border-white/5 select-none no-drag" style={{ minHeight: 38 }} onMouseDown={fullscreen ? handleFullscreenTitleMouseDown : handleTitleMouseDown} onDoubleClick={handleTitleDoubleClick}>
+        <div data-window-titlebar="true" className="relative z-50 flex items-center bg-surface-800/60 backdrop-blur-sm border-b border-white/5 select-none no-drag" style={{ minHeight: 38 }} onMouseDown={fullscreen ? handleFullscreenTitleMouseDown : handleTitleMouseDown} onDoubleClick={handleTitleDoubleClick}>
           {fullscreen && isMac && <div style={{ width: Math.max(0, 72 - sidebarWidth), flexShrink: 0 }} />}
           <TrafficLights onClose={handleClose} onHide={onHide} onFullscreen={() => onUpdateState({ fullscreen: !fullscreen })} isFullscreen={fullscreen} />
           <div className="flex-1 flex items-center gap-2 justify-center">

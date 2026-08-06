@@ -774,14 +774,13 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
     return () => { cancelled = true }
   }, [images, index, readImage])
 
-  // Mouse drag handlers
+  // Mouse drag handlers（任意缩放级别下均可拖拽平移）
   const handleMouseDown = useCallback((e) => {
-    if (scale <= 1) return
     e.preventDefault()
     dragging.current = true
     dragStart.current = { x: e.clientX, y: e.clientY }
     posStart.current = { ...position }
-  }, [scale, position])
+  }, [position])
 
   const handleMouseMove = useCallback((e) => {
     if (!dragging.current) return
@@ -809,7 +808,7 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
     const onWheel = (e) => {
       e.stopPropagation()
       e.preventDefault()
-      setScale(prev => Math.max(0.5, Math.min(3, prev + (e.deltaY > 0 ? -0.2 : 0.2))))
+      setScale(prev => Math.max(0.5, Math.min(3, prev + (e.deltaY > 0 ? -0.1 : 0.1))))
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -835,7 +834,7 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
           <img
             src={src}
             alt=""
-            className={`max-w-full max-h-full object-contain rounded-lg shadow-2xl select-none ${scale > 1 ? 'cursor-grab' : ''}`}
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl select-none cursor-grab"
             style={{ transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)` }}
             draggable={false}
           />
@@ -860,9 +859,10 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
           <Minus className="w-3.5 h-3.5" />
         </button>
         <button
-          onClick={e => { e.stopPropagation(); setScale(1); setPosition({ x: 0, y: 0 }) }}
+          onClick={e => { e.stopPropagation(); setScale(1) }}
           className="px-1.5 py-0.5 rounded text-[10px] text-surface-400 hover:text-white hover:bg-white/10 transition-colors font-mono"
-          aria-label="重置缩放"
+          aria-label="恢复 100% 缩放"
+          title="恢复 100% 缩放"
         >
           {Math.round(scale * 100)}%
         </button>
@@ -872,6 +872,14 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
           aria-label="放大"
         >
           <Plus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); setScale(1); setPosition({ x: 0, y: 0 }) }}
+          className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
+          aria-label="回正"
+          title="一键回正（恢复 100% 并居中）"
+        >
+          <Crosshair className="w-3.5 h-3.5" />
         </button>
       </div>
       {/* Counter + export */}

@@ -6002,8 +6002,7 @@ ipcMain.handle('set-user-config', (_event, key, value) => {
 });
 
 // ── Beta备忘录：从 user.db 读写任务数据 ──
-ipcMain.handle('betamemo-load-tasks', () => {
-  try {
+ipcMain.handle('betamemo-load-tasks', () => {  try {
     if (!userDb) return [];
     const result = userDb.exec("SELECT id, data_json FROM betamemo_tasks ORDER BY updated_at DESC");
     if (!result.length || !result[0].values) return [];

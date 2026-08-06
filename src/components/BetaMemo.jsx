@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Plus, Image, Trash2, Eye, EyeOff, ArrowLeft,
   Upload, Check, X, FolderOpen, Pencil, Eraser,
-  Undo2, Redo2,
+  Undo2, Redo2, GripVertical, FileText,
 } from 'lucide-react'
+import Lightbox from './Lightbox'
 
 // ═══════════════════════════════════════
 // 常量
@@ -33,6 +34,53 @@ function getAllImageKeys(task) {
     }
   }
   return keys
+}
+
+// ═══════════════════════════════════════
+// 文字信息模块工具
+// ═══════════════════════════════════════
+function numValue(v) {
+  const n = parseFloat(v)
+  return isNaN(n) || n <= 0 ? 0 : n
+}
+
+// 生成 "1000+2000+2500=5500" 形式的加总文本（未填/0 的项不显示）
+function sumLine(values) {
+  const filled = values.filter(v => v > 0)
+  if (filled.length === 0) return '0'
+  return filled.join('+') + '=' + filled.reduce((a, b) => a + b, 0)
+}
+
+// 列表卡片展示的收入汇总
+function getIncomeSummary(task) {
+  const income = task.income || {}
+  const types = [...IMAGE_TYPES, ...(task.customImageTypes || [])]
+  const testTotal = types.reduce((a, t) => a + numValue(income.testTypes?.[t.key]), 0)
+  const bug = numValue(income.bug)
+  const addTotal = (task.additionalTasks || []).filter(t => t.done).reduce((a, t) => a + numValue(t.reward), 0)
+  const est = testTotal + bug + addTotal
+  const actual = numValue(income.actualPrimogems)
+  const rmb = String(income.actualRmb || '').trim()
+  const parts = []
+  if (est > 0) parts.push(`估计 ${est} 原石`)
+  if (actual > 0) parts.push(`实收 ${actual} 原石${rmb ? ' ¥' + rmb : ''}`)
+  return {
+    text: parts.join(' · '),
+    breakdown: `测试任务 ${testTotal} 原石 · Bug反馈 ${bug} 原石 · 追加任务 ${addTotal} 原石`,
+  }
+}
+
+function hasTextData(task) {
+  const income = task.income || {}
+  if ((task.additionalTasks || []).some(t => t.title || t.body || t.reward || (t.images || []).length)) return true
+  for (const v of Object.values(income)) {
+    if (typeof v === 'object' && v) {
+      if (Object.values(v).some(x => x)) return true
+    } else if (v) {
+      return true
+    }
+  }
+  return false
 }
 
 const STORAGE_KEY = 'betamemo_tasks' // 仅用于迁移检测
@@ -291,6 +339,7 @@ function TaskCard({ task, onClick, onEdit }) {
   const imgCount = Object.keys(allKeys).length
   const customTypes = task.customImageTypes || []
   const totalTypes = IMAGE_TYPES.length + customTypes.length
+  const incomeSum = getIncomeSummary(task)
   return (
     <div
       onClick={onClick}
@@ -306,9 +355,9 @@ function TaskCard({ task, onClick, onEdit }) {
           <p className="text-[11px] text-surface-500 mt-1">
             {imgCount}/{totalTypes} 张图片 · {task.createdAt ? new Date(task.createdAt).toLocaleDateString('zh-CN') : ''}
           </p>
-          {task.extraInfo && (
-            <p className="text-[11px] text-surface-400 mt-1.5 line-clamp-2 whitespace-pre-wrap break-words">
-              {task.extraInfo}
+          {incomeSum.text && (
+            <p className="text-[11px] text-surface-400 mt-1.5 line-clamp-2" title={incomeSum.breakdown}>
+              {incomeSum.text}
             </p>
           )}
         </div>
@@ -345,7 +394,6 @@ function CreateView({ onSave, onCancel, tasks }) {
   const [error, setError] = useState('')
   const existingNames = (tasks || []).map(t => t.name)
   const [name, setName] = useState('')
-  const extraInfoRef = useRef(null)
   const [images, setImages] = useState({ summary: null, constellation: null, questionnaire: null })
   const [customImageTypes, setCustomImageTypes] = useState([])
   const [showAddCustom, setShowAddCustom] = useState(false)
@@ -445,7 +493,6 @@ function CreateView({ onSave, onCancel, tasks }) {
     const task = {
       id: uid(),
       name: trimmed,
-      extraInfo: extraInfoRef.current?.value?.trim() || '',
       summaryImage: renamedImages.summary,
       constellationImage: renamedImages.constellation,
       questionnaireImage: renamedImages.questionnaire,
@@ -493,18 +540,6 @@ function CreateView({ onSave, onCancel, tasks }) {
           {error && !nameDuplicate && (
             <p className="text-[11px] text-red-400 mt-1">{error}</p>
           )}
-        </div>
-
-        <div>
-          <label className="text-[11px] text-surface-400 font-medium mb-1.5 block">额外信息</label>
-          <textarea
-            ref={extraInfoRef}
-            defaultValue=""
-            placeholder="输入额外备注信息（可选，将在任务列表中显示）"
-            rows={3}
-            className="w-full px-3 py-2 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200
-                       placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors resize-none"
-          />
         </div>
 
         {IMAGE_TYPES.map(t => (
@@ -611,7 +646,6 @@ function CreateView({ onSave, onCancel, tasks }) {
 // ═══════════════════════════════════════
 function EditView({ task, tasks, onUpdate, onDelete, onManage, onBack }) {
   const [name, setName] = useState(task.name || '')
-  const extraInfoRef = useRef(null)
   const [images, setImages] = useState(() => {
     const init = {}
     for (const t of IMAGE_TYPES) init[t.key] = task[t.key + 'Image'] || null
@@ -719,10 +753,22 @@ function EditView({ task, tasks, onUpdate, onDelete, onManage, onBack }) {
       }
     }
 
+    // 移除已删除的自定义类型的收入数据
+    const income = { ...(task.income || {}) }
+    if (income.testTypes) {
+      const nextTestTypes = {}
+      for (const key of Object.keys(income.testTypes)) {
+        if (IMAGE_TYPES.find(t => t.key === key) || activeCustomKeys.has(key)) {
+          nextTestTypes[key] = income.testTypes[key]
+        }
+      }
+      income.testTypes = nextTestTypes
+    }
+
     const updated = {
       ...task,
       name: trimmed,
-      extraInfo: extraInfoRef.current?.value?.trim() || '',
+      income,
       summaryImage: renamedImages.summary,
       constellationImage: renamedImages.constellation,
       questionnaireImage: renamedImages.questionnaire,
@@ -750,8 +796,8 @@ function EditView({ task, tasks, onUpdate, onDelete, onManage, onBack }) {
         <button
           onClick={() => {
             const trimmed = name.trim() || task.name
-            onUpdate({ ...task, name: trimmed, extraInfo: extraInfoRef.current?.value?.trim() || '' })
-            onManage({ ...task, name: trimmed, extraInfo: extraInfoRef.current?.value?.trim() || '' })
+            onUpdate({ ...task, name: trimmed })
+            onManage({ ...task, name: trimmed })
           }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30
                      border border-amber-500/30 text-amber-300 text-xs font-medium transition-colors"
@@ -778,18 +824,6 @@ function EditView({ task, tasks, onUpdate, onDelete, onManage, onBack }) {
           {nameDuplicate && (
             <p className="text-[11px] text-red-400 mt-1">此名称已被使用，请更换</p>
           )}
-        </div>
-
-        <div>
-          <label className="text-[11px] text-surface-400 font-medium mb-1.5 block">额外信息</label>
-          <textarea
-            ref={extraInfoRef}
-            defaultValue={task.extraInfo || ''}
-            placeholder="输入额外备注信息"
-            rows={3}
-            className="w-full px-3 py-2 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200
-                       placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors resize-none"
-          />
         </div>
 
         {IMAGE_TYPES.map(t => (
@@ -1075,7 +1109,7 @@ function drawAllStrokes(ctx, w, h, strokes, imgNaturalSize, showStrokes, preview
 }
 
 function ManageView({ task, onUpdate, onDelete, onBack }) {
-  const [activeTab, setActiveTab] = useState('summary')
+  const [activeTab, setActiveTab] = useState('text')
   const [showStrokes, setShowStrokes] = useState(true)
   const [brush, setBrush] = useState('ok')
   const [pauseColor, setPauseColor] = useState('#f97316')
@@ -1084,7 +1118,6 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   const canvasRef = useRef(null)
   const imageRef = useRef(null)
   const containerRef = useRef(null)
-  const extraInfoRef = useRef(null)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [imgDataUrl, setImgDataUrl] = useState(null)
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
@@ -1388,6 +1421,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   // ── 快捷键 ──
   useEffect(() => {
     const onKey = (e) => {
+      if (activeTab === 'text') return
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z' && e.shiftKey) { e.preventDefault(); handleRedo() }
         else if (e.key === 'z') { e.preventDefault(); handleUndo() }
@@ -1395,7 +1429,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleUndo, handleRedo])
+  }, [handleUndo, handleRedo, activeTab])
 
   const hasImage = !!getImageKey(task, activeTab)
 
@@ -1450,25 +1484,30 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
               </button>
             )
           })}
+          <div className="my-1.5 border-t border-white/5" />
+          <button
+            onClick={() => setActiveTab('text')}
+            className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors text-left ${
+              activeTab === 'text'
+                ? 'bg-white/10 text-white'
+                : 'text-surface-500 hover:text-surface-300 hover:bg-white/5'
+            }`}
+            title="收入与追加任务信息"
+          >
+            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasTextData(task) ? 'bg-amber-500' : 'bg-surface-600'}`} />
+            <FileText className="w-3 h-3 text-surface-500" />
+            文字信息
+          </button>
         </div>
 
-        {/* 额外信息编辑 */}
-        <div className="px-2 py-2 border-b border-white/5" onMouseDown={e => e.stopPropagation()}>
-          <p className="text-[10px] text-surface-500 px-1 mb-1">额外信息</p>
-          <textarea
-            ref={extraInfoRef}
-            defaultValue={task.extraInfo || ''}
-            key={task.id}
-            onChange={() => {
-              onUpdate({ ...task, extraInfo: extraInfoRef.current?.value || '', updatedAt: new Date().toISOString() })
-            }}
-            placeholder="输入备注…"
-            rows={2}
-            className="w-full px-2 py-1.5 rounded-md bg-surface-900/60 border border-white/10 text-[11px] text-surface-300
-                       placeholder-surface-600 outline-none focus:border-primary-500/40 transition-colors resize-none"
-          />
-        </div>
+        {activeTab === 'text' && (
+          <div className="px-3 py-2 border-b border-white/5">
+            <p className="text-[10px] text-surface-500 leading-relaxed">编辑收入与追加任务信息。画笔工具仅用于图片类型。</p>
+          </div>
+        )}
 
+        {activeTab !== 'text' && (
+        <>
         {/* 画笔工具 */}
         <div className="px-2 py-2 border-b border-white/5 space-y-1" onMouseDown={e => e.stopPropagation()}>
           <p className="text-[10px] text-surface-500 px-1 mb-1">画笔</p>
@@ -1575,9 +1614,13 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
             </button>
           </div>
         </div>
+        </>
+        )}
 
         {/* 显示 / 删除 */}
         <div className="px-2 py-2 space-y-1">
+          {activeTab !== 'text' && (
+          <>
           <button
             onClick={() => setShowStrokes(!showStrokes)}
             className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
@@ -1591,6 +1634,8 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
           <div className="flex items-center justify-between px-2">
             <span className="text-[10px] text-surface-500">{strokes.length} 条笔迹</span>
           </div>
+          </>
+          )}
 
           <button
             onClick={() => { if (confirm('确定要删除此任务吗？')) onDelete(task.id) }}
@@ -1601,6 +1646,8 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
           </button>
         </div>
 
+        {activeTab !== 'text' && (
+        <>
         {/* ── 操作提示 ── */}
         <div className="border-t border-white/5">
           <button
@@ -1621,11 +1668,15 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
             </div>
           )}
         </div>
+        </>
+        )}
       </div>
 
-      {/* ── 右侧图片查看器 ── */}
+      {/* ── 右侧内容区（图片查看器 / 文字信息模块） ── */}
       <div ref={containerRef} className="flex-1 overflow-auto relative bg-surface-950/50 betamemo-scroll">
-        {!hasImage ? (
+        {activeTab === 'text' ? (
+          <TextInfoModule task={task} onUpdate={onUpdate} />
+        ) : !hasImage ? (
           <div className="h-full flex flex-col items-center justify-center text-surface-500">
             <Image className="w-12 h-12 mb-3 opacity-30" />
             <p className="text-xs">未导入图片</p>
@@ -1698,4 +1749,511 @@ function findStrokesAt(strokes, pos) {
     }
   }
   return result
+}
+
+// ═══════════════════════════════════════
+// 文字信息模块（收入 + 追加任务信息）
+// ═══════════════════════════════════════
+function NumberInput({ value, onChange, placeholder, className }) {
+  return (
+    <input
+      type="number"
+      min="0"
+      step="any"
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className={className || 'px-2.5 py-1.5 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200 placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors'}
+    />
+  )
+}
+
+function TextInfoModule({ task, onUpdate }) {
+  const income = task.income || {}
+  const types = [...IMAGE_TYPES, ...(task.customImageTypes || [])]
+  const additionalTasks = task.additionalTasks || []
+  const [dragIdx, setDragIdx] = useState(null)
+  const [overIdx, setOverIdx] = useState(null)
+  const [lightbox, setLightbox] = useState(null)
+  const dragNode = useRef(null)
+  const lightboxWinRef = useRef(null)
+  const lightboxTopRef = useRef(0)
+
+  const readUserImage = useCallback(async (filename) => {
+    const res = await window.electronAPI?.readUserImage(filename)
+    return res?.data || null
+  }, [])
+
+  // 打开灯箱：记录所属应用窗口根元素与标题栏高度，
+  // 灯箱挂载到窗口内 absolute 定位，自动跟随窗口移动/缩放（丝滑、不遮挡标题栏）
+  const openLightbox = useCallback((filename, label, triggerEl) => {
+    const win = triggerEl?.closest?.('[data-window-root]') || null
+    const bar = win?.querySelector?.('[data-window-titlebar]') || null
+    lightboxWinRef.current = win
+    lightboxTopRef.current = bar ? bar.getBoundingClientRect().height : 0
+    setLightbox({ filename, label })
+  }, [])
+
+  const closeLightbox = useCallback(() => {
+    setLightbox(null)
+    lightboxWinRef.current = null
+  }, [])
+
+  const patch = useCallback((nextIncome) => {
+    onUpdate({ ...task, income: nextIncome, updatedAt: new Date().toISOString() })
+  }, [task, onUpdate])
+
+  const patchTestType = (key, val) => {
+    const testTypes = { ...(income.testTypes || {}) }
+    if (val === '') delete testTypes[key]
+    else testTypes[key] = val
+    patch({ ...income, testTypes })
+  }
+
+  const patchTasks = useCallback((nextTasks) => {
+    onUpdate({ ...task, additionalTasks: nextTasks, updatedAt: new Date().toISOString() })
+  }, [task, onUpdate])
+
+  const patchTask = (index, item) => {
+    const next = [...additionalTasks]
+    next[index] = item
+    patchTasks(next)
+  }
+
+  const addTask = () => {
+    patchTasks([...additionalTasks, { id: uid(), title: '', body: '', reward: '', images: [], done: false }])
+  }
+
+  const removeTask = (index) => {
+    patchTasks(additionalTasks.filter((_, i) => i !== index))
+  }
+
+  const reorderTasks = (from, to) => {
+    const next = [...additionalTasks]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    patchTasks(next)
+  }
+
+  const handleAddImage = async (index) => {
+    const result = await window.electronAPI?.importUserImage()
+    if (!result?.filename) return
+    const item = additionalTasks[index]
+    patchTask(index, { ...item, images: [...(item.images || []), result.filename] })
+  }
+
+  const handleDropImage = async (e, index) => {
+    e.preventDefault()
+    e.stopPropagation()
+    let srcPath = null
+    const file = e.dataTransfer?.files?.[0]
+    if (file) {
+      srcPath = file.path
+    } else {
+      srcPath = e.dataTransfer?.getData('text/plain') || null
+    }
+    if (!srcPath) return
+    const result = await window.electronAPI?.importUserImageFile(srcPath)
+    if (!result?.filename) return
+    const item = additionalTasks[index]
+    patchTask(index, { ...item, images: [...(item.images || []), result.filename] })
+  }
+
+  const testValues = types.map(t => numValue(income.testTypes?.[t.key]))
+  const testTotal = testValues.reduce((a, b) => a + b, 0)
+  const bugVal = numValue(income.bug)
+  const doneTasks = additionalTasks.filter(t => t.done)
+  const addValues = doneTasks.map(t => numValue(t.reward))
+  const addTotal = addValues.reduce((a, b) => a + b, 0)
+  const estTotal = testTotal + bugVal + addTotal
+
+  const numInputCls = 'flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200 placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors'
+
+  return (
+    <div className="max-w-3xl mx-auto p-5 space-y-5">
+      {/* ── 收入 ── */}
+      <div className="rounded-xl bg-surface-800/50 border border-white/5 p-4 space-y-4">
+        <h3 className="text-xs font-semibold text-surface-200 flex items-center gap-2">
+          <FileText className="w-3.5 h-3.5 text-surface-500" />
+          收入
+        </h3>
+
+        {/* 估计收入 */}
+        <div className="space-y-2.5">
+          <p className="text-[11px] text-surface-400 font-medium">估计收入</p>
+
+          {/* 测试任务 */}
+          <div className="rounded-lg bg-surface-900/40 border border-white/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-surface-300 font-medium">测试任务</span>
+              <span className="flex items-baseline gap-1 shrink-0">
+                <span className="text-xl font-bold text-amber-300 tabular-nums leading-none">{testTotal}</span>
+                <span className="text-[10px] text-surface-500">原石</span>
+              </span>
+            </div>
+            <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2">
+              {types.map(t => (
+                <label key={t.key} className="flex items-center gap-2">
+                  <span className="text-[11px] text-surface-400 w-16 shrink-0 truncate" title={t.label}>{t.label}</span>
+                  <NumberInput
+                    value={income.testTypes?.[t.key]}
+                    onChange={v => patchTestType(t.key, v)}
+                    placeholder="0"
+                    className={numInputCls}
+                  />
+                  <span className="text-[10px] text-surface-500 shrink-0">原石</span>
+                </label>
+              ))}
+            </div>
+            {testValues.some(v => v > 0) && (
+              <p className="mt-2 text-[11px] text-surface-500 tabular-nums">{sumLine(testValues)} 原石</p>
+            )}
+          </div>
+
+          {/* Bug反馈 */}
+          <div className="rounded-lg bg-surface-900/40 border border-white/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-surface-300 font-medium">Bug反馈</span>
+              <span className="flex items-baseline gap-1 shrink-0">
+                <span className="text-xl font-bold text-amber-300 tabular-nums leading-none">{income.bug !== '' && income.bug != null ? bugVal : '—'}</span>
+                <span className="text-[10px] text-surface-500">原石</span>
+              </span>
+            </div>
+            <div className="mt-2.5 flex items-center gap-2">
+              <NumberInput
+                value={income.bug}
+                onChange={v => patch({ ...income, bug: v })}
+                placeholder="300"
+                className={numInputCls}
+              />
+              <span className="text-[10px] text-surface-500 shrink-0">原石</span>
+            </div>
+            <p className="mt-1.5 text-[10px] text-surface-500">惯例保底 300 原石，可自行修改</p>
+          </div>
+
+          {/* 追加任务 */}
+          <div className="rounded-lg bg-surface-900/40 border border-white/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-surface-300 font-medium">追加任务</span>
+              <span className="flex items-baseline gap-1 shrink-0">
+                <span className="text-xl font-bold text-amber-300 tabular-nums leading-none">{addTotal}</span>
+                <span className="text-[10px] text-surface-500">原石</span>
+              </span>
+            </div>
+            <div className="mt-2.5 space-y-1">
+              {additionalTasks.length > 0 ? (
+                <>
+                  {addValues.some(v => v > 0) && (
+                    <p className="text-[11px] text-surface-500 tabular-nums">{sumLine(addValues)} 原石</p>
+                  )}
+                  <p className="text-[10px] text-surface-500">
+                    {doneTasks.length}/{additionalTasks.length} 已完成
+                    {doneTasks.length < additionalTasks.length && ' · 未勾选完成的不计入收入'}
+                  </p>
+                </>
+              ) : (
+                <p className="text-[11px] text-surface-500">暂无追加任务，请在下方添加</p>
+              )}
+            </div>
+          </div>
+
+          {/* 估计合计 */}
+          <div className="rounded-lg bg-primary-500/10 border border-primary-500/20 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-primary-300 font-medium">估计合计</span>
+              <span className="flex items-baseline gap-1 shrink-0">
+                <span className="text-xl font-bold text-primary-200 tabular-nums leading-none">{estTotal}</span>
+                <span className="text-[10px] text-primary-300/70">原石</span>
+              </span>
+            </div>
+            <p className="mt-1 text-[10px] text-surface-500 tabular-nums">
+              测试任务 {testTotal} + Bug反馈 {bugVal} + 追加任务 {addTotal} = {estTotal} 原石
+            </p>
+          </div>
+        </div>
+
+        {/* 实收 */}
+        <div className="rounded-xl border-2 border-amber-500/40 bg-amber-500/5 p-3.5 space-y-2.5">
+          <p className="text-[11px] font-semibold text-amber-300">实收</p>
+          <div className="flex items-center gap-4 flex-wrap">
+            <label className="flex items-center gap-2">
+              <span className="text-[11px] text-surface-400 shrink-0">原石</span>
+              <NumberInput
+                value={income.actualPrimogems}
+                onChange={v => patch({ ...income, actualPrimogems: v })}
+                placeholder="实际收到原石"
+                className="w-36 px-2.5 py-2 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200 placeholder-surface-600 outline-none focus:border-amber-500/50 transition-colors"
+              />
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-[11px] text-surface-400 shrink-0">人民币 ¥</span>
+              <NumberInput
+                value={income.actualRmb}
+                onChange={v => patch({ ...income, actualRmb: v })}
+                placeholder="0.00"
+                className="w-32 px-2.5 py-2 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200 placeholder-surface-600 outline-none focus:border-amber-500/50 transition-colors"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 追加任务信息 ── */}
+      <div className="rounded-xl bg-surface-800/50 border border-white/5 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-surface-200">
+            追加任务信息
+            {additionalTasks.length > 0 && (
+              <span className="ml-1.5 text-[10px] text-surface-500 font-normal">（{additionalTasks.length}）</span>
+            )}
+          </h3>
+          <button
+            onClick={addTask}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-500/20 hover:bg-primary-500/30
+                       border border-primary-500/30 text-primary-300 text-xs font-medium transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            添加追加任务
+          </button>
+        </div>
+
+        {additionalTasks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-surface-500">
+            <FolderOpen className="w-8 h-8 mb-2 opacity-30" />
+            <p className="text-[11px]">暂无追加任务</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {additionalTasks.map((item, i) => (
+              <AdditionalTaskCard
+                key={item.id}
+                index={i}
+                total={additionalTasks.length}
+                item={item}
+                isOver={overIdx === i && dragIdx !== i}
+                isDragging={dragIdx === i}
+                onPatch={(p) => patchTask(i, { ...item, ...p })}
+                onRemove={() => removeTask(i)}
+                onAddImage={() => handleAddImage(i)}
+                onDropImage={(e) => handleDropImage(e, i)}
+                onImageClick={(f, fi, el) => openLightbox(f, `${item.title || '追加任务'} · 参考图片 ${fi + 1}`, el)}
+                onDragStart={(e) => {
+                  dragNode.current = i
+                  setDragIdx(i)
+                  if (e.target) e.target.style.opacity = '0.4'
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  if (dragNode.current !== i) setOverIdx(i)
+                }}
+                onDragEnd={(e) => {
+                  if (e.target) e.target.style.opacity = ''
+                  setDragIdx(null)
+                  setOverIdx(null)
+                  dragNode.current = null
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const from = dragNode.current
+                  setDragIdx(null)
+                  setOverIdx(null)
+                  dragNode.current = null
+                  if (from == null || from === i) return
+                  reorderTasks(from, i)
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {lightbox && (
+        <Lightbox
+          filename={lightbox.filename}
+          label={lightbox.label}
+          portalTo={lightboxWinRef.current}
+          topOffset={lightboxTopRef.current}
+          onClose={closeLightbox}
+          read={readUserImage}
+        />
+      )}
+    </div>
+  )
+}
+
+function AdditionalTaskCard({ index, total, item, isOver, isDragging, onPatch, onRemove, onAddImage, onDropImage, onImageClick, onDragStart, onDragOver, onDragEnd, onDrop }) {
+  const [dragOverImg, setDragOverImg] = useState(false)
+  const bodyRef = useRef(null)
+  const inputCls = 'w-full px-3 py-2 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200 placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors'
+
+  // 正文自适应高度
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
+  }, [item.body])
+
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className={`rounded-xl bg-surface-900/50 border border-white/10 p-3.5 space-y-2.5 transition-all ${
+        isOver ? 'translate-y-1 border-primary-500/40 opacity-80' : ''
+      } ${isDragging ? 'opacity-60' : ''}`}
+    >
+      {/* 头部：拖拽把手 + 序号 + 删除 */}
+      <div className="flex items-center gap-2">
+        <button
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          className="cursor-grab p-1.5 rounded-md text-surface-500 hover:text-surface-300 hover:bg-white/5 active:cursor-grabbing"
+          title="拖拽调整顺序"
+        >
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <span className="text-[11px] font-medium text-surface-300">追加任务 {index + 1}/{total}</span>
+        <div className="flex-1" />
+        <button
+          onClick={() => onPatch({ done: !item.done })}
+          className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors border ${
+            item.done
+              ? 'bg-green-500/15 border-green-500/40 text-green-400'
+              : 'border-white/10 text-surface-500 hover:text-surface-300 hover:bg-white/5'
+          }`}
+          title={item.done ? '已完成 — 点击取消勾选' : '未完成 — 点击标记为已完成'}
+        >
+          <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+            item.done ? 'bg-green-500 border-green-500' : 'border-surface-500'
+          }`}>
+            {item.done && <Check className="w-2.5 h-2.5 text-white" />}
+          </span>
+          已完成
+        </button>
+        <button
+          onClick={() => { if (confirm('确定要删除此追加任务吗？')) onRemove() }}
+          className="p-1.5 rounded-md text-surface-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          title="删除此追加任务"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* 标题 */}
+      <div>
+        <label className="text-[10px] text-surface-500 font-medium mb-1 block">标题</label>
+        <input
+          type="text"
+          value={item.title || ''}
+          onChange={e => onPatch({ title: e.target.value })}
+          placeholder="追加任务标题"
+          className={inputCls}
+        />
+      </div>
+
+      {/* 正文 + 参考图片 并排 */}
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <label className="text-[10px] text-surface-500 font-medium mb-1 block">正文</label>
+          <textarea
+            ref={bodyRef}
+            value={item.body || ''}
+            onChange={e => onPatch({ body: e.target.value })}
+            placeholder="追加任务详情…"
+            rows={4}
+            className={inputCls + ' resize-none overflow-hidden'}
+          />
+        </div>
+        <div className="w-[240px] shrink-0">
+          <label className="text-[10px] text-surface-500 font-medium mb-1 block">参考图片（可选）</label>
+          <div className="flex flex-wrap gap-2">
+            {(item.images || []).map((f, fi) => (
+              <RefImageThumb
+                key={f + '_' + fi}
+                filename={f}
+                onClick={(e) => onImageClick(f, fi, e.currentTarget)}
+                onRemove={() => {
+                  if (confirm('确定要移除这张参考图片吗？')) {
+                    onPatch({ images: (item.images || []).filter((_, x) => x !== fi) })
+                  }
+                }}
+              />
+            ))}
+            <button
+              onClick={onAddImage}
+              onDragOver={(e) => { e.preventDefault(); setDragOverImg(true) }}
+              onDragLeave={() => setDragOverImg(false)}
+              onDrop={(e) => { setDragOverImg(false); onDropImage(e) }}
+              className={`w-28 h-28 rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-1 text-surface-500 hover:text-surface-300 hover:border-surface-500 transition-colors ${
+                dragOverImg ? 'border-primary-400 bg-primary-500/5' : 'border-surface-600'
+              }`}
+              title="点击导入或拖拽图片到此处"
+            >
+              <Plus className="w-5 h-5" />
+              <span className="text-[10px]">添加图片</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 奖励原石 */}
+      <div className="flex items-center gap-2">
+        <label className="text-[10px] text-surface-500 font-medium shrink-0">奖励原石</label>
+        <NumberInput
+          value={item.reward}
+          onChange={v => onPatch({ reward: v })}
+          placeholder="0"
+          className="w-28 px-2.5 py-1.5 rounded-lg bg-surface-800/80 border border-white/10 text-sm text-surface-200 placeholder-surface-600 outline-none focus:border-primary-500/50 transition-colors"
+        />
+        <span className="text-[10px] text-surface-500">原石</span>
+      </div>
+    </div>
+  )
+}
+
+function RefImageThumb({ filename, onClick, onRemove }) {
+  const [preview, setPreview] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!filename) { setPreview(null); return }
+    setLoading(true)
+    window.electronAPI?.readUserImage(filename).then(res => {
+      if (res?.data) setPreview(res.data)
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }, [filename])
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } }}
+      className="group relative w-28 h-28 rounded-lg overflow-hidden border border-white/10 bg-surface-950/60
+                 cursor-zoom-in hover:border-primary-500/40 transition-colors"
+    >
+      {loading ? (
+        <div className="w-full h-full flex items-center justify-center">
+          <div className="w-4 h-4 rounded-full border-2 border-surface-500 border-t-surface-300 animate-spin" />
+        </div>
+      ) : preview ? (
+        <img src={preview} alt={filename} className="w-full h-full object-cover pointer-events-none" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <Image className="w-5 h-5 text-surface-600" />
+        </div>
+      )}
+      <button
+        onClick={(e) => { e.stopPropagation(); onRemove() }}
+        className="absolute top-1 right-1 p-1 rounded-md bg-red-500/90 hover:bg-red-500 text-white shadow-lg
+                   opacity-0 group-hover:opacity-100 transition-opacity"
+        title="移除图片"
+      >
+        <X className="w-3 h-3" />
+      </button>
+    </div>
+  )
 }

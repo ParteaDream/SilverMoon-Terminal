@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { X, Plus, Minus } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { X, Plus, Minus, Focus } from 'lucide-react'
 import { useDb } from '../context/DbContext'
-import { useImageDrag } from '../hooks/useImageDrag'
 import { stripFormatting } from '../utils/colorMarkup'
 
 /**
- * 图片灯箱：点击放大，滚轮缩放（0.5x ~ 3x），放大后可拖拽平移
+ * 图片灯箱：点击放大，滚轮缩放（0.5x ~ 3x），任意缩放级别下均可拖拽平移
+ * read：可选的自定义图片读取函数（返回 data URL 或 null），默认读取数据库图片
+ * portalTo：可选，小程序窗口根元素。传入时灯箱挂载到该窗口内并用 absolute 定位
+ *          （相对窗口自动跟随移动/缩放，丝滑无轮询，且不遮挡窗口标题栏）；
+ *          topOffset 为标题栏高度，遮罩从标题栏下方开始。不传则全屏遮罩
  */
-export default function Lightbox({ filename, label, onClose }) {
+export default function Lightbox({ filename, label, onClose, read, portalTo, topOffset = 0 }) {
   const cleanLabel = stripFormatting(label)
   const [src, setSrc] = useState(null)
   const [scale, setScale] = useState(1)
@@ -16,8 +20,9 @@ export default function Lightbox({ filename, label, onClose }) {
   const dragStart = useRef({ x: 0, y: 0 })
   const posStart = useRef({ x: 0, y: 0 })
   const containerRef = useRef(null)
-  const { readImage } = useDb()
-  const handleDrag = useImageDrag(filename)
+  const { readImage: dbReadImage } = useDb()
+  const readImage = read || dbReadImage
+  const inWindow = !!portalTo
 
   useEffect(() => {
     let cancelled = false
@@ -37,13 +42,13 @@ export default function Lightbox({ filename, label, onClose }) {
     setPosition({ x: 0, y: 0 })
   }, [filename])
 
+  // 任意缩放级别下均可拖拽平移
   const handleMouseDown = useCallback((e) => {
-    if (scale <= 1) return
     e.preventDefault()
     dragging.current = true
     dragStart.current = { x: e.clientX, y: e.clientY }
     posStart.current = { ...position }
-  }, [scale, position])
+  }, [position])
 
   const handleMouseMove = useCallback((e) => {
     if (!dragging.current) return
@@ -78,23 +83,33 @@ export default function Lightbox({ filename, label, onClose }) {
     const onWheel = (e) => {
       e.stopPropagation()
       e.preventDefault()
-      setScale(prev => Math.max(0.5, Math.min(3, prev + (e.deltaY > 0 ? -0.2 : 0.2))))
+      setScale(prev => Math.max(0.5, Math.min(3, prev + (e.deltaY > 0 ? -0.1 : 0.1))))
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [src])
 
+  // 窗口模式：挂载到窗口根元素内（absolute 相对窗口自动跟随，无需轮询）。
+  // 注意不可挂到窗口内层（backdrop-filter 会劫持 fixed 的包含块），挂到窗口根即可。
+  // 全屏模式：fixed 相对视口。
+  const wrap = (node) => (inWindow ? createPortal(node, portalTo) : node)
+  const overlayCls = inWindow ? 'absolute inset-0 z-[200] rounded-b-xl' : 'fixed inset-0 z-[200]'
+  const overlayStyle = inWindow ? { top: topOffset } : undefined
+  const closeCls = inWindow ? 'absolute z-[220]' : 'fixed z-[220]'
+  const closeStyle = inWindow ? { top: topOffset + 16, right: 16 } : undefined
+
   if (!src) {
-    return (
-      <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center" onClick={onClose}>
+    return wrap(
+      <div className={`${overlayCls} bg-black/80 backdrop-blur-sm flex items-center justify-center`} style={overlayStyle} onClick={onClose}>
         <div className="w-10 h-10 rounded-full border-2 border-primary-500 border-t-transparent animate-spin" />
       </div>
     )
   }
 
-  return (
+  return wrap(
     <>
-      <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 overflow-hidden no-drag"
+      <div className={`${overlayCls} bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 overflow-hidden no-drag`}
+        style={overlayStyle}
         onClick={onClose}
         onContextMenu={(e) => { e.preventDefault(); onClose() }}
       >
@@ -108,12 +123,11 @@ export default function Lightbox({ filename, label, onClose }) {
           <img
             src={src}
             alt={cleanLabel || ''}
-            className={`max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl select-none ${scale > 1 ? 'cursor-grab' : ''}`}
+            className={`object-contain rounded-lg shadow-2xl select-none cursor-grab ${inWindow ? 'max-w-full max-h-full' : 'max-w-[90vw] max-h-[85vh]'}`}
             style={{
               transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
             }}
-            draggable={scale <= 1}
-            onDragStart={scale <= 1 ? handleDrag : undefined}
+            draggable={false}
           />
         </div>
 
@@ -128,9 +142,10 @@ export default function Lightbox({ filename, label, onClose }) {
             <Minus className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={e => { e.stopPropagation(); setScale(1); setPosition({ x: 0, y: 0 }) }}
+            onClick={e => { e.stopPropagation(); setScale(1) }}
             className="px-1.5 py-0.5 rounded text-[10px] text-surface-400 hover:text-white hover:bg-white/10 transition-colors font-mono"
-            aria-label="重置缩放"
+            aria-label="恢复 100% 缩放"
+            title="恢复 100% 缩放"
           >
             {Math.round(scale * 100)}%
           </button>
@@ -141,13 +156,22 @@ export default function Lightbox({ filename, label, onClose }) {
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
+          <button
+            onClick={e => { e.stopPropagation(); setScale(1); setPosition({ x: 0, y: 0 }) }}
+            className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="回正"
+            title="一键回正（恢复 100% 并居中）"
+          >
+            <Focus className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
       {/* 关闭按钮 —— 独立于背景层，避免点击区域被遮挡 */}
       <button
         onClick={onClose}
-        className="fixed top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors z-[220] no-drag"
+        className={`${closeCls} top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors no-drag`}
+        style={closeStyle}
         aria-label="关闭"
       >
         <X className="w-5 h-5" />
