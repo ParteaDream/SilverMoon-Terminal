@@ -26,8 +26,8 @@ const PT = {
   53:'草元素抗性',54:'风元素抗性',55:'岩元素抗性',56:'冰元素抗性',
   80:'冷却缩减',81:'护盾强效',
   999999:'体力上限',
-  5:'攻击力',2:'生命值',3:'防御力',6:'元素充能',
-  8:'攻击力%',9:'生命值%',10:'防御力%',
+  2:'生命值',3:'生命值',5:'攻击力',6:'攻击力',
+  8:'防御力',9:'防御力',
 }
 // 不需要显示的属性类型（目前已全部映射）
 const SKIP_PROP_TYPES = new Set([])
@@ -470,6 +470,11 @@ function MainContent({ data, charDBMap, dailyData, onOpenBuildSettings }) {
   const worlds = index.world_explorations||[]
   const worldDisplay = index.world_exploration_display||[]
   const charsList = data.characters?.data?.list||[]
+  // 合并角色列表：characters.list 为准（含最新版本新增角色），index.avatars 补充字段
+  const avatarsById = {}; for (const a of avatars) avatarsById[a.id] = a
+  const mergedAvatars = charsList.length > 0
+    ? charsList.map(c => ({ ...(avatarsById[c.id] || {}), ...c }))
+    : avatars
   const cd = data.characterDetail?.data||{}
   const abyss = data.spiralAbyss?.data
   const abyssPrev = data.spiralAbyssPrev?.data
@@ -481,7 +486,7 @@ function MainContent({ data, charDBMap, dailyData, onOpenBuildSettings }) {
   const tabs = [
     {key:'overview',label:'概览',icon:TrendingUp},
     {key:'explore',label:'探索',icon:MapPin},
-    {key:'characters',label:`角色(${avatars.length})`,icon:Users},
+    {key:'characters',label:`角色(${mergedAvatars.length})`,icon:Users},
     {key:'challenge',label:'挑战',icon:Swords},
     {key:'daily',label:'便笺',icon:Clock},
   ]
@@ -506,10 +511,10 @@ function MainContent({ data, charDBMap, dailyData, onOpenBuildSettings }) {
           stats={stats}
           charDBMap={charDBMap}
         />}
-        {tab==='characters'&&!selectedChar&&<CharacterGrid avatars={avatars} charsList={charsList} charDBMap={charDBMap} onSelect={setSelectedChar} cdMap={cdMap}/>}
+        {tab==='characters'&&!selectedChar&&<CharacterGrid avatars={mergedAvatars} charsList={charsList} charDBMap={charDBMap} onSelect={setSelectedChar} cdMap={cdMap}/>}
         {tab==='characters'&&selectedChar&&<div className="flex gap-3 items-start">
           <div className="flex-1 min-w-0 overflow-visible">
-            <CharacterGrid avatars={avatars} charsList={charsList} charDBMap={charDBMap} onSelect={setSelectedChar} selectedId={selectedChar.id} cdMap={cdMap} />
+            <CharacterGrid avatars={mergedAvatars} charsList={charsList} charDBMap={charDBMap} onSelect={setSelectedChar} selectedId={selectedChar.id} cdMap={cdMap} />
           </div>
           <div className="w-[400px] min-w-0 shrink-0 max-w-[min(520px,60%)] overflow-visible border-l border-surface-700/30 pl-3">
             <CharacterDetail char={selectedChar} charDetail={cdMap[selectedChar.id]} charDBMap={charDBMap} onBack={()=>setSelectedChar(null)} sidePanel onOpenBuildSettings={onOpenBuildSettings} />
@@ -1006,6 +1011,10 @@ function CharacterDetail({ char, charDetail, charDBMap, onBack, sidePanel, onOpe
 
   return <div className="space-y-2.5 text-[11px] lg:text-[13px]">
     {!sidePanel && <button onClick={onBack} className="flex items-center gap-0.5 text-[12px] text-surface-400 hover:text-surface-200 mb-1"><ArrowLeft className="w-3.5 h-3.5"/>返回</button>}
+
+    {!charDetail && <div className="px-2 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[10px] text-amber-400">
+      该角色详情数据暂未同步（米游社可能尚未生成最新角色快照），圣遗物/命座/面板将在下次爬取后显示
+    </div>}
 
     {/* 第一行：头像 + 基本信息 + 武器 */}
     <div className="flex items-center gap-2.5">

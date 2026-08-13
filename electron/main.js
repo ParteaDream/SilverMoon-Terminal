@@ -4074,10 +4074,11 @@ function convertColorMarkup(text) {
   // 1. 将字面量 \\n 转为实际换行（nanoka.cc 数据中 \\n 是 JSON 转义后的字面量）
   let result = text.replace(/\\n/g, '\n');
   // 2. 转换 <color=#FFD780FF>text</color> → [color=#FFD780]text[/color]
-  // nanoka.cc 使用 8 位 hex (带 alpha: RRGGBBAA)，wiki 使用 6 位 hex
+  // 重构后数据混用 8 位 hex (RRGGBBAA) 与 6 位 hex (RRGGBB)，wiki 使用 6 位 hex
   result = result
     .replace(/<color=(#[0-9a-fA-F]{6})[0-9a-fA-F]{2}>/g, '[color=$1]')
     .replace(/<color=(#[0-9a-fA-F]{8})>/g, (_, hex) => `[color=${hex.slice(0, 7)}]`)
+    .replace(/<color=(#[0-9a-fA-F]{6})>/g, '[color=$1]')
     .replace(/<\/color>/g, '[/color]')
     // 同时处理可能的其他 HTML 标签
     .replace(/<i>/g, '[i]').replace(/<\/i>/g, '[/i]')
@@ -4173,15 +4174,11 @@ let _cachedAnnotationData = null;
 async function getAnnotationData() {
   if (_cachedAnnotationData) return _cachedAnnotationData;
   try {
-    // 从任意角色页面提取附注 JSON（第一个 script type="application/json"）
-    const html = await fetchText('https://gi.nanoka.cc/character/10000002');
-    const match = html.match(/<script type="application\/json"[^>]*>(\{.*?\})<\/script>/s);
-    if (match) {
-      const outer = JSON.parse(match[1]);
-      const inner = JSON.parse(outer.body);
-      _cachedAnnotationData = inner;
-      console.log('[getAnnotationData] loaded, entries:', Object.keys(inner).length);
-    }
+    // 重构后附注数据不再内嵌在 SSR HTML 中，改为静态文件 zh/hyperlink.json
+    // （键为数字 ID，值为 { name, desc, param, color }，desc 含 {0} 占位符）
+    const version = await getDataVersion();
+    _cachedAnnotationData = await fetchJson(`https://static.nanoka.cc/gi/${version}/zh/hyperlink.json`);
+    console.log('[getAnnotationData] loaded, entries:', Object.keys(_cachedAnnotationData).length);
   } catch (e) {
     console.error('[getAnnotationData] failed:', e.message);
     _cachedAnnotationData = {};
@@ -4227,22 +4224,14 @@ let _dataVersion = null;
 
 async function getDataVersion() {
   if (_dataVersion) return _dataVersion;
-  // 尝试从首页获取最新版本号（5 秒超时，不阻塞）
+  // nanoka.cc 重构后首页改为 SPA，版本号需从 manifest.json 的 gi.latest 解析
+  // （与网站前端 gi.7d4a860d.js 的解析逻辑一致）
   try {
-    const html = await new Promise((resolve, reject) => {
-      const req = require('https').get(`${NANOKA_BASE}/`, (res) => {
-        if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
-        const chunks = [];
-        res.on('data', chunk => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-      });
-      req.on('error', reject);
-      req.setTimeout(5000, () => { req.destroy(); reject(new Error('Timeout')); });
-    });
-    const m = html.match(/static\.nanoka\.cc\/gi\/([^/"]+)\//);
-    if (m) _dataVersion = m[1];
+    const manifest = await fetchJson('https://static.nanoka.cc/manifest.json');
+    const gi = manifest && manifest.gi ? manifest.gi : {};
+    _dataVersion = gi.latest || gi.live || gi.cn || '';
   } catch (_) {}
-  if (!_dataVersion) _dataVersion = '6.6.54+45738258';
+  if (!_dataVersion) _dataVersion = '7.0';
   return _dataVersion;
 }
 
@@ -4339,11 +4328,14 @@ async function scrapeCharacterStatsFromPage(characterId, existingWin = null) {
     const stats = await win.webContents.executeJavaScript(`
       (async () => {
         const MAX_POLLS = ${maxPolls};
-        // 等待滑块加载
+        // 等待等级滑块加载（新页面滑块为索引制：min=0, max=N-1，刻度为各等级）。
+        // 滑块比刻度先渲染，需等到刻度 span 出现后再读取
         let slider = null;
         for (let i = 0; i < MAX_POLLS; i++) {
-          slider = document.querySelector('input[type="range"]');
-          if (slider) break;
+          slider = document.querySelector('input[type="range"][min="0"]');
+          if (slider && slider.parentElement &&
+              slider.parentElement.querySelectorAll('span').length > 0) break;
+          slider = null;
           await new Promise(r => setTimeout(r, 500));
         }
         if (!slider) {
@@ -4354,14 +4346,30 @@ async function scrapeCharacterStatsFromPage(characterId, existingWin = null) {
           return { error: 'NO_SLIDER', inputs: inputInfo, text: document.body.innerText.substring(0, 1000) };
         }
 
-        const result = {};
-        result._sliderInfo = { min: parseInt(slider.min)||1, max: parseInt(slider.max)||100, step: parseInt(slider.step)||1 };
+        // 从滑块旁刻度文本构建 等级 → 索引 映射
+        const levelMap = new Map();
+        const container = slider.parentElement;
+        if (container) {
+          Array.from(container.querySelectorAll('span'))
+            .map(s => s.textContent.trim())
+            .filter(t => /^\\d{1,3}$/.test(t))
+            .forEach((t, idx) => { if (!levelMap.has(t)) levelMap.set(t, idx); });
+        }
+        // 兜底：按常规等级顺序映射（按滑块 max 截断，避免越界）
+        if (levelMap.size === 0) {
+          const fallbackLevels = [1, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100];
+          const maxIdx = parseInt(slider.max) || fallbackLevels.length - 1;
+          fallbackLevels.slice(0, maxIdx + 1).forEach((l, idx) => levelMap.set(String(l), idx));
+        }
 
-        function setSlider(value) {
+        const result = {};
+        result._sliderInfo = { min: parseInt(slider.min) || 0, max: parseInt(slider.max) || 10, levelMap: Object.fromEntries(levelMap) };
+
+        function setSlider(levelIndex) {
           const nativeSetter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype, 'value'
           ).set;
-          nativeSetter.call(slider, String(value));
+          nativeSetter.call(slider, String(levelIndex));
           slider.dispatchEvent(new Event('input', { bubbles: true }));
           slider.dispatchEvent(new Event('change', { bubbles: true }));
         }
@@ -4370,41 +4378,39 @@ async function scrapeCharacterStatsFromPage(characterId, existingWin = null) {
           const text = document.body.innerText || '';
           const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
           const stats = {};
-
-          const hpKeys = ['基础生命值', 'Base HP'];
-          const atkKeys = ['基础攻击力', 'Base ATK'];
-          const defKeys = ['基础防御力', 'Base DEF'];
-
-          // 策略A：标签和值在不同行
-          for (let i = 0; i < lines.length - 1; i++) {
+          const statKeys = {
+            hp: ['基础生命值', 'Base HP', 'Max HP'],
+            atk: ['基础攻击力', 'Base ATK'],
+            def: ['基础防御力', 'Base DEF'],
+          };
+          // 标签与数值可能同行或分行；数值含千分位逗号
+          for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            const next = lines[i + 1];
-            if (!/^\\d{1,6}$/.test(next)) continue;
-            const num = parseInt(next);
-            for (const k of hpKeys) { if (line.includes(k)) stats.hp = num; }
-            for (const k of atkKeys) { if (line.includes(k)) stats.atk = num; }
-            for (const k of defKeys) { if (line.includes(k)) stats.def = num; }
-          }
-
-          // 策略B：标签和值在同一行
-          if (!stats.hp || !stats.atk || !stats.def) {
-            for (const line of lines) {
-              const m = line.match(/(\\d{3,6})/g);
-              if (!m) continue;
-              for (const k of hpKeys) { if (line.includes(k)) stats.hp = parseInt(m[m.length-1]); }
-              for (const k of atkKeys) { if (line.includes(k)) stats.atk = parseInt(m[m.length-1]); }
-              for (const k of defKeys) { if (line.includes(k)) stats.def = parseInt(m[m.length-1]); }
+            let match = null;
+            for (const [k, labels] of Object.entries(statKeys)) {
+              if (labels.some(l => line.includes(l))) { match = k; break; }
             }
+            if (!match) continue;
+            const candidates = [line, lines[i + 1] || '']
+              .map(s => s.replace(/,/g, '').match(/\\d{1,7}/))
+              .filter(Boolean);
+            const num = candidates.reduce((acc, c) => acc || (parseInt(c[0]) || 0), 0);
+            if (num > 0 && !stats[match]) stats[match] = num;
           }
-
           return stats;
         }
 
         const targetLevels = [80, 90, 95, 100];
         for (const level of targetLevels) {
-          setSlider(level);
-          await new Promise(r => setTimeout(r, 800));
-          const s = parseStats();
+          const idx = levelMap.get(String(level));
+          if (idx === undefined) continue;
+          setSlider(idx);
+          // 属性行可能晚于滑块渲染，轮询等待
+          let s = {};
+          for (let i = 0; i < 12 && !(s.hp && s.atk && s.def); i++) {
+            await new Promise(r => setTimeout(r, 500));
+            s = parseStats();
+          }
           if (s.hp) result['hp_' + level] = s.hp;
           if (s.atk) result['atk_' + level] = s.atk;
           if (s.def) result['def_' + level] = s.def;
@@ -8047,6 +8053,55 @@ ipcMain.handle("genshin-password-login-and-crawl", async () => {
 })
 
 /** 核心爬取逻辑（登录后执行），被 genshin-login-and-crawl 和 genshin-password-login-and-crawl 共用 */
+const GENSHIN_EXT_FIELDS = JSON.stringify({
+  proxyStatus: 0, isRoot: 0, romCapacity: "512",
+  deviceName: "XiaoMi13", productName: "redmi_k70",
+  romRemain: "512", hostname: "dg02-pool03-kvm87",
+  screenSize: "1440x2905", isTablet: 0, aaid: "",
+  model: "XiaoMi13", brand: "XiaoMi", hardware: "qcom",
+  deviceType: "OP5913L1", devId: "REL", serialNumber: "unknown",
+  sdCapacity: 512215, buildTime: "1693626947000",
+  buildUser: "android-build", simState: 5, ramRemain: "239814",
+  appUpdateTimeDiff: 1702604034482,
+  deviceInfo: "XiaoMi/redmi_k70/OP5913L1:13/SKQ1.221119.001/T.118e6c7-5aa23-73911:user/release-keys",
+  vaid: "", buildType: "user", sdkVersion: "34",
+  ui_mode: "UI_MODE_TYPE_NORMAL", isMockLocation: 0,
+  cpuType: "arm64-v8a", isAirMode: 0, ringMode: 2,
+  chargeStatus: 1, manufacturer: "XiaoMi", emulatorStatus: 0,
+  appMemory: "512", osVersion: "14", vendor: "unknown",
+  accelerometer: "1.4883357x7.1712894x6.2847486", sdRemain: 239600,
+  buildTags: "release-keys", packageName: "com.mihoyo.hyperion",
+  networkType: "WiFi", oaid: "", debugStatus: 1,
+  ramCapacity: "469679", magnetometer: "20.081251x-27.487501x2.1937501",
+  display: "redmi_k70_13.1.0.181(CN01)", appInstallTimeDiff: 1688455751496,
+  packageVersion: "2.20.1", gyroscope: "0.030226856x0.014647375x0.010652636",
+  batteryStatus: 100, hasKeyboard: 0, board: "taro",
+})
+
+/** 获取设备指纹（传入已有指纹续期，或生成全新设备信息） */
+async function fetchDeviceFp(prevDeviceFp, deviceId, seedId, bbsDeviceId) {
+  const newDeviceId = deviceId || crypto.randomBytes(8).toString("hex")
+  const newSeedId = seedId || crypto.randomUUID()
+  const newBbsDeviceId = bbsDeviceId || crypto.randomUUID().replace(/-/g, "")
+  const resp = await fetch("https://public-data-api.mihoyo.com/device-fp/api/getFp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      device_id: newDeviceId,
+      bbs_device_id: newBbsDeviceId,
+      seed_id: newSeedId,
+      seed_time: String(Date.now()),
+      platform: "2",
+      device_fp: prevDeviceFp || "",
+      app_name: "bbs_cn",
+      ext_fields: GENSHIN_EXT_FIELDS,
+    }),
+  })
+  const data = await resp.json()
+  return { deviceFp: data?.data?.device_fp || prevDeviceFp, deviceId: newDeviceId, seedId: newSeedId, bbsDeviceId: newBbsDeviceId }
+}
+
+/** 核心爬取逻辑（登录后执行），被 genshin-login-and-crawl 和 genshin-password-login-and-crawl 共用 */
 async function performGenshinCrawl(finalCookieStr, cookies, outputDir) {
   // 获取设备指纹 — 优先从 _app_identity 复用（跨会话）
   let fp = loadFingerprint()
@@ -8056,30 +8111,7 @@ async function performGenshinCrawl(finalCookieStr, cookies, outputDir) {
     if (!deviceId) deviceId = crypto.randomBytes(8).toString("hex")  // 16 hex chars
     if (!seedId) seedId = crypto.randomUUID()
     if (!bbsDeviceId) bbsDeviceId = crypto.randomUUID().replace(/-/g, "")
-    const extFields = JSON.stringify({
-      proxyStatus: 0, isRoot: 0, romCapacity: "512",
-      deviceName: "XiaoMi13", productName: "redmi_k70",
-      romRemain: "512", hostname: "dg02-pool03-kvm87",
-      screenSize: "1440x2905", isTablet: 0, aaid: "",
-      model: "XiaoMi13", brand: "XiaoMi", hardware: "qcom",
-      deviceType: "OP5913L1", devId: "REL", serialNumber: "unknown",
-      sdCapacity: 512215, buildTime: "1693626947000",
-      buildUser: "android-build", simState: 5, ramRemain: "239814",
-      appUpdateTimeDiff: 1702604034482,
-      deviceInfo: "XiaoMi/redmi_k70/OP5913L1:13/SKQ1.221119.001/T.118e6c7-5aa23-73911:user/release-keys",
-      vaid: "", buildType: "user", sdkVersion: "34",
-      ui_mode: "UI_MODE_TYPE_NORMAL", isMockLocation: 0,
-      cpuType: "arm64-v8a", isAirMode: 0, ringMode: 2,
-      chargeStatus: 1, manufacturer: "XiaoMi", emulatorStatus: 0,
-      appMemory: "512", osVersion: "14", vendor: "unknown",
-      accelerometer: "1.4883357x7.1712894x6.2847486", sdRemain: 239600,
-      buildTags: "release-keys", packageName: "com.mihoyo.hyperion",
-      networkType: "WiFi", oaid: "", debugStatus: 1,
-      ramCapacity: "469679", magnetometer: "20.081251x-27.487501x2.1937501",
-      display: "redmi_k70_13.1.0.181(CN01)", appInstallTimeDiff: 1688455751496,
-      packageVersion: "2.20.1", gyroscope: "0.030226856x0.014647375x0.010652636",
-      batteryStatus: 100, hasKeyboard: 0, board: "taro",
-    })
+    const extFields = GENSHIN_EXT_FIELDS
     const fpBody = JSON.stringify({
       device_id: deviceId,
       bbs_device_id: bbsDeviceId,
@@ -8267,22 +8299,10 @@ async function performGenshinCrawl(finalCookieStr, cookies, outputDir) {
       if (d.retcode === 5003) {
         console.log(`[genshin] ${key}: retcode=5003, refreshing device_fp and retrying...`)
         try {
-          const newDeviceId = crypto.randomBytes(8).toString("hex")
-          const newSeedId = crypto.randomUUID()
-          const newFpResp = await fetch("https://public-data-api.mihoyo.com/device-fp/api/getFp", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              device_id: newDeviceId, bbs_device_id: crypto.randomUUID().replace(/-/g, ""),
-              seed_id: newSeedId, seed_time: String(Date.now()), platform: "2",
-              device_fp: crypto.randomBytes(7).toString("hex").slice(0, 13),
-              app_name: "bbs_cn",
-              ext_fields: JSON.stringify({ proxyStatus:0, isRoot:0, romCapacity:"512", deviceName:"XiaoMi13", productName:"redmi_k70", romRemain:"512", hostname:"dg02-pool03-kvm87", screenSize:"1440x2905", isTablet:0, aaid:"", model:"XiaoMi13", brand:"XiaoMi", hardware:"qcom", deviceType:"OP5913L1", devId:"REL", serialNumber:"unknown", sdCapacity:512215, buildTime:"1693626947000", buildUser:"android-build", simState:5, ramRemain:"239814", appUpdateTimeDiff:1702604034482, deviceInfo:"XiaoMi/redmi_k70/OP5913L1:13/SKQ1.221119.001/T.118e6c7-5aa23-73911:user/release-keys", vaid:"", buildType:"user", sdkVersion:"34", ui_mode:"UI_MODE_TYPE_NORMAL", isMockLocation:0, cpuType:"arm64-v8a", isAirMode:0, ringMode:2, chargeStatus:1, manufacturer:"XiaoMi", emulatorStatus:0, appMemory:"512", osVersion:"14", vendor:"unknown", accelerometer:"1.4883357x7.1712894x6.2847486", sdRemain:239600, buildTags:"release-keys", packageName:"com.mihoyo.hyperion", networkType:"WiFi", oaid:"", debugStatus:1, ramCapacity:"469679", magnetometer:"20.081251x-27.487501x2.1937501", display:"redmi_k70_13.1.0.181(CN01)", appInstallTimeDiff:1688455751496, packageVersion:"2.20.1", gyroscope:"0.030226856x0.014647375x0.010652636", batteryStatus:100, hasKeyboard:0, board:"taro" }),
-            })
-          })
-          const newFpData = await newFpResp.json()
-          if (newFpData?.data?.device_fp) {
-            deviceFp = newFpData.data.device_fp
+          const refreshed = await fetchDeviceFp("", null, null, null)
+          if (refreshed.deviceFp) {
+            deviceFp = refreshed.deviceFp
+            deviceId = refreshed.deviceId; seedId = refreshed.seedId; bbsDeviceId = refreshed.bbsDeviceId
             console.log(`[genshin] new device_fp obtained: ${deviceFp.slice(0,8)}..., retrying ${key}...`)
             const ds2 = generateDS(qs, body)
             const hd2 = (ds, post) => ({
@@ -8376,11 +8396,63 @@ async function performGenshinCrawl(finalCookieStr, cookies, outputDir) {
   await crawl("actCalendar", `${BASE}/act_calendar`, { role_id: String(uid), server })
   await crawl("roleCombat", `${BASE}/role_combat`)  // 幻想真境剧诗
   await crawl("hardChallenge", `${BASE}/hard_challenge`)  // 幽境危战
+  // index 缓存滞后兜底：新版更新后 index 端点可能比 character/list 旧
+  // （avatars 数量偏少、缺少新探索区域），等待后重拉一次 index
+  if (results.characters?.retcode === 0 && results.index?.retcode === 0) {
+    const chLen = results.characters?.data?.list?.length || 0
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const avLen = results.index?.data?.avatars?.length || 0
+      if (avLen >= chLen) break
+      console.log(`[genshin] index avatars(${avLen}) < characters(${chLen}), refetching index (${attempt}/3) after cache delay...`)
+      await new Promise(r => setTimeout(r, 8000))
+      await crawl("index", `${BASE}/index`)
+      console.log(`[genshin] index after refetch ${attempt}: avatars=${results.index?.data?.avatars?.length}`)
+    }
+  }
   // 角色详细数据（圣遗物+面板），获取所有角色数据（参考胡桃传参，API 支持一次传入全部角色）
+  // 米游社 character/detail 按设备指纹缓存详情快照：先换全新指纹再请求，确保拿到最新圣遗物/面板/命座
   const allCharacterIds = (results.characters?.data?.list || []).map(c => c.id)
   if (allCharacterIds.length > 0) {
-    await crawl("characterDetail", `${BASE}/character/detail`,
-      { role_id: String(uid), server, character_ids: allCharacterIds, sort_type: 1 })
+    // 多轮重试：换新指纹 + 等待服务端刷新快照，直到角色详情齐全
+    for (let round = 0; round < 3; round++) {
+      if (round > 0) {
+        console.log(`[genshin] characterDetail round ${round+1}/3: waiting for snapshot refresh...`)
+        await new Promise(r => setTimeout(r, 8000))
+      }
+      // 每轮强制换全新设备指纹（新 device_id/seed_id → 新快照）
+      try {
+        const refreshed = await fetchDeviceFp("", null, null, null)
+        if (refreshed.deviceFp && refreshed.deviceFp !== deviceFp) {
+          console.log(`[genshin] refreshed device_fp for characterDetail: ${refreshed.deviceFp.slice(0,8)}...`)
+          deviceFp = refreshed.deviceFp
+          deviceId = refreshed.deviceId; seedId = refreshed.seedId; bbsDeviceId = refreshed.bbsDeviceId
+        } else {
+          console.log("[genshin] device_fp refresh returned same fp, retrying...")
+        }
+      } catch (e) { console.log("[genshin] device_fp refresh failed:", e.message) }
+      await crawl("characterDetail", `${BASE}/character/detail`,
+        { role_id: String(uid), server, character_ids: allCharacterIds, sort_type: 1 })
+      const gotIds = new Set((results.characterDetail?.data?.list || []).map(c => c.base?.id))
+      const missingIds = allCharacterIds.filter(id => !gotIds.has(id))
+      console.log(`[genshin] characterDetail round ${round+1}: ${results.characterDetail?.data?.list?.length} chars, missing ${missingIds.length}`)
+      if (missingIds.length === 0) break
+    }
+    // 仍未拿到的角色（可能服务端尚未生成快照）：按缺失的角色单独重试
+    const gotIds = new Set((results.characterDetail?.data?.list || []).map(c => c.base?.id))
+    const missingIds = allCharacterIds.filter(id => !gotIds.has(id))
+    if (missingIds.length > 0) {
+      console.log(`[genshin] characterDetail still missing ${missingIds.length} chars, retrying individually...`)
+      for (const cid of missingIds) {
+        await crawl(`characterDetail_${cid}`, `${BASE}/character/detail`,
+          { role_id: String(uid), server, character_ids: [cid], sort_type: 1 })
+        const retryRes = results[`characterDetail_${cid}`]
+        if (retryRes?.retcode === 0 && retryRes.data?.list?.length) {
+          results.characterDetail.data.list.push(...retryRes.data.list)
+        }
+        delete results[`characterDetail_${cid}`]
+      }
+      console.log(`[genshin] characterDetail after retry: ${results.characterDetail?.data?.list?.length} chars`)
+    }
   }
 
   const summary = {}

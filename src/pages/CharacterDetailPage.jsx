@@ -1394,7 +1394,7 @@ function CharacterDetailContent() {
                   <ImageTile label={img.label} filename={img.filename} onClick={() => setLightbox({ filename: img.filename, label: img.label })} />
                   <button
                     onClick={() => removeGalleryImage(i)}
-                    className="absolute top-1 right-1 p-1 rounded-lg bg-red-500/80 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                    className="absolute top-1 right-1 z-20 p-1 rounded-lg bg-red-500/80 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
                     title="删除图片"
                   >
                     <Trash2 className="w-3 h-3" />
