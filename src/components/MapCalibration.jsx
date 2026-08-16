@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Crosshair, Check, X, ZoomIn } from 'lucide-react'
 
 // ═══════════════════════════════════════
@@ -25,6 +25,8 @@ export default function MapCalibration({
   const [mapNameInput, setMapNameInput] = useState(mapName || '')
   const [magZoom, setMagZoom] = useState(5)   // 放大镜倍率
   const [confirmError, setConfirmError] = useState(null) // 标定错误
+  const [srcPxPerTile, setSrcPxPerTile] = useState(1024) // 每片覆盖源像素数（切片密度）
+  const [tileFormat, setTileFormat] = useState('auto')   // 'auto' | 'png' | 'jpg'（切片输出格式）
 
   // ── 视图变换（与大世界地图的 matrix 体系一致） ──
   // localZoom: CSS transform scale 值
@@ -35,6 +37,7 @@ export default function MapCalibration({
   const viewCenterRef = useRef(viewCenter)
 
   const containerRef = useRef(null)
+  const sidePanelRef = useRef(null)      // 右侧设置栏（滚动容器）
   const mapDragStart = useRef({ x: 0, y: 0 })
   const pointDragStart = useRef({ x: 0, y: 0, point: { x: 0, y: 0 } })
   const [mapDragging, setMapDragging] = useState(false)
@@ -63,6 +66,23 @@ export default function MapCalibration({
 
   // 同步 ref，供空依赖滚轮事件使用
   useEffect(() => { localZoomRef.current = localZoom; viewCenterRef.current = viewCenter }, [localZoom, viewCenter])
+
+  // ── 右侧设置栏滚轮锁定：原生非 passive 监听（React onWheel 是 passive，
+  // preventDefault 无效），滚动只作用于本栏，绝不冒泡到背后的大地图 ──
+  useEffect(() => {
+    const el = sidePanelRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      e.stopPropagation()
+      e.preventDefault()
+      const maxScroll = el.scrollHeight - el.clientHeight
+      if (maxScroll > 1) {
+        el.scrollTop = Math.max(0, Math.min(maxScroll, el.scrollTop + e.deltaY))
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   // ── 原图加载（解码到 Image 对象供放大镜 Canvas 使用） ──
   useEffect(() => {
@@ -204,7 +224,7 @@ export default function MapCalibration({
       const z = localZoomRef.current
       const vc = viewCenterRef.current
       const step = Math.min(0.06, Math.abs(e.deltaY) / 600)
-      const nz = Math.max(0.1, Math.min(5, z * Math.exp(e.deltaY > 0 ? -step : step)))
+      const nz = Math.max(0.1, Math.min(10, z * Math.exp(e.deltaY > 0 ? -step : step)))
       setViewCenter({
         x: cx - (cx - vc.x) * nz / z,
         y: cy - (cy - vc.y) * nz / z,
@@ -275,6 +295,8 @@ export default function MapCalibration({
       mapW: imageW,
       mapH: imageH,
       tileSize: 512,
+      srcPxPerTile: +srcPxPerTile,
+      tileFormat,
     }
 
     return {
@@ -282,10 +304,29 @@ export default function MapCalibration({
       anchorA_preview: { x: pointA.x, y: pointA.y },
       anchorB_preview: { x: pointB.x, y: pointB.y },
     }
-  }, [pointA, pointB, distanceInput, previewW, previewH, imageW, imageH])
+  }, [pointA, pointB, distanceInput, previewW, previewH, imageW, imageH, srcPxPerTile, tileFormat])
 
   const result = calibrationResult()
   const canConfirm = !!result && mapNameInput.trim().length > 0
+
+  // 预计切片数与体积（源像素驱动：只与原图尺寸和密度有关，与 AB 无关）
+  const tileEstimate = useMemo(() => {
+    if (!result) return null
+    const s = Math.max(256, +srcPxPerTile || 1024)
+    const [ax, ay] = result.config.anchorA
+    const cols = Math.ceil((imageW - ax) / s) - Math.floor(-ax / s)
+    const rows = Math.ceil((imageH - ay) / s) - Math.floor(-ay / s)
+    const count = cols * rows
+    const totalPx = count * s * s
+    return {
+      cols,
+      rows,
+      count,
+      overCap: count > 1200,
+      pngMB: Math.max(1, Math.round(totalPx * 0.7 / 1e6)),
+      jpgMB: Math.max(1, Math.round(totalPx * 0.28 / 1e6)),
+    }
+  }, [result, srcPxPerTile, imageW, imageH])
 
   const handleConfirm = async () => {
     if (!canConfirm) { console.log('[MapCalibration] blocked:', { name: mapNameInput.trim(), distance: distanceInput, result: !!result }); return }
@@ -338,9 +379,9 @@ export default function MapCalibration({
           </div>
         </div>
 
-        <div className="flex-1 flex overflow-hidden min-h-0">
+        <div className="flex-1 flex overflow-hidden min-h-0 relative">
           {/* ── 左侧：预览图 + 定点（matrix transform） ── */}
-          <div ref={containerRef} className="flex-1 relative overflow-hidden bg-surface-950"
+          <div ref={containerRef} className="flex-1 relative overflow-hidden bg-surface-950 mr-72"
             style={{ cursor: dragging ? 'crosshair' : mapDragging ? 'grabbing' : 'grab' }}
             onMouseDown={(e) => {
               // 只有鼠标在空白区域按下时才触发地图拖拽（非定点）
@@ -479,8 +520,12 @@ export default function MapCalibration({
             })()}
           </div>
 
-          {/* ── 右侧控制面板 ── */}
-          <div className="w-72 shrink-0 border-l border-white/5 flex flex-col bg-surface-900/50 p-4 overflow-y-auto max-h-full" style={{ scrollbarWidth: 'thin' }}>
+          {/* ── 右侧控制面板：绝对定位锁定高度，滚动条常驻可见，滚轮只作用于本栏 ── */}
+          <div
+            ref={sidePanelRef}
+            className="absolute top-0 right-0 bottom-0 w-72 border-l border-white/5 flex flex-col bg-surface-900/95 p-4 overflow-y-scroll"
+            style={{ scrollbarWidth: 'thin', overscrollBehavior: 'contain' }}
+          >
             <h3 className="text-xs font-semibold text-surface-300 mb-4 flex items-center gap-2">
               <Crosshair className="w-3.5 h-3.5 text-amber-400" />
               标定设置
@@ -575,13 +620,49 @@ export default function MapCalibration({
               </div>
             )}
 
+            {/* 切片设置：源像素驱动，画质/数量与 AB 无关 */}
+            <div className="mb-4">
+              <label className="text-[11px] text-surface-400 block mb-1">
+                切片密度 <span className="text-surface-600">（每片覆盖原图像素）</span>
+              </label>
+              <select
+                value={srcPxPerTile}
+                onChange={e => setSrcPxPerTile(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-surface-800 border border-white/10 text-sm text-surface-200 outline-none focus:border-amber-500/40 transition-colors"
+              >
+                <option value="512">512 px（切片最多）</option>
+                <option value="1024">1024 px（推荐）</option>
+                <option value="2048">2048 px（切片最少）</option>
+              </select>
+              <label className="text-[11px] text-surface-400 block mt-3 mb-1">切片格式</label>
+              <select
+                value={tileFormat}
+                onChange={e => setTileFormat(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-surface-800 border border-white/10 text-sm text-surface-200 outline-none focus:border-amber-500/40 transition-colors"
+              >
+                <option value="auto">自动（随源图格式）</option>
+                <option value="png">PNG（无损，体积大）</option>
+                <option value="jpg">JPEG（体积小）</option>
+              </select>
+              {tileEstimate && (
+                <div className="mt-2 p-2 rounded-lg bg-surface-800/40 text-[10px] text-surface-500 leading-relaxed">
+                  <p>预计切片：<span className="text-surface-300">{tileEstimate.count} 片</span>（{tileEstimate.cols}×{tileEstimate.rows}）</p>
+                  <p>预计体积：PNG ≈ {tileEstimate.pngMB}MB / JPEG ≈ {tileEstimate.jpgMB}MB</p>
+                  {tileEstimate.overCap && (
+                    <p className="text-amber-400/80 mt-1">⚠ 超过 1200 片上限，切片时将自动增大每片像素</p>
+                  )}
+                  <p className="text-emerald-400/70 mt-1">画质与切片数与 AB 距离无关（AB 只决定世界比例尺）</p>
+                </div>
+              )}
+            </div>
+
             {/* 预览缩放控制 */}
             <div className="mb-4">
               <label className="text-[11px] text-surface-400 block mb-1">
-                预览缩放 <span className="text-surface-600">（0.1~5x）</span>
+                预览缩放 <span className="text-surface-600">（0.1~10x）</span>
               </label>
               <div className="flex items-center gap-2">
-                <input type="range" min="0.1" max="5" step="0.1"
+                <input type="range" min="0.1" max="10" step="0.1"
                   value={localZoom} onChange={e => {
                     const el = containerRef.current
                     if (!el) return

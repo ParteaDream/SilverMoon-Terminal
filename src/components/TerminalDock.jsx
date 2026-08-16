@@ -169,7 +169,7 @@ export default function TerminalDock({ visible }) {
 
   return (
     <>
-      <div className="fixed bottom-0 z-[200] pointer-events-none"
+      <div className="fixed bottom-0 z-[999] pointer-events-none"
         style={{
           left: `${sidebarWidth}px`,
           right: '0px',
@@ -233,7 +233,7 @@ export default function TerminalDock({ visible }) {
       {/* 右键菜单 */}
       {contextMenu && (
         <div
-          className="fixed z-[200] w-36 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in"
+          className="fixed z-[999] w-36 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in"
           style={{ left: Math.min(contextMenu.x, window.innerWidth - 160), top: Math.min(contextMenu.y, window.innerHeight - 120) }}
           onClick={e => e.stopPropagation()}
         >

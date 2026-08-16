@@ -1,5 +1,5 @@
 import {
-  Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass, LayoutGrid
+  Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass, LayoutGrid, Bot
 } from 'lucide-react'
 
 /** 应用程序注册表 — 终端板块的权威定义 */
@@ -17,6 +17,7 @@ export const APPS = [
 ]
 
 export const SYS_TOOLS = [
+  { id: 'ai', name: 'AI', icon: Bot, system: true, color: 'from-indigo-600 to-violet-500', iconClass: 'text-white drop-shadow-md' },
   { id: 'resources', name: '资源', icon: FolderOpen, system: true, color: 'from-blue-500 to-sky-300', iconClass: 'text-white drop-shadow-md' },
   { id: 'customize', name: '自定义', icon: Settings2, system: true, color: 'from-purple-500 to-pink-400', iconClass: 'text-white drop-shadow-md' },
   { id: 'library', name: '资源库', icon: LayoutGrid, system: true, color: 'from-slate-500 to-slate-300', iconClass: 'text-white drop-shadow-md' },

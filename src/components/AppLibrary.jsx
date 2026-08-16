@@ -57,7 +57,7 @@ export default function AppLibrary({ onClose, onOpenApp, dockBottom }) {
 
   return (
     // 外层负责定位（translateX 不参与动画），内层播放 scale 动画，避免动画覆盖定位导致左跳
-    <div className="fixed z-[210]" style={{ bottom: (dockBottom || 76) + 10, ...pos }}
+    <div className="fixed z-[1000]" style={{ bottom: (dockBottom || 76) + 10, ...pos }}
       ref={panelRef}>
       <div className="w-[min(460px,90vw)] max-h-[55vh] flex flex-col rounded-2xl
         bg-surface-900/85 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in">

@@ -13,6 +13,7 @@ import ColoredText from '../components/ColoredText'
 import { X, ImagePlus } from 'lucide-react'
 import Lightbox from '../components/Lightbox'
 import { stripFormatting } from '../utils/colorMarkup'
+import { stripMarkdown } from '../utils/markdown'
 import { useTypeColor } from '../hooks/useTypeColor'
 
 const CATEGORIES = {
@@ -674,7 +675,7 @@ export default function GameDataPage() {
   // Rows with preview
   const rows = filtered.map(item => ({
     ...item,
-    _preview: stripFormatting((item.content || '').slice(0, 200)),
+    _preview: stripMarkdown(stripFormatting(item.content || '')).slice(0, 200),
   }))
 
   // ── 状态持久化：保存滚轮位置和打开条目状态 ──

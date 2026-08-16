@@ -13,6 +13,7 @@ import NorthlandBank from '../components/NorthlandBank'
 import GachaStation from '../components/GachaStation'
 import MemoryHub from '../components/MemoryHub'
 import Hourglass from '../components/Hourglass'
+import AITool from '../components/AITool'
 import {
   X, Minus, Square, Copy, Monitor, ChevronLeft,
   FolderOpen, LayoutList, LayoutGrid,
@@ -334,25 +335,54 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
     dragStart.current = { x: e.clientX, y: e.clientY, left, top, width, height }
   }, [left, top, width, height])
 
+  // 拖拽/缩放期间直接操作 DOM（不经过 React state），避免每帧 mousemove 触发整棵 Provider 树重渲染导致卡顿；
+  // 松手时一次性提交最终位置到状态。
   useEffect(() => {
     if (!dragging && !resizing) return
     const handleMove = (e) => {
+      const el = windowRef.current
+      if (!el) return
       if (dragging) {
         const dx = e.clientX - dragStart.current.x
         const dy = e.clientY - dragStart.current.y
-        onUpdateStateRef.current({ left: dragStart.current.left + dx, top: dragStart.current.top + dy })
+        el.style.left = (dragStart.current.left + dx) + 'px'
+        el.style.top = (dragStart.current.top + dy) + 'px'
       } else if (resizing) {
         const dx = e.clientX - dragStart.current.x
         const dy = e.clientY - dragStart.current.y
-        const ns = { ...dragStart.current }; const dir = resizeDir.current
-        if (dir.includes('e')) ns.width = Math.max(320, dragStart.current.width + dx)
-        if (dir.includes('s')) ns.height = Math.max(240, dragStart.current.height + dy)
-        if (dir.includes('w')) { ns.width = Math.max(320, dragStart.current.width - dx); ns.left = dragStart.current.left + dx }
-        if (dir.includes('n')) { ns.height = Math.max(240, dragStart.current.height - dy); ns.top = dragStart.current.top + dy }
-        onUpdateStateRef.current({ width: ns.width, height: ns.height, left: ns.left, top: ns.top })
+        const dir = resizeDir.current
+        let { left, top, width, height } = dragStart.current
+        if (dir.includes('e')) width = Math.max(320, dragStart.current.width + dx)
+        if (dir.includes('s')) height = Math.max(240, dragStart.current.height + dy)
+        if (dir.includes('w')) { width = Math.max(320, dragStart.current.width - dx); left = dragStart.current.left + dx }
+        if (dir.includes('n')) { height = Math.max(240, dragStart.current.height - dy); top = dragStart.current.top + dy }
+        el.style.left = left + 'px'
+        el.style.top = top + 'px'
+        el.style.width = width + 'px'
+        el.style.height = height + 'px'
       }
     }
-    const handleUp = () => { setDragging(false); setResizing(false) }
+    const handleUp = () => {
+      const el = windowRef.current
+      if (el && (dragging || resizing)) {
+        if (dragging) {
+          const nl = parseFloat(el.style.left)
+          const nt = parseFloat(el.style.top)
+          if (!isNaN(nl) && !isNaN(nt)) onUpdateStateRef.current({ left: nl, top: nt })
+        } else {
+          const patch = {}
+          const nw = parseFloat(el.style.width), nh = parseFloat(el.style.height)
+          const nl = parseFloat(el.style.left), nt = parseFloat(el.style.top)
+          if (!isNaN(nw)) patch.width = nw
+          if (!isNaN(nh)) patch.height = nh
+          if (!isNaN(nl)) patch.left = nl
+          if (!isNaN(nt)) patch.top = nt
+          onUpdateStateRef.current(patch)
+        }
+      }
+      setDragging(false)
+      setResizing(false)
+    }
     window.addEventListener('mousemove', handleMove)
     window.addEventListener('mouseup', handleUp)
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp) }
@@ -767,6 +797,7 @@ function SystemToolContent({ tool }) {
   }
 
   if (tool.id === 'customize') return <CustomizationTool />
+  if (tool.id === 'ai') return <AITool />
   return null
 }
 

@@ -6,6 +6,9 @@ const url = require('url');
 const { autoUpdater } = require('electron-updater');
 const { shell } = require('electron');
 const { getDownloadManager, PACK_DOWNLOAD_URLS, GITHUB_ARCHIVE_URLS, loadState, resolveJsDelivrVersion, generateManifestForDir } = require('./download-manager');
+const { validateAiQuery, capQueryRows } = require('./ai-sql');
+const { streamChat, chatOnce } = require('./ai-client');
+const { trimContext } = require('./ai-context');
 
 // ── 数据库引擎: sql.js (纯 JS, 无原生模块) ──
 const initSqlJs = require('sql.js');
@@ -568,6 +571,14 @@ function ensureUserDbSchema() {
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS wish_analysis_plans (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
     // 世界树 · 圣遗物练度分析：每个角色的有效副词条组合与权重（按米游社角色ID）
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS worldtree_build_configs (character_id INTEGER PRIMARY KEY, effective_subs TEXT NOT NULL, weights TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
+    // AI 助手：会话记录（对话消息存于 data_json）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS ai_conversations (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '新对话',
+      data_json TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`); } catch (_) {}
     // 地图：用户放置的标点（非开发者模式写入 user.db）
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS map_marker_placements (
       id TEXT PRIMARY KEY,
@@ -2799,7 +2810,7 @@ ipcMain.handle('map-start-slice', async (_event, mapId, srcPath, config) => {
     const imagesDir = getImagesDir(dbDir);
     if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
 
-    const { anchorA, anchorB, distance, scale, mapW, mapH, tileSize = 512 } = config;
+    const { anchorA, anchorB, distance, scale, mapW, mapH, srcPxPerTile = 1024, tileFormat } = config;
     if (!anchorA || !anchorB || !scale) throw new Error('标定数据不完整');
 
     const [ax, ay] = anchorA;
@@ -2810,6 +2821,15 @@ ipcMain.handle('map-start-slice', async (_event, mapId, srcPath, config) => {
     const imgW = fullImg.getSize().width;
     const imgH = fullImg.getSize().height;
 
+    // ── 源像素驱动的切片模型 ──
+    // 每片固定覆盖 srcPxPerTile 个源像素并按 1:1 输出（零降采样），
+    // 切片的世界尺寸 = srcPxPerTile * scale。切片数量与画质因此都与 AB
+    // 标定无关：AB 只决定世界比例尺，切片数只取决于原图大小。
+    const srcExt = path.extname(srcPath).toLowerCase();
+    const isJpegSrc = srcExt === '.jpg' || srcExt === '.jpeg';
+    const useJpeg = tileFormat === 'jpg' || tileFormat === 'jpeg'
+      || (tileFormat !== 'png' && isJpegSrc);
+
     // 计算原图覆盖的世界坐标范围
     // 世界坐标 (wx, wy) = (px - ax) * scale, (py - ay) * scale
     // 原图像素 (px, py) = wx / scale + ax, wy / scale + ay
@@ -2818,32 +2838,32 @@ ipcMain.handle('map-start-slice', async (_event, mapId, srcPath, config) => {
     const maxWorldX = (imgW - ax) * scale;
     const maxWorldY = (imgH - ay) * scale;
 
-    const minRow = Math.floor(minWorldY / tileSize);
-    const maxRow = Math.ceil(maxWorldY / tileSize);
-    const minCol = Math.floor(minWorldX / tileSize);
-    const maxCol = Math.ceil(maxWorldX / tileSize);
+    const worldTileSize = srcPxPerTile * scale;
+    const minRow = Math.floor(minWorldY / worldTileSize);
+    const maxRow = Math.ceil(maxWorldY / worldTileSize);
+    const minCol = Math.floor(minWorldX / worldTileSize);
+    const maxCol = Math.ceil(maxWorldX / worldTileSize);
 
     const totalTiles = (maxRow - minRow) * (maxCol - minCol);
 
-    // ── 超大地图自适应切片尺寸：限制总切片数以防止数万小文件 ──
+    // ── 超大地图兜底：限制总切片数防止数万小文件（代价：增大每片源像素 → 轻度降采样） ──
     const MAX_TOTAL_TILES = 1200;
-    let effectiveTileSize = tileSize;
+    let effectiveSrcPx = srcPxPerTile;
     if (totalTiles > MAX_TOTAL_TILES) {
-      // 计算所需的新 tileSize（按面积比例缩放）
-      const worldW = maxWorldX - minWorldX;
-      const worldH = maxWorldY - minWorldY;
+      // 计算所需的每片源像素数（按面积比例缩放）
       const targetPerSide = Math.sqrt(MAX_TOTAL_TILES);
-      const newSize = Math.max(512, Math.ceil(Math.max(worldW, worldH) / targetPerSide));
-      effectiveTileSize = Math.ceil(newSize / 256) * 256;  // 对齐到 256 的倍数
+      const newSrcPx = Math.max(srcPxPerTile, Math.ceil(Math.max(imgW, imgH) / targetPerSide));
+      effectiveSrcPx = Math.ceil(newSrcPx / 256) * 256;  // 对齐到 256 的倍数
       console.log(`[slice] 总切片数 ${totalTiles} 超过上限 ${MAX_TOTAL_TILES}，` +
-        `增大 tileSize ${tileSize} → ${effectiveTileSize}（原图 ${imgW}×${imgH}，世界 ${worldW.toFixed(0)}×${worldH.toFixed(0)})`);
+        `增大每片源像素 ${srcPxPerTile} → ${effectiveSrcPx}（原图 ${imgW}×${imgH}）`);
     }
-    // 使用 effectiveTileSize（可能已增大）重新计算行列范围
-    const sliceTileSize = effectiveTileSize;
-    const sliceMinRow = Math.floor(minWorldY / sliceTileSize);
-    const sliceMaxRow = Math.ceil(maxWorldY / sliceTileSize);
-    const sliceMinCol = Math.floor(minWorldX / sliceTileSize);
-    const sliceMaxCol = Math.ceil(maxWorldX / sliceTileSize);
+    // 使用 effectiveSrcPx（可能已增大）重新计算行列范围
+    const sliceSrcPx = effectiveSrcPx;
+    const sliceWorldSize = sliceSrcPx * scale;
+    const sliceMinRow = Math.floor(minWorldY / sliceWorldSize);
+    const sliceMaxRow = Math.ceil(maxWorldY / sliceWorldSize);
+    const sliceMinCol = Math.floor(minWorldX / sliceWorldSize);
+    const sliceMaxCol = Math.ceil(maxWorldX / sliceWorldSize);
     const actualTotal = (sliceMaxRow - sliceMinRow) * (sliceMaxCol - sliceMinCol);
 
     let processed = 0;
@@ -2851,19 +2871,15 @@ ipcMain.handle('map-start-slice', async (_event, mapId, srcPath, config) => {
 
     for (let worldRow = sliceMinRow; worldRow < sliceMaxRow; worldRow++) {
       for (let worldCol = sliceMinCol; worldCol < sliceMaxCol; worldCol++) {
-        // 计算切片在原图上的像素区域
-        const pxStart = Math.round(worldCol * sliceTileSize / scale + ax);
-        const pyStart = Math.round(worldRow * sliceTileSize / scale + ay);
-        const pxEnd = Math.round((worldCol + 1) * sliceTileSize / scale + ax);
-        const pyEnd = Math.round((worldRow + 1) * sliceTileSize / scale + ay);
-        const tileWPx = Math.max(1, pxEnd - pxStart);  // 该 tile 在原图中覆盖的像素宽
-        const tileHPx = Math.max(1, pyEnd - pyStart);  // 该 tile 在原图中覆盖的像素高
+        // 切片在原图上覆盖的像素区域（1:1 输出，无需缩放）
+        const pxStart = Math.round(worldCol * sliceSrcPx + ax);
+        const pyStart = Math.round(worldRow * sliceSrcPx + ay);
 
         // 有效重叠区域（clamp 到图像边界）
         const cropX = Math.max(0, pxStart);
         const cropY = Math.max(0, pyStart);
-        const cropW = Math.max(0, Math.min(pxEnd, imgW) - cropX);
-        const cropH = Math.max(0, Math.min(pyEnd, imgH) - cropY);
+        const cropW = Math.max(0, Math.min(pxStart + sliceSrcPx, imgW) - cropX);
+        const cropH = Math.max(0, Math.min(pyStart + sliceSrcPx, imgH) - cropY);
 
         if (cropW <= 0 || cropH <= 0) {
           processed++;
@@ -2874,31 +2890,22 @@ ipcMain.handle('map-start-slice', async (_event, mapId, srcPath, config) => {
           let tile = fullImg.crop({ x: cropX, y: cropY, width: cropW, height: cropH });
           if (!tile || tile.isEmpty()) throw new Error('裁剪失败');
 
-          // 比例缩放：crop 在原 tile 中占比 → 输出 tile 中同比占比
-          const outW = Math.max(1, Math.round(cropW / tileWPx * sliceTileSize));
-          const outH = Math.max(1, Math.round(cropH / tileHPx * sliceTileSize));
-          tile = tile.resize({ width: outW, height: outH });
-
-          // 比例偏移
-          const offsetX = Math.round((cropX - pxStart) / tileWPx * sliceTileSize);
-          const offsetY = Math.round((cropY - pyStart) / tileHPx * sliceTileSize);
-
-          // Pad 到完整 tileSize
-          if (offsetX > 0 || offsetY > 0 || outW < sliceTileSize || outH < sliceTileSize) {
+          // 边缘片只裁不放大，pad 到完整切片尺寸（透明）
+          const offsetX = Math.round(cropX - pxStart);
+          const offsetY = Math.round(cropY - pyStart);
+          if (offsetX > 0 || offsetY > 0 || cropW < sliceSrcPx || cropH < sliceSrcPx) {
             const srcBuf = tile.toBitmap();
-            const dstBuf = Buffer.alloc(sliceTileSize * sliceTileSize * 4, 0);
-            for (let row = 0; row < outH && (offsetY + row) < sliceTileSize; row++) {
-              const srcOff = row * outW * 4;
-              const dstOff = ((offsetY + row) * sliceTileSize + offsetX) * 4;
-              srcBuf.copy(dstBuf, dstOff, srcOff, srcOff + outW * 4);
+            const dstBuf = Buffer.alloc(sliceSrcPx * sliceSrcPx * 4, 0);
+            for (let row = 0; row < cropH && (offsetY + row) < sliceSrcPx; row++) {
+              const srcOff = row * cropW * 4;
+              const dstOff = ((offsetY + row) * sliceSrcPx + offsetX) * 4;
+              srcBuf.copy(dstBuf, dstOff, srcOff, srcOff + cropW * 4);
             }
-            tile = nativeImage.createFromBitmap(dstBuf, { width: sliceTileSize, height: sliceTileSize });
+            tile = nativeImage.createFromBitmap(dstBuf, { width: sliceSrcPx, height: sliceSrcPx });
           }
 
-          const srcExt = path.extname(srcPath).toLowerCase();
-          const isJpegSrc = srcExt === '.jpg' || srcExt === '.jpeg';
-          const buf = isJpegSrc ? tile.toJPEG(85) : tile.toPNG();
-          const ext = isJpegSrc ? 'jpg' : 'png';
+          const buf = useJpeg ? tile.toJPEG(92) : tile.toPNG();
+          const ext = useJpeg ? 'jpg' : 'png';
           const hash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 8);
           const filename = `map_${mapId}_${worldRow}_${worldCol}_${hash}.${ext}`;
           fs.writeFileSync(path.join(imagesDir, filename), buf);
@@ -2938,7 +2945,9 @@ ipcMain.handle('map-start-slice', async (_event, mapId, srcPath, config) => {
     // 更新 config 中的切片元数据
     const updatedConfig = {
       ...config,
-      tileSize: sliceTileSize,
+      tileSize: sliceWorldSize,
+      srcPxPerTile: sliceSrcPx,
+      maxNativeZoom: 1 / scale,
       tileCount: { rows: sliceMaxRow - sliceMinRow, cols: sliceMaxCol - sliceMinCol },
       tileRange: { minRow: sliceMinRow, maxRow: sliceMaxRow, minCol: sliceMinCol, maxCol: sliceMaxCol },
       fullImage: fullImagePath,
@@ -6285,6 +6294,198 @@ function readExternalDb(filePath) {
   return result;
 }
 
+// ═══════════════════════════════════════════════════
+// AI 助手 — 终端 Dock 系统工具（数据库 AI）
+// 设置存于 user.json（aiSettings），会话记录存于 user.db（ai_conversations）
+// ═══════════════════════════════════════════════════
+
+// 进行中的 AI 请求（requestId → AbortController），用于中止流式对话
+const _aiAbortControllers = new Map();
+
+// 会话记录：全部会话
+ipcMain.handle('ai-load-conversations', () => {
+  try {
+    if (!userDb) return [];
+    const result = userDb.exec('SELECT id, title, data_json, created_at, updated_at FROM ai_conversations ORDER BY updated_at DESC');
+    if (!result.length || !result[0].values) return [];
+    return result[0].values.map(row => {
+      let data = {};
+      try { data = JSON.parse(row[2] || '{}'); } catch (_) {}
+      return {
+        id: row[0], title: row[1] || '新对话',
+        messages: Array.isArray(data.messages) ? data.messages : [],
+        createdAt: row[3], updatedAt: row[4],
+      };
+    });
+  } catch (e) {
+    console.error('[ai-load-conversations] error:', e.message);
+    return [];
+  }
+});
+
+// 会话记录：保存（新增/覆盖）
+ipcMain.handle('ai-save-conversation', (_event, payload) => {
+  try {
+    if (!userDb) throw new Error('userDb not open');
+    const { id, title, messages } = payload || {};
+    if (!id || !Array.isArray(messages)) throw new Error('invalid conversation payload');
+    userDb.exec(
+      "INSERT OR REPLACE INTO ai_conversations (id, title, data_json, created_at, updated_at) VALUES (?, ?, ?, COALESCE((SELECT created_at FROM ai_conversations WHERE id = ?), datetime('now','localtime')), datetime('now','localtime'))",
+      [String(id), String(title || '新对话').slice(0, 100), JSON.stringify({ messages }), String(id)]
+    );
+    userDbSave();
+    return { success: true };
+  } catch (e) {
+    console.error('[ai-save-conversation] error:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+// 会话记录：删除
+ipcMain.handle('ai-delete-conversation', (_event, id) => {
+  try {
+    if (!userDb) return { success: true };
+    userDb.exec('DELETE FROM ai_conversations WHERE id = ?', [String(id)]);
+    userDbSave();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// 数据库结构摘要（供 AI 理解本地数据库）
+ipcMain.handle('ai-get-schema', () => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    const tables = [];
+    const seen = new Set();
+
+    const collect = (targetDb) => {
+      const raw = targetDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
+      for (const row of raw?.[0]?.values || []) {
+        const name = String(row[0]);
+        if (seen.has(name)) continue;
+        try {
+          const cols = targetDb.exec('PRAGMA table_info("' + name.replace(/"/g, '""') + '")');
+          const colNames = (cols?.[0]?.values || []).map(c => c[1]);
+          if (colNames.length === 0) continue;
+          tables.push(name + '(' + colNames.join(', ') + ')');
+          seen.add(name);
+        } catch (_) {}
+      }
+    };
+    collect(db);
+    if (userDb) collect(userDb);
+
+    const hint = '\n\n说明：部分长文本/JSON 字段（如 character_talents.skill_table、characters.story、weapons.passive_description_zh、artifacts.*_story_zh 等）默认单格截断为 500 字符。需要完整内容时，在 query_database 参数中设置 max_cell_chars（如 5000），最大 20000。';
+    return { success: true, schema: tables.join('\n') + hint, tableCount: tables.length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// 只读数据库查询（AI 工具）：校验 + 与 db-query 相同的 user.db 增量合并
+ipcMain.handle('ai-query-db', (_event, sql, params = [], options = {}) => {
+  try {
+    if (!db) throw new Error('数据库未初始化');
+    const safeSql = validateAiQuery(sql);
+    const trimmed = safeSql.trim().toUpperCase();
+
+    let rows = dbAll(safeSql, params || []);
+
+    // 与 db-query 一致：双数据库模式下合并 user.db 的用户修改（字段级覆盖）
+    if (dualDbMode && userDb && trimmed.startsWith('SELECT')) {
+      try {
+        const tableName = _extractTableName(safeSql);
+        if (tableName) {
+          const merged = mergeWithUserDbDelta(tableName, rows, safeSql);
+          if (merged !== rows) rows = merged;
+        }
+      } catch (_) {}
+    }
+
+    const capped = capQueryRows(rows, options.maxCellChars);
+    return { data: capped.rows, truncated: (rows || []).length > capped.rows.length, cellTruncated: capped.cellTruncated, sizeTruncated: capped.sizeTruncated };
+  } catch (e) {
+    console.error('[ai-query-db] error:', e.message, '| SQL:', String(sql).slice(0, 160));
+    return { error: e.message };
+  }
+});
+
+// 流式对话（单轮 LLM 请求；工具调用循环由渲染端驱动）
+ipcMain.handle('ai-chat', async (event, payload) => {
+  const { requestId, messages, settings } = payload || {};
+  if (!requestId || !Array.isArray(messages) || messages.length === 0) {
+    return { error: 'invalid ai-chat payload' };
+  }
+  const controller = new AbortController();
+  _aiAbortControllers.set(requestId, controller);
+
+  const sendEvent = (type, extra = {}) => {
+    try { event.sender.send('ai-chat-event', { requestId, type, ...extra }); } catch (_) {}
+  };
+
+  try {
+    const { provider = 'deepseek', apiKey = '', baseUrl = '', model = '', temperature } = settings || {};
+    if (!model) throw new Error('未配置模型');
+
+    // 上下文保护：数量/字符预算裁剪（保持顺序、保留 system、保证 tool 配对完整）
+    const history = trimContext(messages, { maxMessages: 60, maxChars: 1500000 });
+
+    const result = await streamChat({
+      provider, baseUrl, apiKey, model,
+      messages: history,
+      temperature: temperature != null ? temperature : 0.7,
+      tools: Array.isArray(payload.tools) ? payload.tools : undefined,
+      signal: controller.signal,
+      onChunk: (text) => sendEvent('chunk', { text }),
+      onEvent: (ev) => { if (ev.type === 'reasoning') sendEvent('reasoning', { text: ev.data }); },
+    });
+
+    if (result.error) {
+      sendEvent('error', { message: result.error });
+      return { error: result.error };
+    }
+    if (result.aborted) {
+      sendEvent('aborted', {});
+      return { aborted: true, content: result.content };
+    }
+    sendEvent('done', {});
+    return { content: result.content, toolCalls: result.toolCalls || [] };
+  } catch (e) {
+    const msg = e.message || '未知错误';
+    sendEvent('error', { message: msg });
+    return { error: msg };
+  } finally {
+    _aiAbortControllers.delete(requestId);
+  }
+});
+
+// 中止流式对话
+ipcMain.handle('ai-chat-abort', (_event, requestId) => {
+  const controller = _aiAbortControllers.get(requestId);
+  if (controller) controller.abort();
+  return { success: true };
+});
+
+// 测试连接（非流式单轮请求）
+ipcMain.handle('ai-test-connection', async (_event, settings = {}) => {
+  try {
+    const { provider = 'deepseek', apiKey = '', baseUrl = '', model = '' } = settings;
+    if (!apiKey) return { success: false, error: '未配置 API Key' };
+    if (!model) return { success: false, error: '未配置模型' };
+    const result = await chatOnce({
+      provider, baseUrl, apiKey, model,
+      messages: [{ role: 'user', content: '你好，请回复"连接成功"四个字。' }],
+      temperature: 0.1,
+    });
+    if (!result.ok) return { success: false, error: result.error };
+    return { success: true, model, reply: String(result.content).slice(0, 120) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // ── 自动更新 ──
 autoUpdater.setMaxListeners(20); // prevent MaxListenersExceededWarning
 autoUpdater.setFeedURL({
@@ -8083,6 +8284,9 @@ async function fetchDeviceFp(prevDeviceFp, deviceId, seedId, bbsDeviceId) {
   const newDeviceId = deviceId || crypto.randomBytes(8).toString("hex")
   const newSeedId = seedId || crypto.randomUUID()
   const newBbsDeviceId = bbsDeviceId || crypto.randomUUID().replace(/-/g, "")
+  // 无旧指纹时传随机 13 位占位指纹（匹配胡桃 HutaoDeviceFingerprint：新设备注册）
+  // 传空字符串会导致米游社返回未激活指纹 → 后续请求全部 5003
+  const fpForBody = prevDeviceFp || crypto.randomBytes(7).toString("hex").slice(0, 13)
   const resp = await fetch("https://public-data-api.mihoyo.com/device-fp/api/getFp", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -8092,7 +8296,7 @@ async function fetchDeviceFp(prevDeviceFp, deviceId, seedId, bbsDeviceId) {
       seed_id: newSeedId,
       seed_time: String(Date.now()),
       platform: "2",
-      device_fp: prevDeviceFp || "",
+      device_fp: fpForBody,
       app_name: "bbs_cn",
       ext_fields: GENSHIN_EXT_FIELDS,
     }),
@@ -8112,13 +8316,15 @@ async function performGenshinCrawl(finalCookieStr, cookies, outputDir) {
     if (!seedId) seedId = crypto.randomUUID()
     if (!bbsDeviceId) bbsDeviceId = crypto.randomUUID().replace(/-/g, "")
     const extFields = GENSHIN_EXT_FIELDS
+    // 持久化指纹有效则续期；失效/缺失时用随机 13 位占位注册新设备（避免空字符串返回未激活指纹 → 5003）
+    const fpForBody = deviceFp || crypto.randomBytes(7).toString("hex").slice(0, 13)
     const fpBody = JSON.stringify({
       device_id: deviceId,
       bbs_device_id: bbsDeviceId,
       seed_id: seedId,
       seed_time: String(Date.now()),
       platform: "2",
-      device_fp: deviceFp,
+      device_fp: fpForBody,
       app_name: "bbs_cn",
       ext_fields: extFields,
     })
@@ -8295,64 +8501,49 @@ async function performGenshinCrawl(finalCookieStr, cookies, outputDir) {
       const r = await doFetch()
       const d = await r.json()
 
-      // 5003: 当前设备指纹不被信任 → 换新指纹重试（可能转为 1034）
+      // 5003: 设备指纹不被信任（多为账号/设备级风控，换指纹无效且会加重风控）
+      // → 等待后按原指纹重试；仍失败则保留旧数据，等待冷却后下次爬取再试
       if (d.retcode === 5003) {
-        console.log(`[genshin] ${key}: retcode=5003, refreshing device_fp and retrying...`)
-        try {
-          const refreshed = await fetchDeviceFp("", null, null, null)
-          if (refreshed.deviceFp) {
-            deviceFp = refreshed.deviceFp
-            deviceId = refreshed.deviceId; seedId = refreshed.seedId; bbsDeviceId = refreshed.bbsDeviceId
-            console.log(`[genshin] new device_fp obtained: ${deviceFp.slice(0,8)}..., retrying ${key}...`)
-            const ds2 = generateDS(qs, body)
-            const hd2 = (ds, post) => ({
-              "Accept": "application/json",
-              "x-rpc-app_version": HOYOLAB_APP_VERSION,
-              "x-rpc-client_type": "5",
-              "x-rpc-device_id": getDeviceId53(),
-              "x-rpc-device_fp": deviceFp,
-              "User-Agent": `Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro) Mobile miHoYoBBS/${HOYOLAB_APP_VERSION}`,
-              "DS": ds,
-              "Referer": "https://webstatic.mihoyo.com/app/community-game-records/index.html?v=6",
-              "Cookie": finalCookieStr,
-              "X-Requested-With": "com.mihoyo.hyperion",
-              ...(post ? { "Content-Type": "application/json" } : {}),
-            })
-            const r2 = await fetch(postBody ? url : `${url}?${qs}`, {
-              method: postBody ? "POST" : "GET",
-              headers: hd2(ds2, !!postBody),
-              ...(postBody ? { body } : {})
-            })
-            const d2 = await r2.json()
-            results[key] = d2
-            maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d2, null, 2))
-            console.log(`[genshin] ${key}: retcode=${d2.retcode} (after new device_fp)`)
-            if (d2.retcode === 1034 && retryOn1034) {
-              console.log(`[genshin] ${key}: 1034 after device_fp refresh, starting geetest...`)
-              const pathMap = { index: "index", dailyNote: "dailyNote", characters: "character/list", spiralAbyss: "spiralAbyss", roleBasicInfo: "roleBasicInfo" }
-              const challengePath = `/game_record/app/genshin/api/${pathMap[key] || key}`
-              const geetestResult = await solveGeetest(finalCookieStr, challengePath)
-              if (geetestResult) {
-                const r3 = await fetch(postBody ? url : `${url}?${qs}`, {
-                  method: postBody ? "POST" : "GET",
-                  headers: { ...hd2(ds2, !!postBody), "x-rpc-challenge": geetestResult.challenge, "x-rpc-validate": geetestResult.validate, "x-rpc-seccode": geetestResult.validate + "|jordan" },
-                  ...(postBody ? { body } : {})
-                })
-                const d3 = await r3.json()
-                results[key] = d3
-                maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d3, null, 2))
-                console.log(`[genshin] ${key}: retcode=${d3.retcode} (after geetest + new fp)`)
-              } else {
-                geetestCancelled = true
-              }
+        console.log(`[genshin] ${key}: retcode=5003, waiting then retrying with same fp...`)
+        let d2 = null
+        for (let waitTry = 0; waitTry < 2; waitTry++) {
+          await new Promise(r => setTimeout(r, 15000 + waitTry * 10000))
+          try {
+            const r2 = await doFetch()
+            d2 = await r2.json()
+            if (d2.retcode !== 5003) break
+            console.log(`[genshin] ${key}: retcode=5003 (retry ${waitTry+2}), waiting more...`)
+          } catch (e) { console.log(`[genshin] ${key}: retry fetch failed:`, e.message) }
+        }
+        if (d2 && d2.retcode !== 5003) {
+          results[key] = d2
+          maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d2, null, 2))
+          console.log(`[genshin] ${key}: retcode=${d2.retcode} (after 5003 retry)`)
+          if (d2.retcode === 1034 && retryOn1034) {
+            console.log(`[genshin] ${key}: 1034 after 5003 retry, starting geetest...`)
+            const pathMap = { index: "index", dailyNote: "dailyNote", characters: "character/list", spiralAbyss: "spiralAbyss", roleBasicInfo: "roleBasicInfo" }
+            const challengePath = `/game_record/app/genshin/api/${pathMap[key] || key}`
+            const geetestResult = await solveGeetest(finalCookieStr, challengePath)
+            if (geetestResult) {
+              const r3 = await doFetch({
+                "x-rpc-challenge": geetestResult.challenge,
+                "x-rpc-validate": geetestResult.validate,
+                "x-rpc-seccode": geetestResult.validate + "|jordan",
+              })
+              const d3 = await r3.json()
+              results[key] = d3
+              maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d3, null, 2))
+              console.log(`[genshin] ${key}: retcode=${d3.retcode} (after geetest)`)
+            } else {
+              geetestCancelled = true
             }
-            return
           }
-        } catch (e) { console.log(`[genshin] ${key}: device_fp refresh failed:`, e.message) }
-        // 如果换指纹也没用，保存原始 5003 结果
+          return
+        }
+        // 等待重试仍 5003：保留原始 5003 结果（不覆盖旧数据，等待冷却后重试）
         results[key] = d
         maybeSave(`${outputDir}/${pf}_${key}.json`, JSON.stringify(d, null, 2))
-        console.log(`[genshin] ${key}: retcode=${d.retcode} (persisted)`)
+        console.log(`[genshin] ${key}: retcode=${d.retcode} (persisted, account cooling down)`)
         return
       }
 
@@ -8410,26 +8601,15 @@ async function performGenshinCrawl(finalCookieStr, cookies, outputDir) {
     }
   }
   // 角色详细数据（圣遗物+面板），获取所有角色数据（参考胡桃传参，API 支持一次传入全部角色）
-  // 米游社 character/detail 按设备指纹缓存详情快照：先换全新指纹再请求，确保拿到最新圣遗物/面板/命座
+  // 米游社 character/detail 有服务端快照缓存（账号维度），多次请求/等待可触发刷新；不要换指纹（会触发 5003 风控）
   const allCharacterIds = (results.characters?.data?.list || []).map(c => c.id)
   if (allCharacterIds.length > 0) {
-    // 多轮重试：换新指纹 + 等待服务端刷新快照，直到角色详情齐全
+    // 多轮重试：等待服务端刷新快照，直到角色详情齐全
     for (let round = 0; round < 3; round++) {
       if (round > 0) {
         console.log(`[genshin] characterDetail round ${round+1}/3: waiting for snapshot refresh...`)
         await new Promise(r => setTimeout(r, 8000))
       }
-      // 每轮强制换全新设备指纹（新 device_id/seed_id → 新快照）
-      try {
-        const refreshed = await fetchDeviceFp("", null, null, null)
-        if (refreshed.deviceFp && refreshed.deviceFp !== deviceFp) {
-          console.log(`[genshin] refreshed device_fp for characterDetail: ${refreshed.deviceFp.slice(0,8)}...`)
-          deviceFp = refreshed.deviceFp
-          deviceId = refreshed.deviceId; seedId = refreshed.seedId; bbsDeviceId = refreshed.bbsDeviceId
-        } else {
-          console.log("[genshin] device_fp refresh returned same fp, retrying...")
-        }
-      } catch (e) { console.log("[genshin] device_fp refresh failed:", e.message) }
       await crawl("characterDetail", `${BASE}/character/detail`,
         { role_id: String(uid), server, character_ids: allCharacterIds, sort_type: 1 })
       const gotIds = new Set((results.characterDetail?.data?.list || []).map(c => c.base?.id))

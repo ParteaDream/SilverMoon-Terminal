@@ -205,4 +205,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   hourglassSelectAndReadDb: () => ipcRenderer.invoke('hourglass-select-and-read-db'),
   hourglassReadExternalDb: (filePath) => ipcRenderer.invoke('hourglass-read-external-db', filePath),
   hourglassReadCurrentDb: () => ipcRenderer.invoke('hourglass-read-current-db'),
+
+  // AI 助手：会话记录（user.db）与数据库 AI 能力
+  aiLoadConversations: () => ipcRenderer.invoke('ai-load-conversations'),
+  aiSaveConversation: (payload) => ipcRenderer.invoke('ai-save-conversation', payload),
+  aiDeleteConversation: (id) => ipcRenderer.invoke('ai-delete-conversation', id),
+  aiGetSchema: () => ipcRenderer.invoke('ai-get-schema'),
+  aiQueryDb: (sql, params, options) => ipcRenderer.invoke('ai-query-db', sql, params, options),
+  aiChat: (payload) => ipcRenderer.invoke('ai-chat', payload),
+  aiChatAbort: (requestId) => ipcRenderer.invoke('ai-chat-abort', requestId),
+  aiTestConnection: (settings) => ipcRenderer.invoke('ai-test-connection', settings),
+  onAiChatEvent: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('ai-chat-event', handler);
+    return () => ipcRenderer.removeListener('ai-chat-event', handler);
+  },
 });

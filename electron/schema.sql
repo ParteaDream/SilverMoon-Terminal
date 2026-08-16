@@ -377,7 +377,7 @@ CREATE TABLE IF NOT EXISTS version_meta (
 CREATE TABLE IF NOT EXISTS map_maps (
   id TEXT PRIMARY KEY,                     -- 唯一标识如 'teyvat'
   name_zh TEXT NOT NULL,                   -- 显示名称如 '提瓦特'
-  config TEXT NOT NULL DEFAULT '{}',       -- JSON: { tileSize, anchorA[x,y], anchorB[x,y], distance, scale, mapW, mapH, maxRow, maxCol, offsetX, offsetY }
+  config TEXT NOT NULL DEFAULT '{}',       -- JSON: { tileSize(世界单位/片), srcPxPerTile, maxNativeZoom, tileFormat, anchorA[x,y], anchorB[x,y], distance, scale, mapW, mapH, tileRange, fullImage }
   sort_order INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime')),
   updated_at TEXT DEFAULT (datetime('now','localtime'))

@@ -274,8 +274,16 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* ── 原神默认字体（本地打包，public/ 根路径加载） ── */
+@font-face {
+  font-family: 'Genshin Impact';
+  src: url('/Genshin_Impact_font.ttf') format('truetype');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Genshin Impact', 'Inter', system-ui, -apple-system, sans-serif;
   background: var(--color-bg);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;

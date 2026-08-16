@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass } from 'lucide-react'
+import { Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass, Bot } from 'lucide-react'
 
 const TerminalContext = createContext(null)
 
@@ -17,6 +17,7 @@ const APP_REGISTRY = {
   hourglass: { icon: Hourglass, color: 'from-indigo-600 to-violet-500', iconClass: 'text-white drop-shadow-md' },
   resources: { icon: FolderOpen, color: 'from-blue-500 to-sky-300', iconClass: 'text-white drop-shadow-md' },
   customize: { icon: Settings2, color: 'from-purple-500 to-pink-400', iconClass: 'text-white drop-shadow-md' },
+  ai: { icon: Bot, color: 'from-indigo-600 to-violet-500', iconClass: 'text-white drop-shadow-md' },
 }
 
 function getDefaultPosition(index, appId) {
@@ -33,11 +34,12 @@ function getDefaultPosition(index, appId) {
   const isMemoryHub = appId === 'memoryhub'
   const isHourglass = appId === 'hourglass'
   const isCustomize = appId === 'customize'
+  const isAI = appId === 'ai'
   return {
     left: sidebarW + 30 + index * 30,
     top: 50 + index * 30,
-    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : isWorldTree ? 700 : isAlbum ? 860 : isRateFetcher ? 720 : isNorthlandBank ? 800 : isGachaStation ? 620 : isMemoryHub ? 960 : isHourglass ? 860 : isCustomize ? 560 : 600,
-    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 660 : isWorldTree ? 580 : isAlbum ? 620 : isRateFetcher ? 640 : isNorthlandBank ? 660 : isGachaStation ? 620 : isMemoryHub ? 700 : isHourglass ? 680 : isCustomize ? 520 : 420,
+    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : isWorldTree ? 700 : isAlbum ? 860 : isRateFetcher ? 720 : isNorthlandBank ? 800 : isGachaStation ? 620 : isMemoryHub ? 960 : isHourglass ? 860 : isCustomize ? 560 : isAI ? 880 : 600,
+    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 660 : isWorldTree ? 580 : isAlbum ? 620 : isRateFetcher ? 640 : isNorthlandBank ? 660 : isGachaStation ? 620 : isMemoryHub ? 700 : isHourglass ? 680 : isCustomize ? 520 : isAI ? 640 : 420,
   }
 }
 
@@ -61,7 +63,8 @@ export function TerminalProvider({ children }) {
 
   const bringToFront = useCallback((appId) => {
     setNextZ(z => {
-      const nz = z + 1
+      // 上限 998：保证 Dock(200) 与资源库小窗(1000) 永远在窗口之上
+      const nz = Math.min(z + 1, 998)
       setRunningApps(prev => prev.map(a =>
         a.id === appId ? { ...a, state: { ...a.state, zIndex: nz } } : a
       ))

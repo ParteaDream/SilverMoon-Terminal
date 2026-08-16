@@ -541,8 +541,34 @@ function OverviewPanel({ stats, daily, worlds, rcDetail, hardChallengeDetail }) 
 function Box({icon:I,label:l,value:v,color:c}){return<div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2 text-center"><I className={`w-4 h-4 ${c} mx-auto mb-0.5`}/><div className="text-sm font-bold text-surface-200">{v||'?'}</div><div className="text-[8px] text-surface-500">{l}</div></div>}
 
 // ─── 探索（按国家-子区域层级，基于 API world_exploration_display）───
+// 神瞳：字段名 → 图包文件名（materials 表 image 列）
+const OCULUS_META = [
+  { k:'anemoculus_number', n:'风', img:'UI_ItemIcon_107001.webp' },
+  { k:'geoculus_number', n:'岩', img:'UI_ItemIcon_107003.webp' },
+  { k:'electroculus_number', n:'雷', img:'UI_ItemIcon_107014.webp' },
+  { k:'dendroculus_number', n:'草', img:'UI_ItemIcon_107017.webp' },
+  { k:'hydroculus_number', n:'水', img:'UI_ItemIcon_107023.webp' },
+  { k:'pyroculus_number', n:'火', img:'UI_ItemIcon_107028.webp' },
+  { k:'moonoculus_number', n:'月', img:'UI_ItemIcon_107030.webp' },
+  { k:'iceculus_number', n:'冰', img:'UI_ItemIcon_107035.webp' },
+]
 function ExplorePanel({ stats, worlds, worldDisplay }) {
-  const oculus = [{k:'anemoculus_number',n:'风',e:'🍃'},{k:'geoculus_number',n:'岩',e:'🪨'},{k:'electroculus_number',n:'雷',e:'⚡'},{k:'dendroculus_number',n:'草',e:'🌿'},{k:'hydroculus_number',n:'水',e:'💧'},{k:'pyroculus_number',n:'火',e:'🔥'},{k:'moonoculus_number',n:'月',e:'🌙'}]
+  const [oculusImgs, setOculusImgs] = useState({})
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const m = {}
+      for (const o of OCULUS_META) {
+        if (stats[o.k] === undefined) continue
+        try {
+          const r = await window.electronAPI?.readImage?.(o.img)
+          if (r?.data) m[o.k] = r.data
+        } catch (_) {}
+      }
+      if (mounted) setOculusImgs(m)
+    })()
+    return () => { mounted = false }
+  }, [stats])
   const chests = [{k:'common_chest_number',n:'普通',c:'text-surface-400'},{k:'exquisite_chest_number',n:'精致',c:'text-blue-400'},{k:'precious_chest_number',n:'珍贵',c:'text-purple-400'},{k:'luxurious_chest_number',n:'华丽',c:'text-amber-400'},{k:'magic_chest_number',n:'奇馈',c:'text-green-400'}]
   const worldMap = {}; for (const w of worlds) worldMap[w.id] = w
 
@@ -589,7 +615,7 @@ function ExplorePanel({ stats, worlds, worldDisplay }) {
     {/* 宝箱 */}
     <div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-3"><h4 className="text-[10px] font-semibold text-surface-400 mb-2">宝箱</h4><div className="grid grid-cols-5 gap-1 text-center">{chests.map((c,i)=><div key={i} className="p-1 rounded bg-surface-800/50"><div className={`text-xs font-bold ${c.c}`}>{stats[c.k]||0}</div><div className="text-[8px] text-surface-500">{c.n}</div></div>)}</div></div>
     {/* 神瞳 */}
-    <div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-3"><h4 className="text-[10px] font-semibold text-surface-400 mb-2">神瞳</h4><div className="grid grid-cols-4 gap-1 text-center">{oculus.map((o,i)=>{const v=stats[o.k];if(v===undefined)return null;return<div key={i} className="p-1 rounded bg-surface-800/50"><div className="text-xs">{o.e}</div><div className="text-[9px] font-bold text-surface-300">{v}</div><div className="text-[7px] text-surface-500">{o.n}</div></div>})}</div></div>
+    <div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-3"><h4 className="text-[10px] font-semibold text-surface-400 mb-2">神瞳</h4><div className="grid grid-cols-4 gap-1 text-center">{OCULUS_META.map((o,i)=>{const v=stats[o.k];if(v===undefined)return null;const img=oculusImgs[o.k];return<div key={i} className="p-1 rounded bg-surface-800/50"><div className="flex items-center justify-center h-6">{img?<img src={img} className="w-5 h-5 object-contain" alt=""/>:<span className="text-xs opacity-70">{o.n}</span>}</div><div className="text-[9px] font-bold text-surface-300">{v}</div><div className="text-[7px] text-surface-500">{o.n}神瞳</div></div>})}</div></div>
   </div>
 }
 
