@@ -4,7 +4,7 @@ import { useDb } from '../context/DbContext'
 import { useTerminal } from '../context/TerminalContext'
 import {
   Database, Download, Upload, Trash2, X, Bug, History, Wrench,
-  Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock, Globe
+  Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock, Globe, Check
 } from 'lucide-react'
 
 // ─── 备份列表弹窗 ───
@@ -445,6 +445,133 @@ function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, on
   )
 }
 
+// ─── 武器查漏选择弹窗：列出缺失武器（名称 + ID），供用户勾选后爬取 ───
+function WeaponLeakCheckModal({ isOpen, onClose, items, loading, onStart, warning }) {
+  const [selectedIds, setSelectedIds] = useState([])
+
+  // 打开或列表刷新时默认全选
+  useEffect(() => {
+    if (isOpen && items.length > 0) {
+      setSelectedIds(items.map(i => i.id))
+    }
+  }, [isOpen, items])
+
+  if (!isOpen) return null
+
+  function toggle(id) {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  function toggleAll() {
+    setSelectedIds(prev => prev.length === items.length ? [] : items.map(i => i.id))
+  }
+
+  const allChecked = items.length > 0 && selectedIds.length === items.length
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="w-full max-w-lg max-h-[75vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-surface-700">
+          <div className="flex items-center gap-2">
+            <Bug className="w-4 h-4 text-amber-400" />
+            <h3 className="text-sm font-semibold">武器查漏</h3>
+            {!loading && items.length > 0 && (
+              <span className="text-xs text-surface-500">发现 {items.length} 个缺失武器</span>
+            )}
+          </div>
+          <button onClick={onClose} className="p-1 rounded text-surface-400 hover:text-surface-200 hover:bg-surface-700">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* 数据版本回退警告 */}
+        {warning && (
+          <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-xs flex items-start gap-2 bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{warning}</span>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-surface-500 text-sm">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            正在检测缺失武器...
+          </div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-10 text-surface-500 text-sm">没有可爬取的缺失武器</div>
+        ) : (
+          <>
+            {/* 全选工具条 */}
+            <div className="flex items-center justify-between px-5 py-2 border-b border-surface-700/50">
+              <button onClick={toggleAll} className="flex items-center gap-2 text-xs text-surface-400 hover:text-surface-200">
+                <span className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                  allChecked ? 'bg-primary-500 border-primary-500' : 'border-surface-600'
+                }`}>
+                  {allChecked && <Check className="w-3 h-3 text-white" />}
+                </span>
+                全选 / 全不选
+              </button>
+              <span className="text-xs text-surface-500">已选 {selectedIds.length} / {items.length}</span>
+            </div>
+
+            {/* 缺失武器列表 */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              {items.map(item => {
+                const checked = selectedIds.includes(item.id)
+                return (
+                  <label
+                    key={item.id}
+                    className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-colors ${
+                      checked
+                        ? 'bg-primary-500/10 border border-primary-500/25'
+                        : 'bg-surface-800/30 border border-transparent hover:bg-surface-800/60'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(item.id)}
+                      className="w-4 h-4 accent-primary-500 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-surface-200 truncate">{item.name}</div>
+                      {item.nameEn && (
+                        <div className="text-xs text-surface-500 truncate">{item.nameEn}</div>
+                      )}
+                    </div>
+                    <span className="text-xs text-surface-500 shrink-0">ID: {item.id}</span>
+                  </label>
+                )
+              })}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3 border-t border-surface-700 flex items-center justify-between">
+              <span className="text-xs text-surface-500">
+                {selectedIds.length > 0
+                  ? `将爬取选中的 ${selectedIds.length} 个武器`
+                  : '请选择要爬取的武器'}
+              </span>
+              <button
+                onClick={() => onStart(selectedIds)}
+                disabled={selectedIds.length === 0}
+                className="px-4 py-1.5 rounded-lg text-xs bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white transition-colors flex items-center gap-1.5"
+              >
+                <Play className="w-3 h-3" />
+                开始爬取 ({selectedIds.length})
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── 主开发者工具栏 ───
 export default function DevToolbar() {
   const { devMode } = useDb()
@@ -484,6 +611,12 @@ export default function DevToolbar() {
   const [weaponCurrentTask, setWeaponCurrentTask] = useState(null)
   const [weaponFastMode, setWeaponFastMode] = useState(false)
   const [weaponCrawlMode, setWeaponCrawlMode] = useState('full')
+
+  // ── 武器查漏弹窗状态 ──
+  const [leakCheckOpen, setLeakCheckOpen] = useState(false)
+  const [leakCheckLoading, setLeakCheckLoading] = useState(false)
+  const [leakCheckItems, setLeakCheckItems] = useState([])
+  const [leakCheckWarning, setLeakCheckWarning] = useState(null)
 
   // ── 圣遗物爬虫状态 ──
   const [artifactCrawlerOpen, setArtifactCrawlerOpen] = useState(false)
@@ -1657,139 +1790,163 @@ export default function DevToolbar() {
     }
   }
 
-  // ── 查漏模式：检测数据库中缺少的武器并爬取 ──
-  async function startLeakCheckCrawl() {
+  // ── 查漏模式：检测数据库中缺少的武器，弹出选择框供用户勾选 ──
+  async function openWeaponLeakCheck() {
+    if (weaponRunningRef.current) return
+    setLeakCheckLoading(true)
+    setLeakCheckItems([])
+    setLeakCheckWarning(null)
+    setLeakCheckOpen(true)
     try {
       // 1. 获取线上全部武器ID
       const res = await checkMissingWeapons()
-      if (!res.success) { alert('获取武器列表失败: ' + (res.error || '未知错误')); return }
+      if (!res.success) { alert('获取武器列表失败: ' + (res.error || '未知错误')); setLeakCheckOpen(false); return }
+      // 版本获取失败时提示（防止旧版数据导致查漏误判）
+      if (res.versionFallback) {
+        setLeakCheckWarning(`未能获取最新数据版本（manifest 请求失败），当前使用 ${res.version || '7.0'} 数据检测，结果可能不准确`)
+      }
       const onlineIds = res.ids || []
-      
+
       // 2. 获取数据库中已有的武器ID
       const dbRes = await query('SELECT id, name_zh FROM weapons ORDER BY id')
       const dbIds = new Set((dbRes.data || []).map(w => w.id))
-      
+
       // 3. 找出缺少的武器（线上有但数据库没有）
       const missing = onlineIds.filter(id => !dbIds.has(id))
-      
+
       if (missing.length === 0) {
         alert('数据库中的武器已齐全！')
+        setLeakCheckOpen(false)
         return
       }
 
       // 4. 构建武器名称映射（从 checkMissingWeapons 返回的 names）
       const weaponNames = res.names || {};
 
-      if (!window.confirm(`发现 ${missing.length} 个缺失武器，是否开始爬取？`)) return
-
-      // 5. 创建任务列表（使用真实武器名称）
-      const tasks = missing.map(id => ({
+      // 5. 展示缺失列表（名称 + ID），等待用户勾选
+      setLeakCheckItems(missing.map(id => ({
         id,
         name: (weaponNames[id] && weaponNames[id].zh) || `ID:${id}`,
-        status: 'pending',
-        message: ''
-      }))
-      setWeaponTasks(tasks)
-      
-      // 6. 开始爬取
-      setWeaponRunning(true)
-      weaponRunningRef.current = true
-      weaponPausedRef.current = false
-      setWeaponPaused(false)
-
-      for (let i = 0; i < tasks.length; i++) {
-        if (!weaponRunningRef.current) break
-        while (weaponPausedRef.current && weaponRunningRef.current) {
-          await new Promise(r => setTimeout(r, 200))
-        }
-        if (!weaponRunningRef.current) break
-
-        const task = tasks[i]
-        setWeaponCurrentTask(task)
-        setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, status: 'running', message: '爬取中...' } : t))
-
-        try {
-          // 先爬取获取名称
-          const res = await crawlWeapon(task.name, { weaponId: task.id, fastMode: weaponFastMode, crawlMode: 'full' })
-          if (res.success && res.data) {
-            // 更新任务名称
-            const crawledName = res.data.name_zh || `武器${task.id}`
-            setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, name: crawledName } : t))
-            
-            // 使用 nanoka.cc 返回的正确 ID
-            const correctId = res.data.id || task.id;
-
-            // 插入新武器记录
-            await query(
-              `INSERT INTO weapons (id, name_zh, name_en, rarity, weapon_type_id, base_atk, max_base_atk, secondary_stat, secondary_stat_value, max_secondary_stat_value, passive_name_zh, passive_description_zh, story_zh, description_zh, image, simple_art) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [correctId, res.data.name_zh, res.data.name_en || '', res.data.rarity || 4, res.data.weapon_type || 0, res.data.base_atk || 0, res.data.max_base_atk || 0, res.data.secondary_stat || '', res.data.secondary_stat_value || 0, res.data.max_secondary_stat_value || 0, res.data.passive_name_zh || '', res.data.passive_description_zh || '', res.data.story_zh || '', res.data.description_zh || '', res.data.images?.simple ? `${res.data.images.simple}.webp` : '', res.data.images?.icon ? `${res.data.images.icon}.webp` : '']
-            )
-            
-            // 突破材料
-            if (res.data.ascension_materials && res.data.ascension_materials.length > 0) {
-              for (const m of res.data.ascension_materials) {
-                let matId = m.material_id
-                const imgFile = m.image ? `${m.image}.png` : ''
-                // 先按 name_zh 查找
-                const byName = await query('SELECT id FROM materials WHERE name_zh = ?', [m.material_name])
-                if (byName.data && byName.data.length > 0) {
-                  const oldId = byName.data[0].id
-                  if (oldId !== m.material_id) {
-                    try {
-                      await query('PRAGMA foreign_keys = OFF')
-                      await query('UPDATE weapon_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
-                      await query(`UPDATE materials SET id = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
-                        [m.material_id, m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, oldId])
-                      await query('PRAGMA foreign_keys = ON')
-                      matId = m.material_id
-                    } catch (e) { matId = oldId }
-                  } else {
-                    await query(`UPDATE materials SET name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
-                      [m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, matId])
-                  }
-                } else {
-                  const existing = await query('SELECT id FROM materials WHERE id = ?', [m.material_id])
-                  if (existing.data && existing.data.length === 0) {
-                    await query(`INSERT INTO materials (id, name_zh, name_en, type, rarity, description_zh, source, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                      [m.material_id, m.material_name, m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile])
-                  } else {
-                    await query(`UPDATE materials SET name_zh = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
-                      [m.material_name, m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, matId])
-                  }
-                }
-                if (m.image) {
-                  try { await downloadMaterialImage(m.image) } catch (_) {}
-                }
-                await query('INSERT OR IGNORE INTO weapon_ascension_materials (weapon_id, material_id, quantity) VALUES (?, ?, ?)',
-                  [correctId, matId, m.quantity || 1])
-              }
-            }
-            
-            // 下载图片
-            if (res.data.images?.icon) {
-              try { await downloadMaterialImage(res.data.images.icon) } catch (_) {}
-            }
-            
-            setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, status: 'done', message: '完成' } : t))
-          } else {
-            setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, status: 'error', message: res.error || '失败' } : t))
-          }
-        } catch (e) {
-          setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, status: 'error', message: e.message || '异常' } : t))
-        }
-      }
-
-      setWeaponRunning(false)
-      weaponRunningRef.current = false
-      setWeaponPaused(false)
-      weaponPausedRef.current = false
-      setWeaponCurrentTask(null)
-      try { await cleanupScrapeWindow() } catch (_) {}
+        nameEn: (weaponNames[id] && weaponNames[id].en) || ''
+      })))
     } catch (e) {
       alert('查漏失败: ' + (e.message || '未知错误'))
-      setWeaponRunning(false)
-      weaponRunningRef.current = false
+      setLeakCheckOpen(false)
+    } finally {
+      setLeakCheckLoading(false)
     }
+  }
+
+  // ── 查漏模式：按用户勾选的武器爬取 ──
+  async function startWeaponLeakCrawl(selectedIds) {
+    setLeakCheckOpen(false)
+
+    // 1. 创建任务列表（使用真实武器名称）
+    const tasks = selectedIds.map(id => {
+      const item = leakCheckItems.find(x => x.id === id)
+      return {
+        id,
+        name: (item && item.name) || `ID:${id}`,
+        status: 'pending',
+        message: ''
+      }
+    })
+    setWeaponTasks(tasks)
+
+    // 2. 开始爬取
+    setWeaponRunning(true)
+    weaponRunningRef.current = true
+    weaponPausedRef.current = false
+    setWeaponPaused(false)
+
+    for (let i = 0; i < tasks.length; i++) {
+      if (!weaponRunningRef.current) break
+      while (weaponPausedRef.current && weaponRunningRef.current) {
+        await new Promise(r => setTimeout(r, 200))
+      }
+      if (!weaponRunningRef.current) break
+
+      const task = tasks[i]
+      setWeaponCurrentTask(task)
+      setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, status: 'running', message: '爬取中...' } : t))
+
+      try {
+        // 先爬取获取名称
+        const res = await crawlWeapon(task.name, { weaponId: task.id, fastMode: weaponFastMode, crawlMode: 'full' })
+        if (res.success && res.data) {
+          // 更新任务名称
+          const crawledName = res.data.name_zh || `武器${task.id}`
+          setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, name: crawledName } : t))
+
+          // 使用 nanoka.cc 返回的正确 ID
+          const correctId = res.data.id || task.id;
+
+          // 插入新武器记录
+          await query(
+            `INSERT INTO weapons (id, name_zh, name_en, rarity, weapon_type_id, base_atk, max_base_atk, secondary_stat, secondary_stat_value, max_secondary_stat_value, passive_name_zh, passive_description_zh, story_zh, description_zh, image, simple_art) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [correctId, res.data.name_zh, res.data.name_en || '', res.data.rarity || 4, res.data.weapon_type || 0, res.data.base_atk || 0, res.data.max_base_atk || 0, res.data.secondary_stat || '', res.data.secondary_stat_value || 0, res.data.max_secondary_stat_value || 0, res.data.passive_name_zh || '', res.data.passive_description_zh || '', res.data.story_zh || '', res.data.description_zh || '', res.data.images?.simple ? `${res.data.images.simple}.webp` : '', res.data.images?.icon ? `${res.data.images.icon}.webp` : '']
+          )
+
+          // 突破材料
+          if (res.data.ascension_materials && res.data.ascension_materials.length > 0) {
+            for (const m of res.data.ascension_materials) {
+              let matId = m.material_id
+              const imgFile = m.image ? `${m.image}.png` : ''
+              // 先按 name_zh 查找
+              const byName = await query('SELECT id FROM materials WHERE name_zh = ?', [m.material_name])
+              if (byName.data && byName.data.length > 0) {
+                const oldId = byName.data[0].id
+                if (oldId !== m.material_id) {
+                  try {
+                    await query('PRAGMA foreign_keys = OFF')
+                    await query('UPDATE weapon_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
+                    await query(`UPDATE materials SET id = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
+                      [m.material_id, m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, oldId])
+                    await query('PRAGMA foreign_keys = ON')
+                    matId = m.material_id
+                  } catch (e) { matId = oldId }
+                } else {
+                  await query(`UPDATE materials SET name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
+                    [m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, matId])
+                }
+              } else {
+                const existing = await query('SELECT id FROM materials WHERE id = ?', [m.material_id])
+                if (existing.data && existing.data.length === 0) {
+                  await query(`INSERT INTO materials (id, name_zh, name_en, type, rarity, description_zh, source, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [m.material_id, m.material_name, m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile])
+                } else {
+                  await query(`UPDATE materials SET name_zh = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
+                    [m.material_name, m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, matId])
+                }
+              }
+              if (m.image) {
+                try { await downloadMaterialImage(m.image) } catch (_) {}
+              }
+              await query('INSERT OR IGNORE INTO weapon_ascension_materials (weapon_id, material_id, quantity) VALUES (?, ?, ?)',
+                [correctId, matId, m.quantity || 1])
+            }
+          }
+
+          // 下载图片
+          if (res.data.images?.icon) {
+            try { await downloadMaterialImage(res.data.images.icon) } catch (_) {}
+          }
+
+          setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, status: 'done', message: '完成' } : t))
+        } else {
+          setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, status: 'error', message: res.error || '失败' } : t))
+        }
+      } catch (e) {
+        setWeaponTasks(prev => prev.map((t, idx) => idx === i ? { ...t, status: 'error', message: e.message || '异常' } : t))
+      }
+    }
+
+    setWeaponRunning(false)
+    weaponRunningRef.current = false
+    setWeaponPaused(false)
+    weaponPausedRef.current = false
+    setWeaponCurrentTask(null)
+    try { await cleanupScrapeWindow() } catch (_) {}
   }
 
   // ── 祈愿爬虫逻辑 ──
@@ -2262,7 +2419,7 @@ export default function DevToolbar() {
                   )}
                 </button>
                 <button
-                  onClick={startLeakCheckCrawl}
+                  onClick={openWeaponLeakCheck}
                   disabled={weaponRunning}
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
                 >
@@ -2438,6 +2595,14 @@ export default function DevToolbar() {
         onToggleFastMode={() => setArtifactFastMode(prev => !prev)}
         crawlMode={artifactCrawlMode}
         onToggleCrawlMode={setArtifactCrawlMode}
+      />
+      <WeaponLeakCheckModal
+        isOpen={leakCheckOpen}
+        onClose={() => setLeakCheckOpen(false)}
+        items={leakCheckItems}
+        loading={leakCheckLoading}
+        onStart={startWeaponLeakCrawl}
+        warning={leakCheckWarning}
       />
       <CrawlerPanel
         isOpen={wishCrawlerOpen}

@@ -4101,7 +4101,31 @@ function convertColorMarkup(text) {
 }
 
 // 通过 https 获取 JSON（Electron 主进程可用 Node.js http/https）
-async function fetchJson(url) {
+async function fetchJson(url, timeoutMs = 90000) {
+  // 优先使用 Chromium 网络栈（与浏览器行为一致：跟随系统代理、HTTP/2、连接复用），
+  // 解决部分网络环境下 Node https 直连超时而浏览器正常的问题
+  if (app.isReady() && net && typeof net.fetch === 'function') {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await net.fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json,*/*',
+        },
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error('Request timeout');
+      if (e.message && e.message.startsWith('HTTP ')) throw e;
+      console.warn('[fetchJson] net.fetch failed, fallback to Node https:', url, e.message);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  // Node https 回退路径
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? require('https') : require('http');
     const req = proto.get(url, {
@@ -4124,14 +4148,52 @@ async function fetchJson(url) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(30000, () => {
+    req.setTimeout(timeoutMs, () => {
       req.destroy();
       reject(new Error('Request timeout'));
     });
   });
 }
 
-async function fetchText(url) {
+// 带重试的 JSON 获取：网络抖动/超时后自动重试，避免一次失败导致功能不可用
+async function fetchWithRetry(url, retries = 2, retryDelayMs = 1000) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetchJson(url);
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[fetchWithRetry] attempt ${attempt + 1}/${retries + 1} failed:`, url, e.message);
+      if (attempt < retries) await new Promise(r => setTimeout(r, retryDelayMs));
+    }
+  }
+  throw lastErr;
+}
+
+async function fetchText(url, timeoutMs = 90000) {
+  // 优先使用 Chromium 网络栈（与浏览器行为一致），失败回退 Node https
+  if (app.isReady() && net && typeof net.fetch === 'function') {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await net.fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/json,*/*',
+        },
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.text();
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error('Request timeout');
+      if (e.message && e.message.startsWith('HTTP ')) throw e;
+      console.warn('[fetchText] net.fetch failed, fallback to Node https:', url, e.message);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  // Node https 回退路径
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? require('https') : require('http');
     const req = proto.get(url, {
@@ -4151,14 +4213,14 @@ async function fetchText(url) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(30000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('Request timeout')); });
   });
 }
 
 async function getCharacterList() {
   if (_cachedCharacterList) return _cachedCharacterList;
   const version = await getDataVersion();
-  _cachedCharacterList = await fetchJson(`https://static.nanoka.cc/gi/${version}/character.json`);
+  _cachedCharacterList = await fetchWithRetry(`https://static.nanoka.cc/gi/${version}/character.json`);
   console.log('[getCharacterList] loaded, count:', Object.keys(_cachedCharacterList).length);
   return _cachedCharacterList;
 }
@@ -4166,14 +4228,14 @@ async function getCharacterList() {
 async function getItemAll() {
   if (_cachedItemAll) return _cachedItemAll;
   const version = await getDataVersion();
-  _cachedItemAll = await fetchJson(`https://static.nanoka.cc/gi/${version}/zh/item_all.json`);
+  _cachedItemAll = await fetchWithRetry(`https://static.nanoka.cc/gi/${version}/zh/item_all.json`);
   return _cachedItemAll;
 }
 
 async function getItemAllEn() {
   if (_cachedItemAllEn) return _cachedItemAllEn;
   const version = await getDataVersion();
-  _cachedItemAllEn = await fetchJson(`https://static.nanoka.cc/gi/${version}/en/item_all.json`);
+  _cachedItemAllEn = await fetchWithRetry(`https://static.nanoka.cc/gi/${version}/en/item_all.json`);
   return _cachedItemAllEn;
 }
 
@@ -4230,18 +4292,37 @@ async function tryFetchJson(urls) {
 
 // ── 静态数据版本 ──
 let _dataVersion = null;
+let _dataVersionFallback = false;   // 最近一次获取失败（回退到 7.0）
+let _dataVersionRetryAt = 0;        // 获取失败后的自动重试时间窗
 
 async function getDataVersion() {
-  if (_dataVersion) return _dataVersion;
+  if (_dataVersion) {
+    _dataVersionFallback = false;
+    return _dataVersion;
+  }
+  // 上次获取失败后 60 秒内直接回退，避免反复请求
+  if (Date.now() < _dataVersionRetryAt) {
+    _dataVersionFallback = true;
+    return '7.0';
+  }
   // nanoka.cc 重构后首页改为 SPA，版本号需从 manifest.json 的 gi.latest 解析
   // （与网站前端 gi.7d4a860d.js 的解析逻辑一致）
+  let resolved = '';
   try {
-    const manifest = await fetchJson('https://static.nanoka.cc/manifest.json');
+    const manifest = await fetchWithRetry('https://static.nanoka.cc/manifest.json');
     const gi = manifest && manifest.gi ? manifest.gi : {};
-    _dataVersion = gi.latest || gi.live || gi.cn || '';
+    resolved = gi.latest || gi.live || gi.cn || '';
   } catch (_) {}
-  if (!_dataVersion) _dataVersion = '7.0';
-  return _dataVersion;
+  if (resolved) {
+    _dataVersion = resolved;
+    _dataVersionFallback = false;
+    return resolved;
+  }
+  // 获取失败：临时回退到 7.0 但不永久缓存，稍后自动重试最新版本，
+  // 避免整个会话一直使用旧版本数据导致查漏误判
+  _dataVersionFallback = true;
+  _dataVersionRetryAt = Date.now() + 60000;
+  return '7.0';
 }
 
 // ── 武器列表（从 nanoka.cc 获取）──
@@ -4250,7 +4331,7 @@ let _cachedWeaponList = null;
 async function getWeaponList() {
   if (_cachedWeaponList) return _cachedWeaponList;
   const version = await getDataVersion();
-  _cachedWeaponList = await fetchJson(`https://static.nanoka.cc/gi/${version}/weapon.json`);
+  _cachedWeaponList = await fetchWithRetry(`https://static.nanoka.cc/gi/${version}/weapon.json`);
   console.log('[getWeaponList] loaded, count:', Object.keys(_cachedWeaponList).length);
   return _cachedWeaponList;
 }
@@ -7330,26 +7411,27 @@ ipcMain.handle('save-page-states', (_event, states) => {
 ipcMain.handle('crawl-weapon', async (_event, weaponName, options = {}) => {
   const { fastMode = false, crawlMode = 'full' } = options;
   try {
-    // 1. 以武器名字为 key，从 nanoka.cc 搜索正确的武器 ID
-    //    数据库中的 ID 可能已过期/错误；若名字搜不到则尝试用传入的 ID
+    // 1. 确定目标武器 ID：优先使用调用方传入的 ID（查漏模式等场景下
+    //    ID 直接来自线上列表，是权威值；占位名称如"武器-单手剑"会被
+    //    名称搜索误匹配到其他同名条目，因此 ID 优先）
+    //    数据库中的 ID 可能已过期/错误：线上列表查不到时才按名称搜索
     let weaponId, info;
-    const found = await findWeaponId(weaponName);
-    if (found) {
-      weaponId = found.id;
-      info = found.info;
-    } else if (options.weaponId) {
-      // 名字搜索失败（如查漏模式名称为 "ID:xxx" 或中文名未匹配），
-      // 回退到直接用传入 ID 在武器列表中查找
+    if (options.weaponId) {
       const list = await getWeaponList();
       const item = list[String(options.weaponId)];
       if (item) {
         weaponId = String(options.weaponId);
         info = item;
+      }
+    }
+    if (!weaponId) {
+      const found = await findWeaponId(weaponName);
+      if (found) {
+        weaponId = found.id;
+        info = found.info;
       } else {
         return { success: false, error: `未找到武器: ${weaponName}` };
       }
-    } else {
-      return { success: false, error: `未找到武器: ${weaponName}` };
     }
     const dbId = options.weaponId;  // 数据库中的旧 ID（仅用于返回给前端更新记录）
 
@@ -7361,7 +7443,7 @@ ipcMain.handle('crawl-weapon', async (_event, weaponName, options = {}) => {
     const itemsPromise = getItemAll();
     try {
       console.log('[crawl-weapon] trying:', detailUrl);
-      detail = await fetchJson(detailUrl);
+      detail = await fetchWithRetry(detailUrl);
     } catch (e) {
       console.log('[crawl-weapon] failed:', detailUrl, e.message);
     }
@@ -7598,6 +7680,7 @@ ipcMain.handle('crawl-weapon', async (_event, weaponName, options = {}) => {
 // ── 武器查漏：检查数据库中缺少的武器 ──
 ipcMain.handle('check-missing-weapons', async () => {
   try {
+    const version = await getDataVersion();
     const list = await getWeaponList();
     const allIds = Object.keys(list).filter(id => {
       const info = list[id];
@@ -7612,7 +7695,7 @@ ipcMain.handle('check-missing-weapons', async () => {
       names[id] = { zh: info.zh || '', en: info.en || '' };
     }
 
-    return { success: true, total: allIds.length, ids: allIds.map(Number), names };
+    return { success: true, total: allIds.length, ids: allIds.map(Number), names, version, versionFallback: _dataVersionFallback };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -7624,7 +7707,7 @@ let _cachedArtifactList = null;
 async function getArtifactList() {
   if (_cachedArtifactList) return _cachedArtifactList;
   const version = await getDataVersion();
-  _cachedArtifactList = await fetchJson(`https://static.nanoka.cc/gi/${version}/artifact.json`);
+  _cachedArtifactList = await fetchWithRetry(`https://static.nanoka.cc/gi/${version}/artifact.json`);
   console.log('[getArtifactList] loaded, count:', Object.keys(_cachedArtifactList).length);
   return _cachedArtifactList;
 }

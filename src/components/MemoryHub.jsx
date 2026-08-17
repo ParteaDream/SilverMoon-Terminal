@@ -6,6 +6,7 @@ import MarkerCreatorModal from './MarkerCreatorModal'
 import TextboxCreatorModal from './TextboxCreatorModal'
 import LayerMapModal from './LayerMapModal'
 import PlacementEditor from './PlacementEditor'
+import Lightbox from './Lightbox'
 import { createIdleQueue } from '../utils/idleLoader'
 import { buildMarkerOverlapGroups } from '../utils/markerOverlap.mjs'
 import {
@@ -28,6 +29,7 @@ import {
   ArrowLeft, ArrowRight, ChevronDown, Grid3x3, X,
   Eye, EyeOff,
 } from 'lucide-react'
+import { useNav } from '../context/NavContext'
 
 // ═══════════════════════════════════════
 // 常量
@@ -224,6 +226,139 @@ const FullMapImage = memo(({ fullImageSrc, anchorA, scale, mapW, mapH, opacity =
 
 
 // ═══════════════════════════════════════
+// tooltip 详情内容渲染（顺序：图片 → 正文 → 圣遗物 → 材料 → 怪物）
+// catalog: { artifacts: Map<id, {name, image}>, materials: Map<id, {name, image}> }
+// onJump(kind, id): kind = 'artifact' | 'material'
+// ═══════════════════════════════════════
+const TooltipSections = memo(({ tooltip, catalog, onJump, onImageClick, compact = false }) => {
+  if (!tooltip) return null
+  const artifacts = Array.isArray(tooltip.artifacts) ? tooltip.artifacts : []
+  const materials = Array.isArray(tooltip.materials) ? tooltip.materials : []
+  // 怪物支持多条（monsters 数组）；兼容旧数据单条（monster 对象）
+  const monsters = Array.isArray(tooltip.monsters)
+    ? tooltip.monsters
+    : (tooltip.monster ? [tooltip.monster] : [])
+  // 图片支持多张（images 数组）；兼容旧数据单张（image）
+  const images = Array.isArray(tooltip.images) && tooltip.images.length > 0
+    ? tooltip.images.filter(Boolean)
+    : (tooltip.image ? [tooltip.image] : [])
+  return (
+    <>
+      {images.length > 0 && (
+        <div className={compact ? 'mb-2 flex flex-wrap items-start gap-1.5' : 'space-y-2 mb-3'}>
+          {images.map((img, idx) => (
+            <img key={idx} src={`local-media://${(img || '').trim()}`}
+              onClick={!compact && onImageClick ? (e) => { e.stopPropagation(); onImageClick(img) } : undefined}
+              className={compact
+                ? `rounded-lg border border-white/10 bg-surface-900/60 object-contain ${
+                    images.length === 1 ? 'max-w-full max-h-44' : 'max-w-[45%] max-h-28'
+                  }`
+                : 'w-full max-h-72 rounded-xl object-cover cursor-zoom-in hover:ring-2 hover:ring-amber-500/50 transition-shadow'}
+              draggable={false} />
+          ))}
+        </div>
+      )}
+      {tooltip.body ? (
+        <p className={compact ? 'text-[10px] text-surface-400 leading-relaxed whitespace-pre-wrap' : 'text-sm text-surface-300 whitespace-pre-wrap leading-relaxed'}>{tooltip.body}</p>
+      ) : null}
+
+      {/* 关联圣遗物（套装图片 + 名称，点击跳转词条） */}
+      {artifacts.length > 0 && (
+        <div className={compact ? '' : 'mt-3'}>
+          <p className="text-[9px] text-surface-500 mb-1.5 flex items-center gap-1">⚙ 关联圣遗物</p>
+          <div className="flex flex-wrap gap-1.5">
+            {artifacts.map(id => {
+              const a = catalog?.artifacts?.get(id)
+              if (!a) return null
+              return (
+                <button key={id} onClick={(e) => { e.stopPropagation(); onJump?.('artifact', id) }}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface-800/80 border border-white/10 hover:border-amber-500/50 hover:bg-surface-800 transition-colors ${compact ? '' : 'pointer-events-auto'}`}
+                  title={`跳转到「${a.name}」词条`}>
+                  {a.image && <img src={`local-media://${(a.image || '').trim()}`} className="w-5 h-5 rounded object-cover shrink-0" draggable={false} />}
+                  <span className="text-[10px] text-surface-200">{a.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 关联材料（图片 + 名称，点击跳转词条） */}
+      {materials.length > 0 && (
+        <div className={compact ? '' : 'mt-3'}>
+          <p className="text-[9px] text-surface-500 mb-1.5 flex items-center gap-1">📦 关联材料</p>
+          <div className="flex flex-wrap gap-1.5">
+            {materials.map(id => {
+              const m = catalog?.materials?.get(id)
+              if (!m) return null
+              return (
+                <button key={id} onClick={(e) => { e.stopPropagation(); onJump?.('material', id) }}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface-800/80 border border-white/10 hover:border-amber-500/50 hover:bg-surface-800 transition-colors ${compact ? '' : 'pointer-events-auto'}`}
+                  title={`跳转到「${m.name}」词条`}>
+                  {m.image && <img src={`local-media://${(m.image || '').trim()}`} className="w-5 h-5 rounded object-cover shrink-0" draggable={false} />}
+                  <span className="text-[10px] text-surface-200">{m.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 怪物信息（多条；图片支持多张，点击可打开图片观看器） */}
+      {monsters.filter(m => m && (m.name || m.images?.length || m.image || m.description)).length > 0 && (
+        <div className={compact ? '' : 'mt-3'}>
+          <p className="text-[9px] text-surface-500 mb-1.5 flex items-center gap-1">👾 怪物信息</p>
+          <div className="space-y-2">
+            {monsters.map((monster, mi) => {
+              if (!monster || (!monster.name && !monster.images?.length && !monster.image && !monster.description)) return null
+              // 图片支持多张（images 数组）；兼容旧数据单张（image）
+              const mImages = Array.isArray(monster.images) && monster.images.length > 0
+                ? monster.images.filter(Boolean)
+                : (monster.image ? [monster.image] : [])
+              const imgBaseCls = 'rounded-lg object-contain shrink-0 bg-surface-900/60 border border-white/10'
+              // 详情弹窗中可点击打开图片观看器（悬停浮层不可交互，保持原样）
+              const imgClick = !compact && onImageClick
+                ? (e, img) => { e.stopPropagation(); onImageClick(img) }
+                : undefined
+              return (
+                <div key={mi} className="rounded-lg bg-surface-800/40 border border-white/5 p-2">
+                  {/* 多图：缩略图网格排布在文本上方 */}
+                  {mImages.length > 1 && (
+                    <div className="flex flex-wrap gap-1.5 mb-1.5">
+                      {mImages.map((img, ii) => (
+                        <img key={ii} src={`local-media://${(img || '').trim()}`}
+                          onClick={imgClick ? (e) => imgClick(e, img) : undefined}
+                          className={`${imgBaseCls} ${compact ? 'w-11 h-11' : 'w-14 h-14 cursor-zoom-in hover:ring-2 hover:ring-amber-500/50 transition-shadow'}`}
+                          draggable={false} />
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2 items-start">
+                    {/* 单图：与文本并排 */}
+                    {mImages.length === 1 && (
+                      <img src={`local-media://${(mImages[0] || '').trim()}`}
+                        onClick={imgClick ? (e) => imgClick(e, mImages[0]) : undefined}
+                        className={`${imgBaseCls} ${compact ? 'max-w-14 max-h-14' : 'max-w-20 max-h-20 cursor-zoom-in hover:ring-2 hover:ring-amber-500/50 transition-shadow'}`}
+                        draggable={false} />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      {monster.name && <p className="text-[11px] font-medium text-surface-200">{monster.name}</p>}
+                      {monster.description && (
+                        <p className={compact ? 'text-[10px] text-surface-400 leading-relaxed mt-0.5 whitespace-pre-wrap' : 'text-xs text-surface-400 leading-relaxed mt-1 whitespace-pre-wrap'}>{monster.description}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  )
+})
+
+// ═══════════════════════════════════════
 // 标点网格（React.memo：隐藏/视口外标点已由上层预过滤，
 // 仅当数据/缩放/交互状态变化时才重渲染，拖拽平移与切片加载期间零触碰）
 // ═══════════════════════════════════════
@@ -259,7 +394,7 @@ const MarkerGrid = memo(({
     return overlapGroups.get(pm.id) || null
   }, [overlapGroups])
 
-  return markers.map(({ pm, template, isBaseMarker }) => {
+  return markers.map(({ pm, template, isBaseMarker, fading = false, fadeIn = false }) => {
     const isCircle = template.marker_type === 'other' || template.marker_type === 'circle'
     const baseSize = effectiveMarkerSize
     const maxWorldSize = Math.max(200, baseSize * 6)
@@ -278,13 +413,13 @@ const MarkerGrid = memo(({
       <div
         key={pm.id}
         data-memoryhub-marker={pm.id}
-        className={`absolute group z-[25] transition-all duration-150 hover:scale-110 hover:z-[999] ${overlapHighlightedId === pm.id ? 'scale-125 z-[999]' : ''}${movingMarkerId === pm.id ? ' cursor-move ring-2 ring-yellow-400/60' : ' cursor-pointer'}`}
+        className={`absolute group z-[25] transition-all duration-150 hover:scale-110 hover:z-[999] ${fadeIn && !fading ? 'animate-fade-in' : ''} ${overlapHighlightedId === pm.id ? 'scale-125 z-[999]' : ''}${movingMarkerId === pm.id ? ' cursor-move ring-2 ring-yellow-400/60' : ' cursor-pointer'}${fading ? ' pointer-events-none' : ''}`}
         style={{
           left: pm.world_x - effectiveSize / 2 + markerOffX,
           top: pm.world_y - effectiveSize / 2 + markerOffY,
           width: effectiveSize, height: effectiveSize,
           scale: 'var(--memoryhub-marker-scale, 1)',
-          opacity: isBaseMarker ? 0.3 : 1,
+          opacity: fading ? 0 : (isBaseMarker ? 0.3 : 1),
           transition: `${effectiveLayerHoverZoom ? 'left 0.2s ease, top 0.2s ease, ' : ''}opacity 0.3s ease, transform 0.15s ease`,
           zIndex: isBaseMarker ? 12 : undefined,
         }}
@@ -379,6 +514,14 @@ const MarkerGrid = memo(({
                   imageFilename: template.image_filename || null,
                   detailImage: sf.image || sf.tooltip?.image || null,
                   body: sf.tooltip?.body || '',
+                  tooltip: {
+                    ...(sf.tooltip || {}),
+                    image: sf.image || sf.tooltip?.image || null,
+                    // 多图兼容：tooltip.images 缺省时由旧字段（sf.image / tooltip.image）回退
+                    images: Array.isArray(sf.tooltip?.images) && sf.tooltip.images.length > 0
+                      ? sf.tooltip.images
+                      : ((sf.image || sf.tooltip?.image) ? [sf.image || sf.tooltip.image] : []),
+                  },
                 })
               }
             } catch (_) {}
@@ -402,14 +545,17 @@ const MarkerGrid = memo(({
             const bwRaw = bc.baseBorderWidth ?? 2
             // 屏幕边框恒定 = bwRaw 像素：世界坐标 bw = bwRaw/zoom 抵消外层缩放
             const bw = bwRaw > 0 ? bwRaw / Math.max(zoom, 0.05) : 0
+            // 方框圆角同样用世界坐标抵消外层 scale(zoom)，保证屏幕圆角恒定 6px
+            // （否则放大时 6px 被放大成 6×zoom，方框会逐渐变成圆形）
+            const cornerRadius = bc.baseType === 'square' ? `${6 / Math.max(zoom, 0.05)}px` : '0'
             const shapeStyle = {
-              borderRadius: bc.baseType === 'circle' ? '50%' : bc.baseType === 'square' ? '6px' : '0',
+              borderRadius: bc.baseType === 'circle' ? '50%' : cornerRadius,
               transform: bc.baseType === 'diamond' ? 'rotate(45deg)' : 'none',
             }
             return (
               <>
                 <div className="absolute" style={{ left: offset, top: offset, width: baseSz, height: baseSz, backgroundColor: bc.baseFillColor || '#E4E4E2', ...shapeStyle, zIndex: 0, pointerEvents: 'none' }} />
-                <div className="absolute overflow-hidden" style={{ left: offset, top: offset, width: baseSz, height: baseSz, borderRadius: bc.baseType === 'circle' ? '50%' : bc.baseType === 'square' ? '6px' : '0', zIndex: 1, pointerEvents: 'none' }}>
+                <div className="absolute overflow-hidden" style={{ left: offset, top: offset, width: baseSz, height: baseSz, borderRadius: bc.baseType === 'circle' ? '50%' : cornerRadius, zIndex: 1, pointerEvents: 'none' }}>
                   {template.image_filename ? <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-full h-full object-cover" decoding="async" draggable={false} /> : <div className="w-full h-full" />}
                 </div>
                 <div className="absolute" style={{ left: offset, top: offset, width: baseSz, height: baseSz, backgroundColor: 'transparent', border: `${bw}px solid black`, boxShadow: `0 0 0 ${bw}px ${bc.baseBorderColor || '#3375DD'} inset`, ...shapeStyle, zIndex: 2, pointerEvents: 'none' }} />
@@ -425,8 +571,8 @@ const MarkerGrid = memo(({
               {template.image_filename ? <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-full h-full object-cover" style={{ borderRadius: '50%' }} decoding="async" draggable={false} /> : <div className="w-5 h-5 rounded-full bg-primary-500/30" />}
             </div>
           ) : (
-            <div className="w-full h-full overflow-hidden rounded-lg" style={{ position: 'relative', zIndex: 1 }}>
-              {template.image_filename ? <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-full h-full object-cover" decoding="async" draggable={false} /> : <div className="w-full h-full rounded-lg bg-primary-500/30 border border-primary-500/50" />}
+            <div className="w-full h-full overflow-hidden" style={{ position: 'relative', zIndex: 1, borderRadius: `${8 / Math.max(zoom, 0.05)}px` }}>
+              {template.image_filename ? <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-full h-full object-cover" decoding="async" draggable={false} /> : <div className="w-full h-full bg-primary-500/30 border border-primary-500/50" style={{ borderRadius: `${8 / Math.max(zoom, 0.05)}px` }} />}
             </div>
           )
         })()}
@@ -475,7 +621,7 @@ const TextboxGrid = memo(({
   loadMarkers,
   clampMenuPos,
 }) => {
-  return markers.map(({ tb, isBaseMarker }) => {
+  return markers.map(({ tb, isBaseMarker, fading = false, fadeIn = false }) => {
     // 分层地图悬停时文本框偏移
     let tbOffX = 0, tbOffY = 0
     const isTbLayerHovered = hoveredLayerId && tb.layer_id === hoveredLayerId && (layerMode !== 'G' && layerMode !== 'B' && layerMode !== 'F') && effectiveLayerHoverZoom
@@ -490,8 +636,8 @@ const TextboxGrid = memo(({
       <div
         key={tb.id}
         data-memoryhub-textbox={tb.id}
-        className={`absolute whitespace-nowrap font-bold text-white leading-none${devMode ? ' pointer-events-auto' : ' pointer-events-none'}${movingTextboxId === tb.id ? ' cursor-move ring-2 ring-yellow-400/60' : ''}`}
-        style={{ left: tb.world_x + tbOffX, top: tb.world_y + tbOffY, opacity: isBaseMarker ? 0.3 : 1, zIndex: isBaseMarker ? 12 : (tb.layer_id ? 22 : 15), transform: 'translate(-50%, -50%) scale(var(--memoryhub-text-scale, 1))', fontSize: (() => {
+        className={`absolute whitespace-nowrap font-bold text-white leading-none ${fadeIn && !fading ? 'animate-fade-in' : ''}${devMode ? ' pointer-events-auto' : ' pointer-events-none'}${movingTextboxId === tb.id ? ' cursor-move ring-2 ring-yellow-400/60' : ''}${fading ? ' pointer-events-none' : ''}`}
+        style={{ left: tb.world_x + tbOffX, top: tb.world_y + tbOffY, opacity: fading ? 0 : (isBaseMarker ? 0.3 : 1), zIndex: isBaseMarker ? 12 : (tb.layer_id ? 22 : 15), transform: 'translate(-50%, -50%) scale(var(--memoryhub-text-scale, 1))', fontSize: (() => {
           const baseFs = effectiveTextboxFontSizes?.[tb.level] ?? 12
           return baseFs / Math.max(zoom, 0.05)
         })(), textShadow: '0 -0.06em 0.03em rgba(60,60,60,0.75), 0 0.06em 0.03em rgba(60,60,60,0.75), -0.06em 0 0.03em rgba(60,60,60,0.75), 0.06em 0 0.03em rgba(60,60,60,0.75)', transition: `${effectiveLayerHoverZoom ? 'left 0.2s ease, top 0.2s ease, ' : ''}opacity 0.3s ease` }}
@@ -860,6 +1006,40 @@ export default function MemoryHub() {
   const [placedMenu, setPlacedMenu] = useState(null)          // 已放置标点右键菜单
   const [sidePanel, setSidePanel] = useState(null)            // switch_map 侧栏
   const [detailModal, setDetailModal] = useState(null)       // tooltip 详情弹窗
+  const [lightboxFile, setLightboxFile] = useState(null)     // 详情图片观赏（Lightbox）
+  const memoryHubRootRef = useRef(null)                      // 根元素：Lightbox portalTo 挂载点
+  const { push: navPush } = useNav()
+
+  // ── 关联词条目录（圣遗物/材料 id → 名称+套装图），用于 tooltip 关联展示与跳转 ──
+  const [entryCatalog, setEntryCatalog] = useState({ artifacts: new Map(), materials: new Map() })
+  useEffect(() => {
+    let alive = true
+    if (window.electronAPI?.dbQuery) {
+      window.electronAPI.dbQuery("SELECT id, name_zh, image, flower_image, circlet_image FROM artifacts").then(r => {
+        if (!alive || !r?.data) return
+        const m = new Map()
+        for (const a of r.data) {
+          m.set(a.id, { name: a.name_zh, image: a.flower_image || a.image || a.circlet_image || null })
+        }
+        setEntryCatalog(prev => ({ ...prev, artifacts: m }))
+      }).catch(() => {})
+      window.electronAPI.dbQuery("SELECT id, name_zh, image FROM materials").then(r => {
+        if (!alive || !r?.data) return
+        const m = new Map()
+        for (const x of r.data) {
+          m.set(x.id, { name: x.name_zh, image: x.image || null })
+        }
+        setEntryCatalog(prev => ({ ...prev, materials: m }))
+      }).catch(() => {})
+    }
+    return () => { alive = false }
+  }, [])
+
+  // ── tooltip 关联词条跳转 ──
+  const handleTooltipJump = useCallback((kind, id) => {
+    setDetailModal(null)
+    navPush(kind === 'artifact' ? `/artifacts/${id}` : `/materials/${id}`)
+  }, [navPush])
   const [hoveredMarker, setHoveredMarker] = useState(null)   // 悬停的标点
   const [overlapMenu, setOverlapMenu] = useState(null)        // 重合标点弹出菜单 { markers, worldX, worldY, screenX, screenY }
   const [overlapHighlightedId, setOverlapHighlightedId] = useState(null) // 菜单中高亮的标点 ID
@@ -882,6 +1062,7 @@ export default function MemoryHub() {
   const [showTeleportMarkers, setShowTeleportMarkers] = useState(true)
   const [showLocalLegend, setShowLocalLegend] = useState(true)
   const [showTextLabels, setShowTextLabels] = useState(true)
+  const [showStatueMarkers, setShowStatueMarkers] = useState(true)
 
   // ── 文本框状态 ──
   const [textboxes, setTextboxes] = useState([])             // 文本框列表
@@ -1017,6 +1198,7 @@ export default function MemoryHub() {
         if (res.config.mapShowTeleportMarkers != null) setShowTeleportMarkers(res.config.mapShowTeleportMarkers)
         if (res.config.mapShowLocalLegend != null) setShowLocalLegend(res.config.mapShowLocalLegend)
         if (res.config.mapShowTextLabels != null) setShowTextLabels(res.config.mapShowTextLabels)
+        if (res.config.mapShowStatueMarkers != null) setShowStatueMarkers(res.config.mapShowStatueMarkers)
       }
     }).catch(() => {})
   }, [])
@@ -1219,6 +1401,15 @@ export default function MemoryHub() {
     setDefaultViewActive(false); defaultViewActiveRef.current = false
     // 重置分层模式
     setLayerMode('G')
+    // 清空渐隐状态（避免旧地图的标点/文本框在新地图上残留渐隐）
+    setFadingMarkers(new Map())
+    setFadingTextboxes(new Map())
+    setFadeInMarkers(new Set())
+    setFadeInTextboxes(new Set())
+    prevVisibleMarkerKeysRef.current = null
+    prevVisibleMarkerItemsRef.current = null
+    prevVisibleTextboxKeysRef.current = null
+    prevVisibleTextboxItemsRef.current = null
     setCurrentMapId(mapId)
     setMapConfig(m.config)
     mapConfigRef.current = m.config
@@ -2674,12 +2865,17 @@ export default function MemoryHub() {
       // 视图模式 / 类型开关过滤
       if (viewMode === 'original') continue
       if (viewMode === 'compact' && template.marker_type !== 'statue') continue
+      // 简洁视图额外隐藏秘境/炼武秘境（statue 类型但属于副本入口类标点）
+      if (viewMode === 'compact' && template.marker_type === 'statue' && (
+        (template.name_zh || '').includes('秘境') || /domain/i.test(template.image_filename || '')
+      )) continue
       if (!showTeleportMarkers && template.marker_type === 'teleport') continue
+      if (!showStatueMarkers && template.marker_type === 'statue') continue
       if (legendHidden && legendHidden.has(template.id)) continue
       out.push({ pm, template, isBaseMarker })
     }
     return out
-  }, [placedMarkers, markerTemplates, templateMap, zoom, effectiveLevelThresholds, layerMode, configLayers, viewMode, showTeleportMarkers, showLocalLegend])
+  }, [placedMarkers, markerTemplates, templateMap, zoom, effectiveLevelThresholds, layerMode, configLayers, viewMode, showTeleportMarkers, showLocalLegend, showStatueMarkers])
 
   // ── 重叠标点检测：只统计当前可见（通过级别/分层/视图模式/开关过滤）的标点，
   // 隐藏级别的标点不再进入重叠组，避免菜单列出未显示的标点 ──
@@ -2695,11 +2891,105 @@ export default function MemoryHub() {
     return overlapGroups.get(pm.id) || null
   }, [overlapGroups])
 
+  // ── 级别切换渐隐：离开可见集的标点/文本框保留 350ms 淡出（DOM 预过滤不丢动画） ──
+  // 渲染期 state 调整（React 官方模式）：检测“上帧可见、本帧不可见”的项加入渐隐集，
+  // 使离开的项在本帧继续挂载（opacity 过渡 1→0），定时器到期后再移除。
+  const FADE_OUT_MS = 350
+  const [fadingMarkers, setFadingMarkers] = useState(() => new Map())     // pm.id -> { item, until }
+  const [fadingTextboxes, setFadingTextboxes] = useState(() => new Map()) // tb.id -> { item, until }
+  const [fadeInMarkers, setFadeInMarkers] = useState(() => new Set())     // pm.id —— 内容变化时新进入的标点（一次性淡入）
+  const [fadeInTextboxes, setFadeInTextboxes] = useState(() => new Set()) // tb.id
+  const prevVisibleMarkerKeysRef = useRef(null)
+  const prevVisibleMarkerItemsRef = useRef(null)
+  const prevVisibleTextboxKeysRef = useRef(null)
+  const prevVisibleTextboxItemsRef = useRef(null)
+  const lastVisibleMarkerDataRef = useRef(null)   // 性能守卫：visibleMarkerData 引用未变时跳过
+  const lastVisibleTextboxDataRef = useRef(null)
+
+  // 渲染期：调整标点渐隐/渐显集（幂等；仅在集合变化时 setState，React 提交前立即重渲染）
+  // 性能关键：缩放/平移期间 visibleMarkerData 引用每帧变化，但内容往往不变；
+  // 用 Set.has 成员检查做 O(n) 内容等价判断（零分配），内容相同时不触发任何状态更新。
+  if (lastVisibleMarkerDataRef.current !== visibleMarkerData) {
+    lastVisibleMarkerDataRef.current = visibleMarkerData
+    const prevKeys = prevVisibleMarkerKeysRef.current
+    let contentChanged = true
+    if (prevKeys && prevKeys.size === visibleMarkerData.length) {
+      contentChanged = false
+      for (const d of visibleMarkerData) {
+        if (!prevKeys.has(d.pm.id)) { contentChanged = true; break }
+      }
+    }
+    if (contentChanged) {
+      const currentKeys = new Set(visibleMarkerData.map(d => d.pm.id))
+      let changed = false
+      const nextFading = new Map(fadingMarkers)
+      if (prevKeys) {
+        for (const key of prevKeys) {
+          if (!currentKeys.has(key) && !nextFading.has(key)) {
+            const item = prevVisibleMarkerItemsRef.current?.get(key)
+            if (item) { nextFading.set(key, { item, until: Date.now() + FADE_OUT_MS }); changed = true }
+          }
+        }
+      }
+      for (const key of [...nextFading.keys()]) {
+        if (currentKeys.has(key)) { nextFading.delete(key); changed = true }
+      }
+      // 新进入的标点 → 一次性淡入（仅内容变化时，避免缩放平移期间动画风暴）
+      const nextFadeIn = new Set()
+      for (const key of currentKeys) {
+        if (!prevKeys?.has(key)) nextFadeIn.add(key)
+      }
+      if (nextFadeIn.size > 0 || fadeInMarkers.size > 0) changed = true
+      if (changed) {
+        setFadingMarkers(nextFading)
+        setFadeInMarkers(nextFadeIn)
+      }
+      prevVisibleMarkerItemsRef.current = new Map(visibleMarkerData.map(d => [d.pm.id, d]))
+      prevVisibleMarkerKeysRef.current = currentKeys
+    }
+  }
+
+  // 定时器：渐隐集变化时，按最早到期时间安排移除
+  useEffect(() => {
+    if (fadingMarkers.size === 0) return
+    const now = Date.now()
+    let firstExpiry = Infinity
+    for (const v of fadingMarkers.values()) firstExpiry = Math.min(firstExpiry, v.until)
+    const t = setTimeout(() => {
+      setFadingMarkers(prev => {
+        const next = new Map(prev)
+        const cutoff = Date.now()
+        for (const [k, v] of next) if (v.until <= cutoff) next.delete(k)
+        return next.size === prev.size ? prev : next
+      })
+    }, Math.max(0, firstExpiry - now))
+    return () => clearTimeout(t)
+  }, [fadingMarkers])
+
+  // 定时器：淡入标记 350ms 后清除（动画早已完成，避免残留类名影响后续挂载）
+  useEffect(() => {
+    if (fadeInMarkers.size === 0) return
+    const t = setTimeout(() => setFadeInMarkers(new Set()), FADE_OUT_MS)
+    return () => clearTimeout(t)
+  }, [fadeInMarkers])
+
   // ── 带 guard 的标注窗口：接近边缘时提前换窗，避免进入视口后才挂载 ──
+  // 性能关键：无渐隐/渐显项时直接返回原数组（零 spread、零 Set 分配），
+  // 缩放/平移期间每帧 visibleMarkerData 引用变化但内容不变，走零开销路径。
+  const renderMarkerData = useMemo(() => {
+    if (fadingMarkers.size === 0 && fadeInMarkers.size === 0) return visibleMarkerData
+    const currentKeys = new Set(visibleMarkerData.map(d => d.pm.id))
+    const out = visibleMarkerData.map(d => ({ ...d, fading: false, fadeIn: fadeInMarkers.has(d.pm.id) }))
+    for (const [id, { item }] of fadingMarkers) {
+      if (!currentKeys.has(id)) out.push({ ...item, fading: true })
+    }
+    return out
+  }, [visibleMarkerData, fadingMarkers, fadeInMarkers])
+
   const viewportMarkers = useMemo(() => {
-    if (!visibleMarkerData.length || !annotationWindow) return visibleMarkerData
+    if (!renderMarkerData.length || !annotationWindow) return renderMarkerData
     const out = []
-    for (const item of visibleMarkerData) {
+    for (const item of renderMarkerData) {
       const { pm } = item
       if (pm.world_x >= annotationWindow.left && pm.world_x <= annotationWindow.right &&
           pm.world_y >= annotationWindow.top && pm.world_y <= annotationWindow.bottom) {
@@ -2707,7 +2997,7 @@ export default function MemoryHub() {
       }
     }
     return out
-  }, [visibleMarkerData, annotationWindow])
+  }, [renderMarkerData, annotationWindow])
 
   // ── 文本框可见性预过滤（与标点同一套策略） ──
   const visibleTextboxData = useMemo(() => {
@@ -2738,10 +3028,20 @@ export default function MemoryHub() {
     return out
   }, [textboxes, zoom, effectiveLevelThresholds, layerMode, configLayers, viewMode, showTextLabels])
 
+  const renderTextboxData = useMemo(() => {
+    if (fadingTextboxes.size === 0 && fadeInTextboxes.size === 0) return visibleTextboxData
+    const out = visibleTextboxData.map(d => ({ ...d, fading: false, fadeIn: fadeInTextboxes.has(d.tb.id) }))
+    const currentKeys = new Set(visibleTextboxData.map(d => d.tb.id))
+    for (const [id, { item }] of fadingTextboxes) {
+      if (!currentKeys.has(id)) out.push({ ...item, fading: true })
+    }
+    return out
+  }, [visibleTextboxData, fadingTextboxes, fadeInTextboxes])
+
   const viewportTextboxes = useMemo(() => {
-    if (!visibleTextboxData.length || !annotationWindow) return visibleTextboxData
+    if (!renderTextboxData.length || !annotationWindow) return renderTextboxData
     const out = []
-    for (const item of visibleTextboxData) {
+    for (const item of renderTextboxData) {
       const { tb } = item
       if (tb.world_x >= annotationWindow.left && tb.world_x <= annotationWindow.right &&
           tb.world_y >= annotationWindow.top && tb.world_y <= annotationWindow.bottom) {
@@ -2749,7 +3049,71 @@ export default function MemoryHub() {
       }
     }
     return out
-  }, [visibleTextboxData, annotationWindow])
+  }, [renderTextboxData, annotationWindow])
+
+  // 渲染期：调整文本框渐隐/渐显集（visibleTextboxData 声明之后执行）
+  if (lastVisibleTextboxDataRef.current !== visibleTextboxData) {
+    lastVisibleTextboxDataRef.current = visibleTextboxData
+    const prevKeys = prevVisibleTextboxKeysRef.current
+    let contentChanged = true
+    if (prevKeys && prevKeys.size === visibleTextboxData.length) {
+      contentChanged = false
+      for (const d of visibleTextboxData) {
+        if (!prevKeys.has(d.tb.id)) { contentChanged = true; break }
+      }
+    }
+    if (contentChanged) {
+      const currentKeys = new Set(visibleTextboxData.map(d => d.tb.id))
+      let changed = false
+      const nextFading = new Map(fadingTextboxes)
+      if (prevKeys) {
+        for (const key of prevKeys) {
+          if (!currentKeys.has(key) && !nextFading.has(key)) {
+            const item = prevVisibleTextboxItemsRef.current?.get(key)
+            if (item) { nextFading.set(key, { item, until: Date.now() + FADE_OUT_MS }); changed = true }
+          }
+        }
+      }
+      for (const key of [...nextFading.keys()]) {
+        if (currentKeys.has(key)) { nextFading.delete(key); changed = true }
+      }
+      const nextFadeIn = new Set()
+      for (const key of currentKeys) {
+        if (!prevKeys?.has(key)) nextFadeIn.add(key)
+      }
+      if (nextFadeIn.size > 0 || fadeInTextboxes.size > 0) changed = true
+      if (changed) {
+        setFadingTextboxes(nextFading)
+        setFadeInTextboxes(nextFadeIn)
+      }
+      prevVisibleTextboxItemsRef.current = new Map(visibleTextboxData.map(d => [d.tb.id, d]))
+      prevVisibleTextboxKeysRef.current = currentKeys
+    }
+  }
+
+  // 定时器：文本框渐隐集变化时，按最早到期时间安排移除
+  useEffect(() => {
+    if (fadingTextboxes.size === 0) return
+    const now = Date.now()
+    let firstExpiry = Infinity
+    for (const v of fadingTextboxes.values()) firstExpiry = Math.min(firstExpiry, v.until)
+    const t = setTimeout(() => {
+      setFadingTextboxes(prev => {
+        const next = new Map(prev)
+        const cutoff = Date.now()
+        for (const [k, v] of next) if (v.until <= cutoff) next.delete(k)
+        return next.size === prev.size ? prev : next
+      })
+    }, Math.max(0, firstExpiry - now))
+    return () => clearTimeout(t)
+  }, [fadingTextboxes])
+
+  // 定时器：文本框淡入标记 350ms 后清除
+  useEffect(() => {
+    if (fadeInTextboxes.size === 0) return
+    const t = setTimeout(() => setFadeInTextboxes(new Set()), FADE_OUT_MS)
+    return () => clearTimeout(t)
+  }, [fadeInTextboxes])
 
   if (loading) {
     return (
@@ -2763,7 +3127,7 @@ export default function MemoryHub() {
   }
 
   return (
-    <div data-memoryhub-root className="h-full flex flex-col bg-surface-950/90 select-none relative">
+    <div ref={memoryHubRootRef} data-memoryhub-root className="h-full flex flex-col bg-surface-950/90 select-none relative">
       {/* ── 顶部工具栏 ── */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-surface-900/50 shrink-0">
         {/* 地图选择 */}
@@ -2859,6 +3223,7 @@ export default function MemoryHub() {
         <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-surface-900/40 border border-white/5">
           {[
             { key: 'teleport', label: '传送点', state: showTeleportMarkers, setter: setShowTeleportMarkers, configKey: 'mapShowTeleportMarkers' },
+            { key: 'statue', label: '神像', state: showStatueMarkers, setter: setShowStatueMarkers, configKey: 'mapShowStatueMarkers' },
             { key: 'legend', label: '传奇', state: showLocalLegend, setter: setShowLocalLegend, configKey: 'mapShowLocalLegend' },
             { key: 'text', label: '文字', state: showTextLabels, setter: setShowTextLabels, configKey: 'mapShowTextLabels' },
           ].map(({ key, label, state, setter, configKey }) => (
@@ -3370,17 +3735,35 @@ export default function MemoryHub() {
             </div>
             {/* 内容区 */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {detailModal.detailImage && (
-                <img src={`local-media://${(detailModal.detailImage || '').trim()}`} className="w-full max-h-72 rounded-xl object-cover" />
-              )}
-              {detailModal.body ? (
-                <p className="text-sm text-surface-300 whitespace-pre-wrap leading-relaxed">{detailModal.body}</p>
+              {detailModal.tooltip ? (
+                <TooltipSections tooltip={detailModal.tooltip} catalog={entryCatalog} onJump={handleTooltipJump} onImageClick={setLightboxFile} />
               ) : (
-                <p className="text-sm text-surface-500 italic">暂无详情描述</p>
+                <>
+                  {detailModal.detailImage && (
+                    <img src={`local-media://${(detailModal.detailImage || '').trim()}`}
+                      onClick={() => setLightboxFile(detailModal.detailImage)}
+                      className="w-full max-h-72 rounded-xl object-cover cursor-zoom-in hover:ring-2 hover:ring-amber-500/50 transition-shadow" />
+                  )}
+                  {detailModal.body ? (
+                    <p className="text-sm text-surface-300 whitespace-pre-wrap leading-relaxed">{detailModal.body}</p>
+                  ) : (
+                    <p className="text-sm text-surface-500 italic">暂无详情描述</p>
+                  )}
+                </>
               )}
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── 详情图片观赏（Lightbox，挂载到摹忆中枢根节点内，不遮挡窗口标题栏） ── */}
+      {lightboxFile && (
+        <Lightbox
+          filename={lightboxFile}
+          label={detailModal?.name || ''}
+          onClose={() => setLightboxFile(null)}
+          portalTo={memoryHubRootRef.current}
+        />
       )}
 
       {/* ── 分层地图悬停名称提示（右上角） ── */}
@@ -3573,15 +3956,26 @@ export default function MemoryHub() {
               const sf = typeof sfRaw === 'string' ? JSON.parse(sfRaw) : sfRaw
               const tipName = pm.custom_name || template?.name_zh || '未命名'
               return (
-                <div key={pm.id} className="w-64 p-3 rounded-xl bg-surface-900/95 backdrop-blur-md border border-white/10 shadow-2xl">
+                <div key={pm.id} className="w-72 p-3 rounded-xl bg-surface-900/95 backdrop-blur-md border border-white/10 shadow-2xl">
                   <div className="flex items-center gap-2 mb-2">
                     {template?.image_filename && (
                       <img src={`local-media://${(template.image_filename || '').trim()}`} className="w-8 h-8 rounded object-cover shrink-0" />
                     )}
                     <p className="text-xs font-medium text-white">{tipName}</p>
                   </div>
-                  {(sf.image || sf.tooltip?.image) && <img src={`local-media://${(sf.image || sf.tooltip?.image || '').trim()}`} className="w-full h-24 rounded-lg object-cover mb-2" />}
-                  {sf.tooltip?.body && <p className="text-[10px] text-surface-400 leading-relaxed whitespace-pre-wrap">{sf.tooltip.body}</p>}
+                  <TooltipSections
+                    tooltip={{
+                      ...(sf.tooltip || {}),
+                      image: sf.image || sf.tooltip?.image || null,
+                      // 多图兼容：tooltip.images 缺省时由旧字段（sf.image / tooltip.image）回退
+                      images: Array.isArray(sf.tooltip?.images) && sf.tooltip.images.length > 0
+                        ? sf.tooltip.images
+                        : ((sf.image || sf.tooltip?.image) ? [sf.image || sf.tooltip.image] : []),
+                    }}
+                    catalog={entryCatalog}
+                    onJump={handleTooltipJump}
+                    compact
+                  />
                 </div>
               )
             })}
@@ -3645,6 +4039,14 @@ export default function MemoryHub() {
                               imageFilename: tpl?.image_filename || null,
                               detailImage: sf.image || sf.tooltip?.image || null,
                               body: sf.tooltip?.body || '',
+                              tooltip: {
+                                ...(sf.tooltip || {}),
+                                image: sf.image || sf.tooltip?.image || null,
+                                // 多图兼容：tooltip.images 缺省时由旧字段（sf.image / tooltip.image）回退
+                                images: Array.isArray(sf.tooltip?.images) && sf.tooltip.images.length > 0
+                                  ? sf.tooltip.images
+                                  : ((sf.image || sf.tooltip?.image) ? [sf.image || sf.tooltip.image] : []),
+                              },
                             })
                           }
                         } catch (_) {}
@@ -3808,6 +4210,7 @@ export default function MemoryHub() {
           key={layerEditData ? `edit-${layerEditData.id}` : 'new'}
           editData={layerEditData}
           mapConfig={mapConfig}
+          mapId={currentMapId}
           onConfirm={handleLayerConfirm}
           onCancel={() => { setShowLayerManager(false); setLayerEditData(null) }}
         />

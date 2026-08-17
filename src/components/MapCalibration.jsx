@@ -524,7 +524,7 @@ export default function MapCalibration({
           <div
             ref={sidePanelRef}
             className="absolute top-0 right-0 bottom-0 w-72 border-l border-white/5 flex flex-col bg-surface-900/95 p-4 overflow-y-scroll"
-            style={{ scrollbarWidth: 'thin', overscrollBehavior: 'contain' }}
+            style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgb(var(--color-1)) rgb(var(--surface-800))', overscrollBehavior: 'contain' }}
           >
             <h3 className="text-xs font-semibold text-surface-300 mb-4 flex items-center gap-2">
               <Crosshair className="w-3.5 h-3.5 text-amber-400" />

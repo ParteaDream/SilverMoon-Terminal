@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { X, Check, Image, Layers } from 'lucide-react'
+import { getTileRequestWidth, getVisibleTileLimit } from '../utils/tileResolution.mjs'
 
 // ═══════════════════════════════════════
 // 分层地图创建/编辑弹窗
@@ -7,10 +8,12 @@ import { X, Check, Image, Layers } from 'lucide-react'
 export default function LayerMapModal({
   editData,
   mapConfig,
+  mapId,
   onConfirm,
   onCancel,
 }) {
   const existingLayers = mapConfig?.layers || []
+  const TILE_SIZE = 512   // 切片尺寸兜底（旧地图无 config.tileSize 时使用）
 
   // ── 地图参数 ──
   const [name, setName] = useState(editData?.name || '')
@@ -35,6 +38,18 @@ export default function LayerMapModal({
   const zoomRef = useRef(1.0)
   zoomRef.current = previewZoom
   const [previewFlip, setPreviewFlip] = useState(false) // false=分层在上, true=G层在上
+
+  // ── 手动切片加载（G层细节参照，仅点击按钮时按当前可视范围加载一次） ──
+  const [tileOverlay, setTileOverlay] = useState([])   // [{ row, col, src }]
+  const [tileLoading, setTileLoading] = useState(false)
+  const [tileHint, setTileHint] = useState('')          // '无切片' 等提示
+  const tileCacheRef = useRef(new Map())                // "mapId_row_col" → { data, width } | null
+
+  // 切换地图/新建弹窗时清空切片叠加
+  useEffect(() => {
+    setTileOverlay([])
+    setTileHint('')
+  }, [mapId])
 
   // ── 参考图切换 ──
   const [referenceIndex, setReferenceIndex] = useState(-1) // -1=无，0=第一张已有分层地图...
@@ -372,6 +387,105 @@ export default function LayerMapModal({
     setPanY(prev => zoomRatio * prev)
   }, [])
 
+  // ── 手动加载当前可视范围的切片（G层细节参照） ──
+  // 仅点击按钮时按当前视角计算一次可见切片并加载，平移/缩放后需再次点击更新
+  const handleLoadTiles = useCallback(async () => {
+    if (!mapId || !mapConfig) return
+    const tileSize = mapConfig.tileSize || TILE_SIZE
+    const { w: cw, h: ch } = containerSizeRef.current
+    if (cw === 0 || ch === 0) return
+    const { worldW, worldH, fitScale } = worldMetrics
+    const s = previewZoom * fitScale
+    if (s <= 0) return
+    setTileLoading(true)
+    setTileHint('')
+    try {
+      // 屏幕可视矩形 → 世界坐标范围
+      const worldLeft = (0 - cw / 2 - panX) / s + worldW / 2
+      const worldRight = (cw - cw / 2 - panX) / s + worldW / 2
+      const worldTop = (0 - ch / 2 - panY) / s + worldH / 2
+      const worldBottom = (ch - ch / 2 - panY) / s + worldH / 2
+
+      let minCol = Math.floor(worldLeft / tileSize)
+      let maxCol = Math.ceil(worldRight / tileSize) - 1
+      let minRow = Math.floor(worldTop / tileSize)
+      let maxRow = Math.ceil(worldBottom / tileSize) - 1
+
+      // 限制在地图切片范围内
+      const range = mapConfig.tileRange
+      if (range) {
+        minCol = Math.max(minCol, range.minCol)
+        maxCol = Math.min(maxCol, range.maxCol)
+        minRow = Math.max(minRow, range.minRow)
+        maxRow = Math.min(maxRow, range.maxRow)
+      }
+      if (maxCol < minCol || maxRow < minRow) {
+        setTileOverlay([])
+        setTileHint('无切片')
+        return
+      }
+
+      const tiles = []
+      for (let r = minRow; r <= maxRow; r++) {
+        for (let c = minCol; c <= maxCol; c++) {
+          tiles.push({ row: r, col: c })
+        }
+      }
+      // 超出上限时按距视口中心距离排序截断（与大地图一致）
+      const MAX_TILES = getVisibleTileLimit({
+        tileSize,
+        zoom: s,
+        devicePixelRatio: window.devicePixelRatio,
+      })
+      if (tiles.length > MAX_TILES) {
+        const wcx = (cw / 2 - cw / 2 - panX) / s + worldW / 2
+        const wcy = (ch / 2 - ch / 2 - panY) / s + worldH / 2
+        tiles.sort((a, b) => {
+          const da = Math.hypot((a.col + 0.5) * tileSize - wcx, (a.row + 0.5) * tileSize - wcy)
+          const db = Math.hypot((b.col + 0.5) * tileSize - wcx, (b.row + 0.5) * tileSize - wcy)
+          return da - db
+        })
+        tiles.length = MAX_TILES
+      }
+
+      const requestedWidth = getTileRequestWidth({
+        tileSize,
+        zoom: s,
+        devicePixelRatio: window.devicePixelRatio,
+      })
+      const cache = tileCacheRef.current
+      const loaded = []
+      // 串行加载，避免一次性并发过多
+      for (const { row, col } of tiles) {
+        const cacheKey = `${mapId}_${row}_${col}`
+        let entry = cache.get(cacheKey)
+        if (!entry || !entry.data || (entry.width || 0) < (requestedWidth || tileSize)) {
+          try {
+            const res = await window.electronAPI?.mapReadTile(mapId, row, col, requestedWidth)
+            if (res?.success && res.data) {
+              entry = { data: res.data, width: requestedWidth || tileSize }
+              cache.set(cacheKey, entry)
+            } else {
+              cache.set(cacheKey, null)
+              continue
+            }
+          } catch {
+            cache.set(cacheKey, null)
+            continue
+          }
+        }
+        loaded.push({ row, col, src: entry.data })
+      }
+      setTileOverlay(loaded)
+      if (loaded.length === 0) setTileHint('无切片')
+    } catch (e) {
+      console.error('[LayerMapModal] load tiles error:', e)
+      setTileHint('切片加载失败')
+    } finally {
+      setTileLoading(false)
+    }
+  }, [mapId, mapConfig, panX, panY, previewZoom, worldMetrics])
+
   // ── 确认 ──
   const handleConfirm = () => {
     if (!name.trim() || !level || !imageFilename) return
@@ -564,6 +678,32 @@ export default function LayerMapModal({
                     )}
                   </div>
 
+                  {/* ── 手动加载的切片（G层全图上方，仅当前可视范围，点击按钮后加载一次） ── */}
+                  {tileOverlay.length > 0 && (() => {
+                    const tileSize = mapConfig?.tileSize || TILE_SIZE
+                    return (
+                      <div className="absolute pointer-events-none" style={{ zIndex: previewFlip ? 21 : 2 }}>
+                        {tileOverlay.map(({ row, col, src }) => (
+                          <img
+                            key={`${row}_${col}`}
+                            src={src}
+                            alt={`tile ${row}_${col}`}
+                            className={`absolute no-fade-in ${referenceIndex >= 0 ? 'opacity-0' : 'opacity-40'}`}
+                            draggable={false}
+                            style={{
+                              left: col * tileSize,
+                              top: row * tileSize,
+                              width: tileSize,
+                              height: tileSize,
+                              maxWidth: 'none',
+                              imageRendering: 'auto',
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )
+                  })()}
+
                   {/* 网格叠加 */}
                   <div className="absolute inset-0 opacity-10 pointer-events-none"
                     style={{
@@ -652,6 +792,18 @@ export default function LayerMapModal({
                 </div>
               )}
               <div className="flex-1" />
+              <button onClick={handleLoadTiles} disabled={tileLoading}
+                className={`bg-surface-900/80 rounded-lg px-2 py-1 text-[10px] pointer-events-auto transition-colors ${
+                  tileLoading
+                    ? 'text-surface-500 cursor-wait'
+                    : tileOverlay.length > 0 ? 'text-emerald-400 hover:text-emerald-300' : 'text-surface-400 hover:text-white'
+                }`}
+                title="手动加载当前可视范围的G层切片（平移/缩放后需再次点击更新）">
+                {tileLoading ? '切片加载中…' : tileOverlay.length > 0 ? `切片已加载 ${tileOverlay.length} 片` : '加载G层切片'}
+              </button>
+              {tileHint && (
+                <span className="bg-surface-900/80 rounded-lg px-2 py-1 text-[10px] text-amber-400 pointer-events-auto">{tileHint}</span>
+              )}
               <div className="flex items-center gap-1 bg-surface-900/80 rounded-lg px-2 py-1 pointer-events-auto">
                 <button onClick={() => zoomAtCenter(-0.1)}
                   className="text-[10px] text-surface-400 hover:text-white px-1">−</button>

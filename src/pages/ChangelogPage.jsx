@@ -907,6 +907,77 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
   )
 }
 
+// ── 横向拖拽滚动容器 ──
+//    内容超出可视范围时出现横向滚动条，支持按住鼠标左右拖拽滑动；
+//    拖拽超过阈值后自动抑制紧随的 click，避免误触内部卡片/按钮。
+function DragScrollArea({ className = '', children }) {
+  const ref = useRef(null)
+  const drag = useRef({ active: false, startX: 0, startLeft: 0, moved: false })
+
+  const endDrag = useCallback(() => {
+    const d = drag.current
+    if (!d.active) return
+    d.active = false
+    const el = ref.current
+    if (el) {
+      el.style.cursor = ''
+      el.classList.remove('drag-scrolling')
+    }
+    if (d.moved) {
+      // 拖拽结束后抑制紧随的 click（捕获阶段拦截，防止误触内部按钮）
+      const suppressClick = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        window.removeEventListener('click', suppressClick, true)
+      }
+      window.addEventListener('click', suppressClick, true)
+      setTimeout(() => window.removeEventListener('click', suppressClick, true), 0)
+    }
+  }, [])
+
+  const handleMouseDown = useCallback((e) => {
+    if (e.button !== 0) return
+    const el = ref.current
+    if (!el) return
+    drag.current = { active: true, startX: e.clientX, startLeft: el.scrollLeft, moved: false }
+    el.style.cursor = 'grabbing'
+    el.classList.add('drag-scrolling')
+  }, [])
+
+  const handleMouseMove = useCallback((e) => {
+    const d = drag.current
+    if (!d.active) return
+    const el = ref.current
+    if (!el) return
+    const dx = e.clientX - d.startX
+    if (Math.abs(dx) > 4) {
+      d.moved = true
+      el.scrollLeft = d.startLeft - dx
+    }
+  }, [])
+
+  // 全局监听移动/松开，拖出容器后仍能跟随
+  useEffect(() => {
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', endDrag)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', endDrag)
+    }
+  }, [handleMouseMove, endDrag])
+
+  return (
+    <div
+      ref={ref}
+      className={`overflow-x-auto cursor-grab ${className}`}
+      onMouseDown={handleMouseDown}
+      onDragStart={e => e.preventDefault()}
+    >
+      {children}
+    </div>
+  )
+}
+
 // ── Version entry display ──
 function VersionEntry({ version, data, charMap, weaponMap, artifactMap, materialMap, wishMap, outfitMap, gameDataMap, versionImages, randomVersionImage, onEdit, isExpanded, defaultExpanded, onToggleExpand }) {
   const navigate = useNavigate()
@@ -1006,7 +1077,7 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
             const visibleTypes = collapsed ? nonWishTypes.filter(t => t !== 'material') : nonWishTypes
             const hasAny = visibleTypes.some(t => additions[t]?.length > 0)
             if (!hasAny) return null
-            return (
+            const sections = (
               <div className="flex flex-wrap gap-x-6 gap-y-4">
                 {visibleTypes.map(type => {
                   const items = additions[type]
@@ -1061,6 +1132,12 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
                   )
                 })}
               </div>
+            )
+            // 折叠态内容过多时会横向超出可视范围：包一层可拖拽横向滚动容器（超出时出现滚动条，支持鼠标拖拽左右滑动）
+            return collapsed ? (
+              <DragScrollArea className="pb-1">{sections}</DragScrollArea>
+            ) : (
+              sections
             )
           })()}
 

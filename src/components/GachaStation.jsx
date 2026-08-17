@@ -574,7 +574,7 @@ function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, 
           <div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2.5">
             <h4 className="text-[10px] font-semibold text-surface-400 mb-2">逐条记录</h4>
             <div className="space-y-0.5 max-h-80 overflow-y-auto"
-              style={{ scrollbarWidth: 'thin', scrollbarColor: '#6b7280 #1f2937' }}>
+              style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgb(var(--color-1)) rgb(var(--surface-800))' }}>
               {[...items].reverse().map(item => {
                 const rankColor = RANK_COLORS[item.rank_type] || 'text-surface-300'
                 const rankBg = RANK_BGS[item.rank_type] || 'bg-surface-800/50'

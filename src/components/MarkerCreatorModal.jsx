@@ -80,7 +80,7 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
-      <div className="w-96 rounded-xl bg-surface-900 border border-white/10 shadow-2xl p-5" onClick={e => e.stopPropagation()}>
+      <div className="w-[600px] max-w-[94vw] rounded-xl bg-surface-900 border border-white/10 shadow-2xl p-5 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
             <Pin className="w-4 h-4 text-amber-400" /> {editData ? '编辑标点' : '创建标点'}
@@ -160,30 +160,34 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
               <div className="flex gap-3 mb-2">
                 <div className="flex-1">
                   <label className="text-[10px] text-surface-500 block mb-1">边框颜色</label>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {presetColors.slice(0, 8).map(p => (
-                      <button key={p.label + p.color} onClick={() => setBaseBorderColor(p.color)}
-                        className={`w-6 h-6 rounded-full border-2 transition-all ${
-                          baseBorderColor === p.color ? 'border-white scale-110' : 'border-transparent'
-                        }`}
-                        style={{ backgroundColor: p.color }} title={p.label} />
-                    ))}
+                  <div className="flex items-start gap-1.5">
+                    <div className="flex gap-1.5 flex-wrap max-h-20 overflow-y-auto pr-0.5">
+                      {presetColors.map(p => (
+                        <button key={p.label + p.color} onClick={() => setBaseBorderColor(p.color)}
+                          className={`w-6 h-6 rounded-full border-2 transition-all shrink-0 ${
+                            baseBorderColor === p.color ? 'border-white scale-110' : 'border-transparent'
+                          }`}
+                          style={{ backgroundColor: p.color }} title={p.label} />
+                      ))}
+                    </div>
                     <input type="color" value={baseBorderColor} onChange={e => setBaseBorderColor(e.target.value)}
-                      className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent" />
+                      className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent shrink-0" />
                   </div>
                 </div>
                 <div className="flex-1">
                   <label className="text-[10px] text-surface-500 block mb-1">填充颜色</label>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {presetColors.slice(0, 8).map(p => (
-                      <button key={p.label + p.color} onClick={() => setBaseFillColor(p.color)}
-                        className={`w-6 h-6 rounded-full border-2 transition-all ${
-                          baseFillColor === p.color ? 'border-white scale-110' : 'border-transparent'
-                        }`}
-                        style={{ backgroundColor: p.color }} title={p.label} />
-                    ))}
+                  <div className="flex items-start gap-1.5">
+                    <div className="flex gap-1.5 flex-wrap max-h-20 overflow-y-auto pr-0.5">
+                      {presetColors.map(p => (
+                        <button key={p.label + p.color} onClick={() => setBaseFillColor(p.color)}
+                          className={`w-6 h-6 rounded-full border-2 transition-all shrink-0 ${
+                            baseFillColor === p.color ? 'border-white scale-110' : 'border-transparent'
+                          }`}
+                          style={{ backgroundColor: p.color }} title={p.label} />
+                      ))}
+                    </div>
                     <input type="color" value={baseFillColor} onChange={e => setBaseFillColor(e.target.value)}
-                      className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent" />
+                      className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent shrink-0" />
                   </div>
                 </div>
               </div>

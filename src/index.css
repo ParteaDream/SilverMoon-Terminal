@@ -290,7 +290,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Scrollbar styles */
+/* Scrollbar styles — 统一使用主题色第一颜色 (--color-1) */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -301,12 +301,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgb(var(--scrollbar-thumb));
+  background: rgb(var(--color-1));
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: rgb(var(--color-1) / 0.8);
 }
 
 /* Selection */
@@ -337,33 +337,42 @@ button:where(:not([class*="hover:"])):hover:not(:disabled) {
   height: 8px;
 }
 
-/* 技能倍率表横向滚动条 — 加粗 + 异色外框 */
+/* 技能倍率表横向滚动条 — 加粗 + 主题色外框 */
 .skill-table-scroll::-webkit-scrollbar {
   height: 10px;
 }
 .skill-table-scroll::-webkit-scrollbar-track {
   background: rgb(var(--surface-800));
   border-radius: 5px;
-  border: 1px solid rgb(var(--primary-400)/0.3);
+  border: 1px solid rgb(var(--color-1)/0.3);
 }
 .skill-table-scroll::-webkit-scrollbar-thumb {
-  background: rgb(var(--primary-400)/0.35);
+  background: rgb(var(--color-1));
   border-radius: 5px;
-  border: 1px solid rgb(var(--primary-400)/0.5);
+  border: 1px solid rgb(var(--color-1)/0.5);
 }
 .skill-table-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--primary-400)/0.55);
+  background: rgb(var(--color-1) / 0.8);
 }
 .betamemo-scroll::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 4px;
 }
 .betamemo-scroll::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.45);
+  background: rgb(var(--color-1));
   border-radius: 4px;
 }
 .betamemo-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.7);
+  background: rgb(var(--color-1) / 0.8);
+}
+
+/* 拖拽滚动中禁用文本选择，防止误选内容 / 图片被原生拖走 */
+.drag-scrolling {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.drag-scrolling img {
+  pointer-events: none;
 }
 .category-tag { background: rgb(var(--surface-700)); color: rgb(var(--surface-300)); }
 

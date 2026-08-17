@@ -5,6 +5,7 @@ import DataTable from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
 import { useImageDrag } from '../hooks/useImageDrag'
+import MarkdownText from '../components/MarkdownText'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import { savePageStateSync } from '../utils/pageStateStore'
 import { Plus, LayoutList, LayoutGrid, ExternalLink, X } from 'lucide-react'
@@ -245,7 +246,7 @@ export default function WebsitesPage() {
           ? [
               { key: 'icon', label: '图标', width: '56px', render: row => <IconCell filename={row.icon} /> },
               { key: 'title_zh', label: '标题', render: row => <span className="font-medium text-white text-sm">{row.title_zh}</span> },
-              { key: 'description_zh', label: '描述', render: row => <span className="text-xs text-surface-400 line-clamp-2 max-w-xl">{row.description_zh || '-'}</span> },
+              { key: 'description_zh', label: '描述', render: row => <span className="text-xs text-surface-400 line-clamp-2 max-w-xl">{row.description_zh ? <MarkdownText text={row.description_zh} /> : '-'}</span> },
             ]
           : [
               { key: 'icon', label: '图标', width: '56px', render: row => <IconCell filename={row.icon} /> },
@@ -261,7 +262,7 @@ export default function WebsitesPage() {
                   </button>
                 ) : <span className="text-xs text-surface-500">-</span>,
               },
-              { key: 'description_zh', label: '描述', render: row => <span className="text-xs text-surface-400 line-clamp-2 max-w-xl">{row.description_zh || '-'}</span> },
+              { key: 'description_zh', label: '描述', render: row => <span className="text-xs text-surface-400 line-clamp-2 max-w-xl">{row.description_zh ? <MarkdownText text={row.description_zh} /> : '-'}</span> },
             ]
         return (
         <DataTable
@@ -364,7 +365,7 @@ export default function WebsitesPage() {
               <WebsiteDetailImage filename={activeDetail.image} />
             )}
             {activeDetail.description_zh && (
-              <p className="text-sm text-surface-300 leading-relaxed whitespace-pre-wrap">{activeDetail.description_zh}</p>
+              <p className="text-sm text-surface-300 leading-relaxed whitespace-pre-wrap"><MarkdownText text={activeDetail.description_zh} /></p>
             )}
             {!activeDetail.description_zh && !activeDetail.image && (
               <p className="text-surface-500 text-sm">暂无详细信息</p>
@@ -389,7 +390,7 @@ export default function WebsitesPage() {
         <FormInput label="地址 (URL)" value={form.url || ''} onChange={v => setForm({ ...form, url: v })} placeholder="https://..." />
         <ImagePicker label="图标" currentImage={form.icon} onSelect={v => setForm({ ...form, icon: v })} onRemove={() => setForm({ ...form, icon: null })} />
         <ImagePicker label="站点图片" currentImage={form.image} onSelect={v => setForm({ ...form, image: v })} onRemove={() => setForm({ ...form, image: null })} />
-        <FormInput label="描述" value={form.description_zh || ''} onChange={v => setForm({ ...form, description_zh: v })} multiline />
+        <FormInput label="描述" value={form.description_zh || ''} onChange={v => setForm({ ...form, description_zh: v })} multiline placeholder="支持链接：[文字](https://...)" />
       </EditModal>
     </div>
   )
