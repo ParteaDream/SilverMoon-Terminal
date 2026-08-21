@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Plus, ArrowLeft, Landmark, Calendar, Trash2, Banknote, TrendingUp,
+  ChevronLeft, ChevronRight, LayoutGrid, List,
 } from 'lucide-react'
 import WishAnalysis from './WishAnalysis'
 
@@ -21,6 +23,10 @@ function uid() {
 
 function todayStr() {
   const d = new Date()
+  return fmtDate(d)
+}
+
+function fmtDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
@@ -81,10 +87,43 @@ function calcDiff(prev, curr) {
 }
 
 // ═══════════════════════════════════════
+// 纠缠之缘换算（把四种货币折算为以纠缠之缘为单位的等价数）
+// ═══════════════════════════════════════
+function periodToFates(period) {
+  const primogems = period?.primogems || 0
+  const fates = period?.intertwinedFates || 0
+  const genesisCrystals = period?.genesisCrystals || 0
+  const starglitter = period?.starglitter || 0
+  const totalPrimo = primogems + genesisCrystals // 创世结晶 → 原石 (1:1)
+  const fatesFromPrimo = Math.floor(totalPrimo / 160) // 原石 → 纠缠之缘 (160:1)
+  const leftoverPrimo = totalPrimo % 160
+  const fatesFromGlitter = Math.floor(starglitter / 5) // 星辉 → 纠缠之缘 (5:1)
+  const leftoverGlitter = starglitter % 5
+  return {
+    fates: fates + fatesFromPrimo + fatesFromGlitter,
+    leftoverPrimo,
+    leftoverGlitter,
+  }
+}
+
+// 构建某月日历格子（周一为一周之始，首尾不足 7 个用 null 补齐）
+function buildMonthCells(year, month) {
+  const first = new Date(year, month, 1)
+  const startOffset = (first.getDay() + 6) % 7
+  const days = new Date(year, month + 1, 0).getDate()
+  const cells = []
+  for (let i = 0; i < startOffset; i++) cells.push(null)
+  for (let d = 1; d <= days; d++) cells.push(new Date(year, month, d))
+  while (cells.length % 7 !== 0) cells.push(null)
+  return cells
+}
+
+// ═══════════════════════════════════════
 // 主组件
 // ═══════════════════════════════════════
 export default function NorthlandBank() {
   const [view, setView] = useState('list')
+  const [viewMode, setViewMode] = useState('list') // 列表 / 日历
   const [records, setRecords] = useState([])
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [analysisPeriod, setAnalysisPeriod] = useState(null) // 祈愿分析所选的收支明细
@@ -154,16 +193,16 @@ export default function NorthlandBank() {
       return selectedRecord
         ? <DateDetailView record={selectedRecord} onUpdate={handleUpdate} onDelete={handleDelete} onBack={handleBack}
             onAnalyze={(period, idx) => setAnalysisPeriod({ period, idx })} />
-        : <RecordListView records={records} onSelect={(r) => { setSelectedRecord(r); setView('detail') }} onAdd={() => setView('add')} />
+        : <RecordListView records={records} viewMode={viewMode} setViewMode={setViewMode} onSelect={(r) => { setSelectedRecord(r); setView('detail') }} onAdd={() => setView('add')} />
     default:
-      return <RecordListView records={records} onSelect={(r) => { setSelectedRecord(r); setView('detail') }} onAdd={() => setView('add')} />
+      return <RecordListView records={records} viewMode={viewMode} setViewMode={setViewMode} onSelect={(r) => { setSelectedRecord(r); setView('detail') }} onAdd={() => setView('add')} />
   }
 }
 
 // ═══════════════════════════════════════
 // 记录列表视图
 // ═══════════════════════════════════════
-function RecordListView({ records, onSelect, onAdd }) {
+function RecordListView({ records, onSelect, onAdd, viewMode, setViewMode }) {
   // 按日期倒序排列
   const sorted = [...records].sort((a, b) => b.date.localeCompare(a.date))
 
@@ -175,32 +214,254 @@ function RecordListView({ records, onSelect, onAdd }) {
           <Landmark className="w-4 h-4 text-amber-400" />
           北国银行 · 收支记录
         </h2>
-        <button
-          onClick={onAdd}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30
-                     border border-amber-500/30 text-amber-300 text-xs font-medium transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          新建记录
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 视图切换：列表 / 日历 */}
+          <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-surface-800/80 border border-white/10">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+                ${viewMode === 'list' ? 'bg-amber-500/20 text-amber-300' : 'text-surface-400 hover:text-surface-200'}`}
+            >
+              <List className="w-3 h-3" />
+              列表
+            </button>
+            <button
+              onClick={() => setViewMode('calendar')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+                ${viewMode === 'calendar' ? 'bg-amber-500/20 text-amber-300' : 'text-surface-400 hover:text-surface-200'}`}
+            >
+              <LayoutGrid className="w-3 h-3" />
+              日历
+            </button>
+          </div>
+          <button
+            onClick={onAdd}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30
+                       border border-amber-500/30 text-amber-300 text-xs font-medium transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            新建记录
+          </button>
+        </div>
       </div>
 
-      {/* 列表 */}
-      <div className="flex-1 overflow-auto p-4">
-        {sorted.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-surface-500">
-            <Landmark className="w-14 h-14 mb-4 opacity-20" />
-            <p className="text-sm">暂无记录</p>
-            <p className="text-[11px] mt-1 opacity-60">点击"新建记录"开始记账</p>
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {sorted.map(record => (
-              <DateCard key={record.id} record={record} onClick={() => onSelect(record)} />
-            ))}
-          </div>
-        )}
+      {/* 日历 / 列表 */}
+      {viewMode === 'calendar' ? (
+        <CalendarView records={records} onSelect={onSelect} />
+      ) : (
+        <div className="flex-1 overflow-auto p-4">
+          {sorted.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-surface-500">
+              <Landmark className="w-14 h-14 mb-4 opacity-20" />
+              <p className="text-sm">暂无记录</p>
+              <p className="text-[11px] mt-1 opacity-60">点击"新建记录"开始记账</p>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {sorted.map(record => (
+                <DateCard key={record.id} record={record} onClick={() => onSelect(record)} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════
+// 日历视图
+// ═══════════════════════════════════════
+const WEEK_LABELS = ['一', '二', '三', '四', '五', '六', '日']
+
+function CalendarView({ records, onSelect }) {
+  const [cursor, setCursor] = useState(() => {
+    const now = new Date()
+    return { y: now.getFullYear(), m: now.getMonth() }
+  })
+  const [tip, setTip] = useState(null) // { record, anchor }
+
+  const recordMap = useMemo(() => {
+    const map = {}
+    for (const r of records) if (r?.date) map[r.date] = r
+    return map
+  }, [records])
+
+  const cells = useMemo(() => buildMonthCells(cursor.y, cursor.m), [cursor.y, cursor.m])
+  const now = new Date()
+  const isCurrentMonth = cursor.y === now.getFullYear() && cursor.m === now.getMonth()
+  const today = todayStr()
+
+  function shift(delta) {
+    setTip(null)
+    setCursor(prev => {
+      const m = prev.m + delta
+      return { y: prev.y + Math.floor(m / 12), m: ((m % 12) + 12) % 12 }
+    })
+  }
+
+  function goToday() {
+    setTip(null)
+    const n = new Date()
+    setCursor({ y: n.getFullYear(), m: n.getMonth() })
+  }
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* 月份导航 */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
+        <div className="flex items-center gap-1">
+          <button onClick={() => shift(-1)} className="p-1.5 rounded-md text-surface-400 hover:text-white hover:bg-white/10 transition-colors" title="上个月">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-sm font-semibold text-white min-w-[104px] text-center select-none">{cursor.y}年{cursor.m + 1}月</span>
+          <button onClick={() => shift(1)} className="p-1.5 rounded-md text-surface-400 hover:text-white hover:bg-white/10 transition-colors" title="下个月">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+          {!isCurrentMonth && (
+            <button
+              onClick={goToday}
+              className="ml-1 px-2 py-1 rounded-md text-[11px] text-amber-300 hover:bg-amber-500/10 transition-colors"
+            >
+              回到本月
+            </button>
+          )}
+        </div>
+        <span className="text-[11px] text-surface-500">期末折算为纠缠之缘 · 悬停查看明细</span>
       </div>
+
+      {/* 日历网格 */}
+      <div data-calendar-scroll className="flex-1 overflow-auto p-4">
+        {records.length === 0 && (
+          <div className="text-center text-[11px] text-surface-500 mb-3">暂无记录，点击右上角"新建记录"开始记账</div>
+        )}
+        <div className="grid grid-cols-7 gap-1.5">
+          {WEEK_LABELS.map(w => (
+            <div key={w} className="text-center text-[10px] text-surface-500 font-medium py-1 select-none">{w}</div>
+          ))}
+          {cells.map((date, i) => {
+            if (!date) return <div key={`blank-${i}`} />
+            const dateStr = fmtDate(date)
+            const record = recordMap[dateStr]
+            const isToday = dateStr === today
+            const fates = record ? periodToFates(record.periods[record.periods.length - 1]) : null
+            return (
+              <div
+                key={dateStr}
+                onClick={() => record && onSelect(record)}
+                onMouseEnter={record ? (e) => setTip({ record, anchor: e.currentTarget }) : undefined}
+                onMouseLeave={record ? () => setTip(null) : undefined}
+                className={`relative h-[76px] rounded-lg border p-1.5 flex flex-col transition-colors
+                  ${record ? 'cursor-pointer bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/15 hover:border-amber-500/40' : 'bg-surface-800/30 border-white/5'}
+                  ${isToday ? 'ring-1 ring-amber-400/70' : ''}`}
+              >
+                <span className={`text-[10px] leading-none ${isToday ? 'text-amber-300 font-bold' : record ? 'text-surface-300' : 'text-surface-600'}`}>
+                  {date.getDate()}
+                </span>
+                {fates && (
+                  <div className="mt-auto min-w-0">
+                    <div className="flex items-center gap-1">
+                      <MaterialThumb imgFile={MATERIALS[1].imgFile} className="w-3.5 h-3.5 rounded shrink-0" />
+                      <span className="text-[11px] font-semibold text-amber-300 leading-none">{fates.fates.toLocaleString()}</span>
+                    </div>
+                    {(fates.leftoverPrimo > 0 || fates.leftoverGlitter > 0) && (
+                      <div className="text-[9px] text-surface-500 leading-tight mt-0.5 truncate">
+                        {fates.leftoverPrimo > 0 && `余${fates.leftoverPrimo.toLocaleString()}原石`}
+                        {fates.leftoverPrimo > 0 && fates.leftoverGlitter > 0 && ' · '}
+                        {fates.leftoverGlitter > 0 && `余${fates.leftoverGlitter}星辉`}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* 悬停小窗：portal 渲染到 body 并给高 z-index，避免被小程序窗口图层遮挡 */}
+      {tip && <CalendarTip record={tip.record} anchor={tip.anchor} />}
+    </div>
+  )
+}
+
+// 日历悬停小窗（日期、期初期末四种货币数额、变更原因）
+function CalendarTip({ record, anchor }) {
+  const tipRef = useRef(null)
+  const [pos, setPos] = useState(null)
+
+  // 挂载后按实际尺寸定位；日历滚动 / 窗口缩放时跟随重算
+  useEffect(() => {
+    const scroller = anchor.closest('[data-calendar-scroll]')
+    const update = () => {
+      const el = tipRef.current
+      if (!el) return
+      const rect = anchor.getBoundingClientRect()
+      const gap = 8
+      const below = rect.bottom + gap + el.offsetHeight <= window.innerHeight
+      setPos({
+        top: below ? rect.bottom + gap : Math.max(gap, rect.top - gap - el.offsetHeight),
+        left: Math.max(gap, Math.min(window.innerWidth - el.offsetWidth - gap, rect.left + rect.width / 2 - el.offsetWidth / 2)),
+      })
+    }
+    update()
+    scroller?.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    return () => {
+      scroller?.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [anchor])
+
+  const periods = [...(record.periods || [])].sort((a, b) => (a.seq || 0) - (b.seq || 0))
+  const first = periods[0]
+  const last = periods[periods.length - 1]
+  const note = record.diffNotes?.[`${periods.length - 1}-${periods.length}`]
+
+  return createPortal(
+    <div
+      ref={tipRef}
+      className="fixed w-[272px] rounded-xl bg-surface-900/95 backdrop-blur-xl border border-amber-500/25 shadow-2xl p-3 space-y-2.5 animate-scale-in"
+      style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, zIndex: 10001, pointerEvents: 'none' }}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-white">{record.date}</span>
+        <span className="text-[10px] text-surface-500">{periods.length} 期记录</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <PeriodMiniBox label="期初" period={first} tone="emerald" />
+        <PeriodMiniBox label="期末" period={last} prev={first} tone="amber" />
+      </div>
+      <div>
+        <div className="text-[10px] text-surface-500 mb-1">变更原因</div>
+        <p className="text-[11px] text-surface-300 leading-relaxed">{note || '—'}</p>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+// 期初/期末数额小框；传 prev（期初）时，期末各货币追加增量显示（正绿负红）
+function PeriodMiniBox({ label, period, prev, tone }) {
+  const toneCls = tone === 'emerald' ? 'text-emerald-400' : 'text-amber-400'
+  return (
+    <div className="rounded-lg bg-surface-800/60 border border-white/5 p-2 space-y-1">
+      <div className={`text-[10px] font-medium ${toneCls}`}>{label}</div>
+      {MATERIALS.map(m => {
+        const value = period?.[m.key] || 0
+        const delta = prev ? value - (prev[m.key] || 0) : 0
+        return (
+          <div key={m.key} className="flex items-center gap-1.5">
+            <MaterialThumb imgFile={m.imgFile} className="w-3.5 h-3.5 rounded shrink-0" />
+            <span className={`text-[10px] leading-none ${m.color}`}>{value.toLocaleString()}</span>
+            {delta !== 0 && (
+              <span className={`text-[10px] leading-none ${delta > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                ({delta > 0 ? '+' : ''}{delta.toLocaleString()})
+              </span>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -77,6 +77,105 @@ function parseAdvDisadv(text, elementsMap) {
   return parts
 }
 
+// ── 挑战时间规则 ──
+// 深境螺旋 / 幻想真境剧诗：开始日凌晨 4:00 开启，结束日凌晨 4:00 关闭
+// 幽境危战：开始日上午 10:00 开启，结束日凌晨 4:00 关闭
+const CHALLENGE_TIME_RULES = {
+  spiral_abyss: { startHour: 4, endHour: 4 },
+  imaginarium_theater: { startHour: 4, endHour: 4 },
+  perilous_trail: { startHour: 10, endHour: 4 },
+}
+
+// 解析 YYYY-MM-DD 为本地时间（非法输入返回 null，视为无该边界）
+function parseLocalDate(str) {
+  if (!str) return null
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(str).trim())
+  if (!m) return null
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function fmtDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// 炫彩框判定：是否处于进行中（按各类型的开启/关闭小时规则）
+function isChallengeActive(challenge) {
+  const now = new Date()
+  const rule = CHALLENGE_TIME_RULES[challenge?.type] || { startHour: 4, endHour: 4 }
+  if (challenge?.start_date) {
+    const start = parseLocalDate(challenge.start_date)
+    if (start) {
+      start.setHours(rule.startHour, 0, 0, 0)
+      if (now < start) return false
+    }
+  }
+  if (challenge?.end_date) {
+    const end = parseLocalDate(challenge.end_date)
+    if (end) {
+      end.setHours(rule.endHour, 0, 0, 0)
+      if (now >= end) return false
+    }
+  }
+  return true
+}
+
+// 月份加减（月末溢出时钳制到目标月最后一天）
+function addMonthsTo(dateStr, months) {
+  const d = parseLocalDate(dateStr)
+  if (!d) return ''
+  const target = new Date(d.getFullYear(), d.getMonth() + months, 1)
+  const daysInTarget = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate()
+  target.setDate(Math.min(d.getDate(), daysInTarget))
+  return fmtDateStr(target)
+}
+
+function addDaysTo(dateStr, days) {
+  const d = parseLocalDate(dateStr)
+  if (!d) return ''
+  d.setDate(d.getDate() + days)
+  return fmtDateStr(d)
+}
+
+// 幻想真境剧诗命名：'幻想真境剧诗·第N期' → 第 N+1 期
+function incrementTheaterName(name) {
+  if (!name) return ''
+  const m = String(name).match(/第(\d+)期/)
+  if (!m) return ''
+  return String(name).replace(/第(\d+)期/, `第${Number(m[1]) + 1}期`)
+}
+
+// 添加新条目时的预填：按该类型最新已添加条目推算
+// 深境螺旋 / 幻想真境剧诗：每月固定周期，整体顺延一个月
+// 幽境危战：结束与下个开始的间隔恒为 8 天（版本更迭的周三到下一个周三），
+//           结束与下个结束间隔 42 天（版本周期），即以最新结束日期为锚点顺延
+function buildPrefillFor(type, list) {
+  let latest = null
+  for (const c of list || []) {
+    if (!c?.start_date) continue
+    if (!latest || c.start_date > latest.start_date) latest = c
+  }
+  if (!latest) return {}
+  if (type === 'spiral_abyss') {
+    return { start_date: addMonthsTo(latest.start_date, 1), end_date: addMonthsTo(latest.end_date, 1) }
+  }
+  if (type === 'imaginarium_theater') {
+    return {
+      start_date: addMonthsTo(latest.start_date, 1),
+      end_date: addMonthsTo(latest.end_date, 1),
+      name_zh: incrementTheaterName(latest.name_zh),
+    }
+  }
+  if (type === 'perilous_trail') {
+    if (latest.end_date) {
+      return { start_date: addDaysTo(latest.end_date, 8), end_date: addDaysTo(latest.end_date, 42) }
+    }
+    // 最新条目缺结束日期时，退化为按版本周期从开始日期顺延
+    return { start_date: addDaysTo(latest.start_date, 42), end_date: addDaysTo(latest.start_date, 76) }
+  }
+  return {}
+}
+
 // ── 确保 challenges 表有所需列（幂等，弥补迁移未触发的场景）──
 async function ensureSchemaColumns() {
   const columns = ['upper_buff', 'lower_buff', 'moon_blessing']
@@ -306,7 +405,16 @@ export default function ChallengesPage() {
   // ── 增删改 ──
   function openAdd() {
     setEditing(null)
-    setForm({ version: '', type: activeType, name_zh: '', start_date: '', end_date: '', upper_buff: '', lower_buff: '', moon_blessing: '' })
+    // 根据该类型最新条目预填开始/结束日期（剧诗还会顺延期数命名）
+    const prefill = buildPrefillFor(activeType, challenges)
+    setForm({
+      version: '',
+      type: activeType,
+      name_zh: prefill.name_zh || '',
+      start_date: prefill.start_date || '',
+      end_date: prefill.end_date || '',
+      upper_buff: '', lower_buff: '', moon_blessing: '',
+    })
     initFormChildren(null, activeType)
     setModalOpen(true)
   }
@@ -635,10 +743,7 @@ export default function ChallengesPage() {
       {/* 卡片列表 */}
       <div key={activeType} className="space-y-4 animate-fade-in">
         {filtered.map(challenge => {
-          const today = new Date().toISOString().slice(0, 10)
-          const started = !challenge.start_date || challenge.start_date <= today
-          const notEnded = !challenge.end_date || challenge.end_date >= today
-          const isActive = started && notEnded
+          const isActive = isChallengeActive(challenge)
           return (
           <ChallengeCard
             key={challenge.id + '|s' + search + sortAsc}
@@ -905,7 +1010,7 @@ function PerilousTrailContent({ childData, elemMap, elemIcons, onLightbox }) {
               >
                 <span className="transition-transform">▶</span>
                 <span className="flex-shrink-0">{DIFFICULTY_LABELS[diff]}</span>
-                <div className="flex gap-3 flex-1 min-w-0">
+                <div className="flex flex-wrap gap-3 flex-1 min-w-0">
                   {diffBosses.map(boss => (
                     <PerilousBossCompact key={boss.id} boss={boss} />
                   ))}
@@ -936,19 +1041,22 @@ function PerilousTrailContent({ childData, elemMap, elemIcons, onLightbox }) {
 }
 
 // 折叠态：紧凑一行（小头像、名称、等级、血量）
+// 空间不足时自动换行：名称独占一行（或与头像同行），等级血量信息排到下一行
 function PerilousBossCompact({ boss }) {
   const { ref, src } = useLazyImage(boss.boss_image)
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-surface-800/50 border border-surface-700 flex-1 min-w-0">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 rounded bg-surface-800/50 border border-surface-700 flex-1 min-w-[8rem]">
       <div ref={ref} className="w-6 h-6 rounded overflow-hidden flex-shrink-0 bg-surface-700">
         {src ? (
           <img src={src} alt="" className="w-full h-full object-cover" />
         ) : null}
       </div>
-      <span className="text-xs text-white truncate"><ColoredText text={boss.boss_name || '未命名'} /></span>
-      {boss.boss_level && <span className="text-[10px] text-surface-500 flex-shrink-0">Lv.{boss.boss_level}</span>}
-      {boss.boss_hp && <span className="text-[10px] text-surface-500 flex-shrink-0 truncate">HP:{boss.boss_hp}</span>}
+      <span className="text-xs text-white truncate flex-1 min-w-[4.5rem]"><ColoredText text={boss.boss_name || '未命名'} /></span>
+      <span className="flex items-center gap-2 text-[10px] text-surface-500 flex-shrink-0">
+        {boss.boss_level && <span>Lv.{boss.boss_level}</span>}
+        {boss.boss_hp && <span className="truncate max-w-[7rem]">HP:{boss.boss_hp}</span>}
+      </span>
     </div>
   )
 }

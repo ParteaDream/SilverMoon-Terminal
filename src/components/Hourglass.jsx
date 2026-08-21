@@ -126,16 +126,27 @@ function valToText(val, maxLen = 200) {
   return String(val)
 }
 
-/** 去除富文本格式标记如 [color=#xxx]、[/color]、[b]、[/b] 等 */
+/** 富文本格式标记白名单（与 colorMarkup 的 tokenize/stripFormatting 保持一致）：
+ *  [color=#xxx]/[color=name]/[/color]、[b]/[/b]、[i]/[/i]、[note="..."]/[/note]
+ *  其余方括号内容（如武器精炼数值 [52/65/78/91/104]、[effect:名称] 引用等）
+ *  属于数据本身，一律原样保留，避免误过滤重要信息 */
+const FORMAT_TAG_PATTERNS = [
+  /\[color=(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]+)\]/g,
+  /\[\/color\]/g,
+  /\[b\]/g,
+  /\[\/b\]/g,
+  /\[i\]/g,
+  /\[\/i\]/g,
+  /\[note="[^"]*"\]/g,
+  /\[\/note\]/g,
+]
+
+/** 去除富文本格式标记（白名单制），保留数据型方括号内容 */
 function stripFormatTags(str) {
   if (typeof str !== 'string') return str
-  // 循环删除最外层方括号，处理嵌套如 [note="[effect:...]"]
-  let prev = ''
-  while (prev !== str) {
-    prev = str
-    str = str.replace(/\[[^\[\]]*\]/g, '')
-  }
-  return str
+  let out = str
+  for (const re of FORMAT_TAG_PATTERNS) out = out.replace(re, '')
+  return out
 }
 
 /** 元数据字段名 — 过滤不展示 */
@@ -147,11 +158,11 @@ const JSON_STRING_FIELDS = new Set(['skill_table', 'gallery_images'])
 /** 基于 LCS 的词级文本差异：返回分段数组 [{ type: 'same'|'added'|'removed', text }] */
 function wordDiff(oldText, newText) {
   if (typeof oldText !== 'string' || typeof newText !== 'string') return null
-  // 分词：按词边界分割，保留分隔符
+  // 分词：按词边界分割，保留分隔符（含 [ ]，使精炼数值 [52/65/78/91/104] 等可按单元高亮）
   const tokenize = (s) => {
     const tokens = []
     let last = 0
-    const re = /(\s+|[,.!?;:，。！？；：、()（）【】·\n\r+\-*/×%])/g
+    const re = /(\s+|[,.!?;:，。！？；：、()（）【】·\n\r+\-*/×%\[\]])/g
     let m
     while ((m = re.exec(s)) !== null) {
       if (m.index > last) tokens.push(m.input.slice(last, m.index))
@@ -540,6 +551,7 @@ function SkillTableReadonly({ data, side }) {
 // ═══════════════════════════════════════
 export default function HourglassApp() {
   const [view, setView] = useState('home')        // home | result | detail
+  const [resultTab, setResultTab] = useState('characters') // 对比结果当前分类 Tab（提升到父级，跨详情页保持）
   const [extDbName, setExtDbName] = useState('')   // 导入文件名
   const [extData, setExtData] = useState(null)      // 导入的数据库数据
   const [curData, setCurData] = useState(null)      // 当前数据库数据
@@ -646,6 +658,7 @@ export default function HourglassApp() {
         result[table] = { label: tableLabels[table], items, total: items.length }
       }
       setDiffResult(result)
+      setResultTab('characters') // 新对比默认从角色分类开始
       setView('result')
     } catch (e) {
       console.error('[Hourglass] comparison error:', e)
@@ -708,6 +721,7 @@ export default function HourglassApp() {
 
   // 进入详情
   const handleSelectItem = useCallback((table, item) => {
+    setResultTab(table) // 记录从哪个分类进入，返回时回到该分类
     setSelectedItem({ table, ...item })
     setView('detail')
   }, [])
@@ -735,6 +749,8 @@ export default function HourglassApp() {
       <ResultView
         diffResult={diffResult}
         extDbName={extDbName}
+        activeTab={resultTab}
+        onTabChange={setResultTab}
         onSelectItem={handleSelectItem}
         onBack={handleBack}
         onReimport={handleImport}
@@ -971,8 +987,7 @@ function ItemThumb({ imageFile, fallback, className }) {
 // ═══════════════════════════════════════
 // 差异列表视图
 // ═══════════════════════════════════════
-function ResultView({ diffResult, extDbName, onSelectItem, onBack, onReimport, loading }) {
-  const [activeTab, setActiveTab] = useState('characters')
+function ResultView({ diffResult, extDbName, activeTab, onTabChange, onSelectItem, onBack, onReimport, loading }) {
   const tabs = [
     { key: 'characters', label: '角色', icon: '🎭' },
     { key: 'weapons', label: '武器', icon: '⚔️' },
@@ -1016,7 +1031,7 @@ function ResultView({ diffResult, extDbName, onSelectItem, onBack, onReimport, l
           return (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => onTabChange(tab.key)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 activeTab === tab.key
                   ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
