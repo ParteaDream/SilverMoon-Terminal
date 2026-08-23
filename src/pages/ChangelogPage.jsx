@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
+import useZoomPan from '../hooks/useZoomPan'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import { Plus, Minus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight, ChevronLeft, ImagePlus, Download, User, Crosshair, Sparkles, Shirt, Package, BarChart3, Star } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
@@ -755,18 +756,11 @@ function VersionImageBg({ imageFile }) {
 function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
   const { readImage } = useDb()
   const [src, setSrc] = useState(null)
-  const [scale, setScale] = useState(1)
-  const [position, setPosition] = useState({ x: 0, y: 0 })
-  const dragging = useRef(false)
-  const dragStart = useRef({ x: 0, y: 0 })
-  const posStart = useRef({ x: 0, y: 0 })
   const containerRef = useRef(null)
+  const { scale, position, startHold, stopHold, onWheel, reset, dragProps } = useZoomPan()
 
   // Reset zoom/pan on image change
-  useEffect(() => {
-    setScale(1)
-    setPosition({ x: 0, y: 0 })
-  }, [index])
+  useEffect(() => { reset() }, [index, reset])
 
   useEffect(() => {
     let cancelled = false
@@ -774,45 +768,13 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
     return () => { cancelled = true }
   }, [images, index, readImage])
 
-  // Mouse drag handlers（任意缩放级别下均可拖拽平移）
-  const handleMouseDown = useCallback((e) => {
-    e.preventDefault()
-    dragging.current = true
-    dragStart.current = { x: e.clientX, y: e.clientY }
-    posStart.current = { ...position }
-  }, [position])
-
-  const handleMouseMove = useCallback((e) => {
-    if (!dragging.current) return
-    const dx = e.clientX - dragStart.current.x
-    const dy = e.clientY - dragStart.current.y
-    setPosition({ x: posStart.current.x + dx, y: posStart.current.y + dy })
-  }, [])
-
-  const handleMouseUp = useCallback(() => { dragging.current = false }, [])
-
-  // Global mouse events
-  useEffect(() => {
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [handleMouseMove, handleMouseUp])
-
-  // Wheel zoom (0.5x ~ 3x)
+  // Wheel zoom (0.5x ~ 3x) — 以可视窗口中心为缩放中心，灵敏度约 5%/格
   useEffect(() => {
     const el = containerRef.current
     if (!el || !src) return
-    const onWheel = (e) => {
-      e.stopPropagation()
-      e.preventDefault()
-      setScale(prev => Math.max(0.5, Math.min(3, prev + (e.deltaY > 0 ? -0.1 : 0.1))))
-    }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [src])
+  }, [src, onWheel])
 
   return (
     <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex items-center justify-center no-drag" onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose() }}>
@@ -828,7 +790,7 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
         ref={containerRef}
         className="max-w-[85vw] max-h-[85vh] flex items-center justify-center"
         onClick={e => e.stopPropagation()}
-        onMouseDown={handleMouseDown}
+        onMouseDown={dragProps.onMouseDown}
       >
         {src ? (
           <img
@@ -849,17 +811,21 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
       >
         <ChevronRight className="w-6 h-6" />
       </button>
-      {/* 缩放控制 */}
+      {/* 缩放控制（长按连续缩放） */}
       <div className="absolute bottom-4 right-4 flex items-center gap-1 bg-black/50 px-1.5 py-1 rounded-lg z-10">
         <button
-          onClick={e => { e.stopPropagation(); setScale(prev => Math.max(0.5, +(prev - 0.2).toFixed(1))) }}
+          onMouseDown={(e) => { e.stopPropagation(); startHold(-1) }}
+          onMouseUp={stopHold}
+          onMouseLeave={stopHold}
+          onClick={e => e.stopPropagation()}
           className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
           aria-label="缩小"
+          title="缩小（- / 长按连续缩放）"
         >
           <Minus className="w-3.5 h-3.5" />
         </button>
         <button
-          onClick={e => { e.stopPropagation(); setScale(1) }}
+          onClick={e => { e.stopPropagation(); reset() }}
           className="px-1.5 py-0.5 rounded text-[10px] text-surface-400 hover:text-white hover:bg-white/10 transition-colors font-mono"
           aria-label="恢复 100% 缩放"
           title="恢复 100% 缩放"
@@ -867,14 +833,18 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
           {Math.round(scale * 100)}%
         </button>
         <button
-          onClick={e => { e.stopPropagation(); setScale(prev => Math.min(3, +(prev + 0.2).toFixed(1))) }}
+          onMouseDown={(e) => { e.stopPropagation(); startHold(1) }}
+          onMouseUp={stopHold}
+          onMouseLeave={stopHold}
+          onClick={e => e.stopPropagation()}
           className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
           aria-label="放大"
+          title="放大（+ / 长按连续缩放）"
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
         <button
-          onClick={e => { e.stopPropagation(); setScale(1); setPosition({ x: 0, y: 0 }) }}
+          onClick={e => { e.stopPropagation(); reset() }}
           className="p-0.5 rounded text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
           aria-label="回正"
           title="一键回正（恢复 100% 并居中）"

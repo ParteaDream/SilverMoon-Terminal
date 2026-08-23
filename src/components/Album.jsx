@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react'
 import { createPortal } from 'react-dom'
+import useZoomPan from '../hooks/useZoomPan'
 import {
   Images, FolderOpen, Image, ChevronLeft, ChevronRight,
   X, LayoutGrid, LayoutList,
@@ -289,10 +290,6 @@ const AlbumGrid = memo(function AlbumGrid({
 // 灯箱（仅图片，无视频）
 // ═══════════════════════════════════════════════
 function Lightbox({ items, currentIndex, onClose, onPrev, onNext, rootPath, previewMap, fullPreviewCache, albumTags, tagDefs, onToggleTag }) {
-  const [scale, setScale] = useState(1)
-  const [position, setPosition] = useState({ x: 0, y: 0 })
-  const [dragging, setDragging] = useState(false)
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0, px: 0, py: 0 })
   const [fullPreview, setFullPreview] = useState(null)
   const [loading, setLoading] = useState(true)
   const containerRef = useRef(null)
@@ -307,6 +304,7 @@ function Lightbox({ items, currentIndex, onClose, onPrev, onNext, rootPath, prev
   const filmstripRef = useRef(null)
   const preloadCache = useRef(new Map())  // _fullPath → base64 data
   const justSwitchedRef = useRef(false)
+  const { scale, position, dragging, interacting, startHold, stopHold, onWheel, reset, dragProps } = useZoomPan({ minScale: 0.2, maxScale: 10 })
 
   const currentItem = items[currentIndex]
   const currentTags = albumTags?.[currentItem?._fullPath || currentItem?.name || ''] || []
@@ -315,7 +313,7 @@ function Lightbox({ items, currentIndex, onClose, onPrev, onNext, rootPath, prev
   useEffect(() => {
     if (!currentItem) return
     justSwitchedRef.current = true; requestAnimationFrame(() => { justSwitchedRef.current = false })
-    setScale(1); setPosition({ x: 0, y: 0 })
+    reset()
     const imgPath = currentItem._fullPath || ''
 
     // 1. 先查全分辨率缓存（Phase 3.5），次查预加载缓存
@@ -367,7 +365,7 @@ function Lightbox({ items, currentIndex, onClose, onPrev, onNext, rootPath, prev
 
   }, [currentIndex])
 
-  // 键盘事件（含 H 键切换 UI 可见性）
+  // 键盘事件（含 H 键切换 UI 可见性；+/- 缩放由 useZoomPan 处理）
   useEffect(() => {
     const handler = (e) => {
       if (e.key === 'Escape') onClose()
@@ -379,30 +377,14 @@ function Lightbox({ items, currentIndex, onClose, onPrev, onNext, rootPath, prev
     return () => window.removeEventListener('keydown', handler)
   }, [onClose, onPrev, onNext])
 
-  // 滚轮缩放 — 用原生 addEventListener({ passive: false }) 避免 React 18 passive 警告
+  // 滚轮缩放 — 用原生 addEventListener({ passive: false }) 避免 React 18 passive 警告；
+  // 以可视窗口中心为缩放中心，灵敏度约 5%/格
   useEffect(() => {
     const el = imageAreaRef.current
     if (!el) return
-    const onWheel = (e) => {
-      e.preventDefault()
-      setScale(s => Math.max(0.2, Math.min(10, s + (e.deltaY > 0 ? -0.1 : 0.1))))
-    }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [])
-
-  const handleMouseDown = useCallback((e) => {
-    if (e.button !== 0) return
-    setDragging(true); setDragStart({ x: e.clientX, y: e.clientY, px: position.x, py: position.y })
-  }, [position])
-
-  useEffect(() => {
-    if (!dragging) return
-    const move = (e) => setPosition({ x: dragStart.px + (e.clientX - dragStart.x), y: dragStart.py + (e.clientY - dragStart.y) })
-    const up = () => setDragging(false)
-    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up)
-    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
-  }, [dragging, dragStart])
+  }, [onWheel])
 
   const handleBgClick = useCallback((e) => { if (e.target === e.currentTarget) onClose() }, [onClose])
 
@@ -574,17 +556,17 @@ function Lightbox({ items, currentIndex, onClose, onPrev, onNext, rootPath, prev
               })}
             </div>
           )}
-          <button onClick={() => setScale(s => Math.max(0.2, s - 0.25))} className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors"><ZoomOut className="w-4 h-4" /></button>
+          <button onMouseDown={(e) => { e.stopPropagation(); startHold(-1) }} onMouseUp={stopHold} onMouseLeave={stopHold} onClick={e => e.stopPropagation()} className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors" title="缩小（- / 长按连续缩放）"><ZoomOut className="w-4 h-4" /></button>
           <span className="text-[11px] text-white/40 font-mono w-10 text-center">{Math.round(scale * 100)}%</span>
-          <button onClick={() => setScale(s => Math.min(10, s + 0.25))} className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors"><ZoomIn className="w-4 h-4" /></button>
-          <button onClick={() => { setScale(1); setPosition({ x: 0, y: 0 }) }} className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors"><Maximize className="w-3.5 h-3.5" /></button>
+          <button onMouseDown={(e) => { e.stopPropagation(); startHold(1) }} onMouseUp={stopHold} onMouseLeave={stopHold} onClick={e => e.stopPropagation()} className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors" title="放大（+ / 长按连续缩放）"><ZoomIn className="w-4 h-4" /></button>
+          <button onClick={() => { reset() }} className="p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors" title="恢复 100% 并居中"><Maximize className="w-3.5 h-3.5" /></button>
         </div>
       </div>
       {/* 图片区域 */}
       <div ref={imageContainerRef} className="flex-1 flex items-center justify-center overflow-hidden relative">
         <button onClick={onPrev} className={`absolute left-2 sm:left-4 p-2 rounded-full bg-black/30 hover:bg-black/60 text-white/60 hover:text-white transition-all z-20 ${uiVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'} duration-300`}><ChevronLeft className="w-6 h-6 sm:w-8 sm:h-8" /></button>
-        <div ref={imageAreaRef} className="select-none" style={{ transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`, cursor: dragging ? 'grabbing' : 'grab', transition: dragging || justSwitchedRef.current ? 'none' : 'transform 0.2s ease' }}
-          onMouseDown={handleMouseDown} onClick={handleImageAreaClick}>
+        <div ref={imageAreaRef} className="select-none" style={{ transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`, cursor: dragging ? 'grabbing' : 'grab', transition: interacting || justSwitchedRef.current ? 'none' : 'transform 0.2s ease' }}
+          onMouseDown={dragProps.onMouseDown} onClick={handleImageAreaClick}>
           {loading && !fullPreview ? (
             filmPreviews[currentIndex]
               ? <img src={filmPreviews[currentIndex]} alt="" className="no-fade-in object-contain blur-xl scale-110" draggable={false} style={{ maxWidth: (containerSize.w || innerWidth) * 0.92, maxHeight: (containerSize.h || innerHeight) * 0.92 }} />

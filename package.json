@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test:memoryhub": "node scripts/test-marker-overlap.mjs && node scripts/test-idle-loader.mjs && node scripts/test-map-viewport.mjs",
+    "test:desktop": "node scripts/test-desktop-placement.mjs",
     "test:wish": "node scripts/test-wish-analysis.mjs",
     "perf:memoryhub": "env -u ELECTRON_RUN_AS_NODE electron scripts/benchmark-memoryhub-zoom.cjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",

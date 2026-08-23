@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
+import { resolveDesktopDrop } from '../utils/desktopPlacement'
 import { useDb } from '../context/DbContext'
 import { useTerminal } from '../context/TerminalContext'
 import { APPS } from '../components/appRegistry'
@@ -26,7 +27,7 @@ const GRID_CELL = 110
 // ═══════════════════════════════════════════════
 // 桌面图标组件（自由拖拽 + 松手对齐网格）
 // ═══════════════════════════════════════════════
-function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occupiedCells, gridCols, isSelected, onDragStart, onDragMove, groupDragOffset, onRemove }) {
+function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, gridCols, isSelected, onDragStart, onDragMove, groupDragOffset, onRemove }) {
   const [dragging, setDragging] = useState(false)
   const [dragPos, setDragPos] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
@@ -84,7 +85,7 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
     const handleUp = () => {
       setDragging(false)
       setDragPos(null)
-      // 计算最终网格位置
+      // 计算松手时的原始网格落点（不在此做重叠重定向，统一交给父组件 resolveDesktopDrop 处理）
       const grid = gridRef.current
       if (!grid) return
       const gridRect = grid.getBoundingClientRect()
@@ -92,24 +93,8 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
       const centerY = dragPos?.y ?? dragStartPos.current.y
       const x = centerX - gridRect.left - dragOffset.current.x + GRID_CELL / 2
       const y = centerY - gridRect.top - dragOffset.current.y + GRID_CELL / 2
-      let col = Math.max(0, Math.min(gridCols - 1, Math.floor(x / GRID_CELL)))
-      let row = Math.max(0, Math.floor(y / GRID_CELL))
-      // 避免重叠：如果目标格已被占用，寻找最近空格
-      const occ = occupiedCells?.() || {}
-      const key = `${col},${row}`
-      if (occ[key] && occ[key] !== app.id) {
-        // 寻找曼哈顿距离最近的空格
-        let bestCol = col, bestRow = row, bestDist = Infinity
-        for (let r = 0; r < 20; r++) {
-          for (let c = 0; c < gridCols; c++) {
-            if (!occ[`${c},${r}`] || occ[`${c},${r}`] === app.id) {
-              const dist = Math.abs(c - col) + Math.abs(r - row)
-              if (dist < bestDist) { bestDist = dist; bestCol = c; bestRow = r }
-            }
-          }
-        }
-        col = bestCol; row = bestRow
-      }
+      const col = Math.max(0, Math.min(gridCols - 1, Math.floor(x / GRID_CELL)))
+      const row = Math.max(0, Math.floor(y / GRID_CELL))
       onDragEnd?.(app.id, col, row)
     }
 
@@ -119,7 +104,7 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, occu
       window.removeEventListener('mousemove', handleMove)
       window.removeEventListener('mouseup', handleUp)
     }
-  }, [dragging, app.id, onDragEnd, onDragMove, gridRef, dragPos, occupiedCells])
+  }, [dragging, app.id, onDragEnd, onDragMove, gridRef, dragPos, gridCols])
 
   const { col = 0, row = 0 } = position || {}
   const AppIcon = app.icon
@@ -1194,25 +1179,21 @@ export default function TerminalPage() {
   function handleIconDragEnd(appId, col, row) {
     setGroupDragOffset(null)
     groupDragStartMouse.current = { x: 0, y: 0 }
-    // 群组拖动：选中多个图标时，一起按相同偏移移动
-    if (selectedAppIds.length > 1 && selectedAppIds.includes(appId) && dragOriginRef.current[appId]) {
-      const orig = dragOriginRef.current[appId]
-      const dCol = col - orig.col
-      const dRow = row - orig.row
-      const next = { ...desktopIcons }
-      for (const id of selectedAppIds) {
-        const o = dragOriginRef.current[id]
-        if (o) {
-          next[id] = { col: Math.max(0, o.col + dCol), row: Math.max(0, o.row + dRow) }
-        }
-      }
-      saveDesktopIcons(next)
-      // 保留选择，用户可继续调整
-    } else {
-      const next = { ...desktopIcons, [appId]: { col, row } }
-      saveDesktopIcons(next)
-    }
+    const origins = dragOriginRef.current
     dragOriginRef.current = {}
+    // 放置逻辑统一在 desktopPlacement 中处理：
+    // 单图标 → 目标格被占用时找最近空格；组合 → 按落点位移整体平移，
+    // 校验不越界、不压到未选中 app，必要时就近调整，并修复成员间历史重叠
+    const next = resolveDesktopDrop({
+      draggedId: appId,
+      rawCol: col,
+      rawRow: row,
+      origins,
+      selectedIds: selectedAppIds,
+      occupied: getOccupiedCells(),
+      gridCols,
+    })
+    saveDesktopIcons({ ...desktopIcons, ...next })
   }
 
   const dragOriginRef = useRef({})
@@ -1381,7 +1362,7 @@ export default function TerminalPage() {
           {APPS.filter(app => desktopIcons[app.id]).map((app, i) => (
             <DesktopIcon key={app.id} app={app} position={getIconPosition(app, i)}
               onClick={launchApp} onDragEnd={handleIconDragEnd} onDragStart={handleIconDragStart} onDragMove={handleIconDragMove}
-              gridRef={desktopRef} settled={settled} occupiedCells={getOccupiedCells} gridCols={gridCols}
+              gridRef={desktopRef} settled={settled} gridCols={gridCols}
               isSelected={selectedAppIds.includes(app.id)} groupDragOffset={groupDragOffset}
               onRemove={handleIconRemove} />
           ))}

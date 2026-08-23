@@ -1444,7 +1444,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
   return (
     <div className="h-full flex select-none">
       {/* ── 左侧控制栏 ── */}
-      <div className="w-[148px] shrink-0 flex flex-col border-r border-white/5 bg-surface-800/30" onMouseDown={e => e.stopPropagation()}>
+      <div className="w-[148px] shrink-0 flex flex-col overflow-y-auto border-r border-white/5 bg-surface-800/30" onMouseDown={e => e.stopPropagation()}>
         {/* 返回 */}
         <div className="px-3 py-2 border-b border-white/5">
           <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-surface-400 hover:text-white transition-colors">
@@ -1692,7 +1692,7 @@ function ManageView({ task, onUpdate, onDelete, onBack }) {
               ref={imageRef}
               src={imgDataUrl}
               alt={[...IMAGE_TYPES, ...(task.customImageTypes || [])].find(t => t.key === activeTab)?.label || ''}
-              className="max-w-full block"
+              className="w-full block"
               onLoad={() => setImageLoaded(true)}
               draggable={false}
             />
