@@ -6356,7 +6356,7 @@ ipcMain.handle('hourglass-read-external-db', (_event, filePath) => {
 ipcMain.handle('hourglass-read-current-db', () => {
   try {
     if (!db) return null;
-    const tables = ['characters', 'weapons', 'artifacts', 'character_talents', 'character_constellations', 'character_related_effects', 'character_outfits'];
+    const tables = ['characters', 'weapons', 'artifacts', 'character_talents', 'character_constellations', 'character_related_effects', 'character_outfits', 'map_marker_placements', 'map_markers'];
     const result = {};
     for (const table of tables) {
       try {
@@ -6386,7 +6386,7 @@ function readExternalDb(filePath) {
   if (!SQL) throw new Error('sql.js not initialized');
   const buf = fs.readFileSync(filePath);
   const extDb = new SQL.Database(buf);
-  const tables = ['characters', 'weapons', 'artifacts', 'character_talents', 'character_constellations', 'character_related_effects', 'character_outfits'];
+  const tables = ['characters', 'weapons', 'artifacts', 'character_talents', 'character_constellations', 'character_related_effects', 'character_outfits', 'map_marker_placements', 'map_markers'];
   const result = {};
   for (const table of tables) {
     try {

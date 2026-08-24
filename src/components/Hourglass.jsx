@@ -47,6 +47,8 @@ const FIELD_LABELS = {
   talent_type: '天赋类型', description: '描述',
   upgrades: '升级材料', materials: '材料',
   value: '数值', values: '数值列表',
+  // 圣遗物来源关联（炼武秘境标点）
+  sourceLink: '来源关联（炼武秘境）',
 }
 
 /** 递归深度比较两个 JSON 值，返回差异路径列表 */
@@ -88,6 +90,63 @@ function compareRecords(extRecord, curRecord) {
   } catch {
     return deepDiff(extRecord, curRecord)
   }
+}
+
+/**
+ * 圣遗物 ↔ 炼武秘境标点 关联索引
+ * 从 map_marker_placements.special_function.tooltip.artifacts 提取；
+ * 展示名称优先取标点自定义名称（custom_name），为空时回退标点模板名。
+ * 返回 Map<artifactId, Array<{ key, markerName }>>，key = map_id|marker_id|custom_name
+ * （同一标点模板可放置多个不同自定义名称的标点，如多个炼武秘境，因此 key 含自定义名称）
+ */
+function buildSourceLinkIndex(placements, markers) {
+  const markerNameMap = new Map()
+  for (const m of markers || []) markerNameMap.set(m.id, m.name_zh || '')
+  const index = new Map()
+  const push = (map, id, entry) => {
+    if (!map.has(id)) map.set(id, [])
+    map.get(id).push(entry)
+  }
+  for (const p of placements || []) {
+    let sf = null
+    try {
+      sf = typeof p.special_function === 'string' ? JSON.parse(p.special_function) : p.special_function
+    } catch { continue }
+    const arts = sf?.tooltip?.artifacts
+    if (!Array.isArray(arts) || arts.length === 0) continue
+    const customName = (p.custom_name || '').trim()
+    const markerName = customName || markerNameMap.get(p.marker_id) || '未命名标点'
+    const key = `${p.map_id}|${p.marker_id}|${customName}`
+    for (const id of arts) push(index, Number(id), { key, markerName })
+  }
+  // 排序保证跨库对比顺序确定
+  for (const arr of index.values()) {
+    arr.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+  }
+  return index
+}
+
+/** 对比某圣遗物在两个库中的来源关联标点，生成差异条目（以标点自定义名称呈现） */
+function buildSourceLinkDiffs(extLinks, curLinks) {
+  const diffs = []
+  const extKeyed = new Map(extLinks.map(l => [l.key, l]))
+  const curKeyed = new Map(curLinks.map(l => [l.key, l]))
+  // 当前库新增的关联标点
+  for (const [key, l] of curKeyed) {
+    const old = extKeyed.get(key)
+    if (!old) {
+      diffs.push({ path: '.sourceLink', type: 'added', oldVal: undefined, newVal: l.markerName })
+    } else if (old.markerName !== l.markerName) {
+      diffs.push({ path: '.sourceLink', type: 'changed', oldVal: old.markerName, newVal: l.markerName })
+    }
+  }
+  // 导入库中存在、当前库已移除的关联标点
+  for (const [key, l] of extKeyed) {
+    if (!curKeyed.has(key)) {
+      diffs.push({ path: '.sourceLink', type: 'removed', oldVal: l.markerName, newVal: undefined })
+    }
+  }
+  return diffs
 }
 
 /** 格式化路径为可读标签 */
@@ -581,6 +640,10 @@ export default function HourglassApp() {
       }
       const result = {}
 
+      // 圣遗物来源关联（炼武秘境标点 tooltip.artifacts）索引，供圣遗物对比使用
+      const extLinkIndex = buildSourceLinkIndex(extData.map_marker_placements, extData.map_markers)
+      const curLinkIndex = buildSourceLinkIndex(cur.map_marker_placements, cur.map_markers)
+
       for (const table of tables) {
         const extRows = extData[table] || []
         const curRows = cur[table] || []
@@ -633,6 +696,14 @@ export default function HourglassApp() {
                 diffs.push({ ...d, path: prefix + d.path })
               }
             }
+          }
+
+          // 圣遗物来源关联标点对比（新增/移除/改名，以关联标点的自定义名称呈现）
+          if (table === 'artifacts') {
+            diffs.push(...buildSourceLinkDiffs(
+              extLinkIndex.get(Number(id)) || [],
+              curLinkIndex.get(Number(id)) || [],
+            ))
           }
 
           if (diffs.length > 0) {
