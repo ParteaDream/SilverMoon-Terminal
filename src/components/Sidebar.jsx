@@ -1,5 +1,5 @@
 import { useLocation } from 'react-router-dom'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { notifySidebarToggled } from '../context/SidebarContext'
 import { useNav } from '../context/NavContext'
 import { useTerminal } from '../context/TerminalContext'
@@ -26,9 +26,17 @@ export default function Sidebar() {
     return localStorage.getItem('sidebar_collapsed') === '1'
   })
   const [appVersion, setAppVersion] = useState('1.0')
+  // 宽度过渡期间暂停 backdrop-blur：模糊在动画每帧都要重新采样背后的页面内容，
+  // 画廊视图（材料/武器等数百张图片）下会明显掉帧；过渡结束后恢复原效果
+  const [animating, setAnimating] = useState(false)
+  const blurTimerRef = useRef(null)
   const { push } = useNav()
   const { clearSelection } = useTerminal()
   const location = useLocation()
+
+  useEffect(() => () => {
+    if (blurTimerRef.current) clearTimeout(blurTimerRef.current)
+  }, [])
 
   const nav = useCallback((to) => {
     clearSelection()
@@ -44,6 +52,9 @@ export default function Sidebar() {
   }, [])
 
   function toggleCollapsed() {
+    setAnimating(true)
+    if (blurTimerRef.current) clearTimeout(blurTimerRef.current)
+    blurTimerRef.current = setTimeout(() => setAnimating(false), 260)
     setCollapsed(prev => {
       const next = !prev
       localStorage.setItem('sidebar_collapsed', next ? '1' : '0')
@@ -93,7 +104,7 @@ export default function Sidebar() {
   // 配合画廊卡片上的 content-visibility，动画期间离屏卡片跳过布局，
   // 每帧只重排可视区内容，动画保持流畅。
   return (
-    <aside className={`${collapsed ? 'w-14' : 'w-56'} flex-shrink-0 border-r border-surface-800 bg-surface-900/80 backdrop-blur-xl flex flex-col transition-[width] duration-200 ease-out will-change-[width] drag-region`}>
+    <aside className={`${collapsed ? 'w-14' : 'w-56'} flex-shrink-0 border-r border-surface-800 flex flex-col transition-[width] duration-200 ease-out will-change-[width] drag-region ${animating ? 'bg-surface-900' : 'bg-surface-900/80 backdrop-blur-xl'}`}>
       {/* Header */}
       <div className={`h-12 flex items-center border-b border-surface-800 flex-shrink-0 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
         <div className="flex items-center gap-2 no-drag min-w-0">

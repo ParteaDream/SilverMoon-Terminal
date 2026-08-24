@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  #root { display: flex; height: 100%; overflow: hidden; background: #0a0f1e; }
+  #aside {
+    width: 224px; flex-shrink: 0;
+    background: rgba(15, 23, 42, 0.8);
+    border-right: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    transition: width 200ms ease-out;
+    will-change: width;
+    overflow: hidden;
+  }
+  #aside.collapsed { width: 56px; }
+  #main { flex: 1; overflow-y: auto; padding: 24px; }
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 4px;
+  }
+  .card {
+    background: #131c33;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.06);
+    aspect-ratio: 1;
+  }
+  .card img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* 变体切换通过 JS 覆盖这些默认值 */
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="aside"></div>
+  <div id="main">
+    <div id="grid"></div>
+  </div>
+</div>
+<script>
+  // ── 生成 500 张卡片（20 张不同的图循环，模拟真实画廊）──
+  const IMGS = []
+  for (let k = 0; k < 20; k++) {
+    const c = document.createElement('canvas')
+    c.width = 128; c.height = 128
+    const ctx = c.getContext('2d')
+    const hue = (k * 47) % 360
+    ctx.fillStyle = `hsl(${hue}, 60%, 40%)`
+    ctx.fillRect(0, 0, 128, 128)
+    ctx.fillStyle = '#fff'
+    ctx.beginPath(); ctx.arc(64, 64, 40, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = `hsl(${hue}, 80%, 70%)`
+    ctx.beginPath(); ctx.arc(64, 64, 24, 0, Math.PI * 2); ctx.fill()
+    IMGS.push(c.toDataURL('image/png'))
+  }
+  const grid = document.getElementById('grid')
+  for (let i = 0; i < 500; i++) {
+    const card = document.createElement('div')
+    card.className = 'card'
+    const img = document.createElement('img')
+    img.src = IMGS[i % IMGS.length]
+    img.draggable = false
+    card.appendChild(img)
+    grid.appendChild(card)
+  }
+  const cards = Array.from(document.querySelectorAll('.card'))
+  const aside = document.getElementById('aside')
+
+  // ── 变体：切换卡片渲染策略与侧栏样式 ──
+  const VARIANT_STYLES = {
+    base:      () => { cards.forEach(c => { c.style.contentVisibility = 'auto'; c.style.containIntrinsicSize = 'auto 100px'; c.style.willChange = 'auto'; }); aside.style.backdropFilter = 'blur(24px)'; aside.style.transition = 'width 200ms ease-out'; },
+    noblur:    () => { cards.forEach(c => { c.style.contentVisibility = 'auto'; c.style.containIntrinsicSize = 'auto 100px'; c.style.willChange = 'auto'; }); aside.style.backdropFilter = 'none'; aside.style.transition = 'width 200ms ease-out'; },
+    noskip:    () => { cards.forEach(c => { c.style.contentVisibility = 'visible'; c.style.containIntrinsicSize = 'auto'; c.style.willChange = 'auto'; }); aside.style.backdropFilter = 'blur(24px)'; aside.style.transition = 'width 200ms ease-out'; },
+    snap:      () => { cards.forEach(c => { c.style.contentVisibility = 'auto'; c.style.containIntrinsicSize = 'auto 100px'; c.style.willChange = 'auto'; }); aside.style.backdropFilter = 'blur(24px)'; aside.style.transition = 'none'; },
+    appfix:    () => { cards.forEach(c => { c.style.contentVisibility = 'auto'; c.style.containIntrinsicSize = 'auto 100px'; c.style.willChange = 'auto'; }); aside.style.backdropFilter = 'none'; aside.style.transition = 'width 200ms ease-out'; aside.style.background = 'rgb(15,23,42)'; },
+  }
+
+  function applyVariant(name) {
+    VARIANT_STYLES[name]()
+  }
+
+  // ── 跑一次动画，记录每帧耗时 ──
+  function runOnce() {
+    return new Promise(resolve => {
+      const frames = []
+      let last = performance.now()
+      let raf
+      const tick = (now) => {
+        frames.push(now - last)
+        last = now
+        raf = requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)  // 开始逐帧计时
+      requestAnimationFrame(() => {
+        // 先强制一次布局，让初始状态稳定
+        void aside.offsetWidth
+        aside.classList.toggle('collapsed')
+        // 200ms 动画 + 缓冲
+        setTimeout(() => {
+          cancelAnimationFrame(raf)
+          resolve(frames)
+        }, 320)
+      })
+    })
+  }
+
+  async function runVariant(name, iterations = 3) {
+    applyVariant(name)
+    // 恢复展开态并等待稳定
+    aside.classList.remove('collapsed')
+    await new Promise(r => setTimeout(r, 300))
+    const all = []
+    for (let i = 0; i < iterations; i++) {
+      const frames = await runOnce()
+      all.push(...frames)
+      aside.classList.remove('collapsed')
+      await new Promise(r => setTimeout(r, 250))
+    }
+    // 跳过前 3 帧（首帧含初始布局）
+    const f = all.slice(3)
+    f.sort((a, b) => a - b)
+    const p50 = f[Math.floor(f.length * 0.5)]
+    const p95 = f[Math.floor(f.length * 0.95)]
+    const max = f[f.length - 1]
+    const over16 = f.filter(x => x > 16.7).length
+    const over33 = f.filter(x => x > 33).length
+    return { variant: name, frames: f.length, p50: +p50.toFixed(2), p95: +p95.toFixed(2), max: +max.toFixed(2), over16, over33 }
+  }
+
+  window.__run = async () => {
+    const results = []
+    for (const v of ['base', 'appfix', 'noblur', 'noskip', 'snap']) {
+      results.push(await runVariant(v))
+    }
+    return results
+  }
+</script>
+</body>
+</html>
