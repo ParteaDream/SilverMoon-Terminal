@@ -2,10 +2,32 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useTerminal } from '../context/TerminalContext'
+import { parseTowerDetail, parseTheaterDetail, parseLeylineDetail } from '../utils/challengeCrawl'
 import {
   Database, Download, Upload, Trash2, X, Bug, History, Wrench,
-  Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock, Globe, Check
+  Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock, Globe, Check, RefreshCw
 } from 'lucide-react'
+
+// ─── 角色爬虫可选的爬取内容分类：勾选后爬取详情页并自动覆盖对应信息 ───
+const CHARACTER_CRAWL_CATEGORIES = [
+  { key: 'basic', label: '基础信息', desc: '英文名/称号/稀有度/简介/生日/所属/上线时间/命座名/元素/武器类型/地区' },
+  { key: 'stats', label: '属性数值', desc: '80/90/95/100 级生命·攻击·防御及突破属性' },
+  { key: 'talents', label: '天赋技能', desc: '普通攻击/元素战技/元素爆发/被动天赋（含倍率表与描述）' },
+  { key: 'constellations', label: '命之座', desc: '命座名称与效果描述' },
+  { key: 'effects', label: '相关效果', desc: '规则术语（技能附注引用的效果名称与内容）' },
+  { key: 'materials', label: '培养材料', desc: '突破材料与天赋材料清单' },
+  { key: 'stories', label: '角色故事', desc: '角色故事文本' },
+  { key: 'outfits', label: '时装', desc: '时装名称与描述' },
+  { key: 'food', label: '特殊料理', desc: '料理名称/描述/效果' },
+  { key: 'namecard', label: '名片', desc: '名片名称/描述' },
+  { key: 'images', label: '图片', desc: '立绘与头像图片' },
+]
+
+// 从图标名生成 DB 中的图片文件名
+function extractImageFile(iconName) {
+  if (!iconName) return ''
+  return `${iconName}.png`
+}
 
 // ─── 备份列表弹窗 ───
 function BackupListModal({ isOpen, onClose }) {
@@ -97,7 +119,7 @@ function BackupListModal({ isOpen, onClose }) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-lg max-h-[70vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -224,7 +246,7 @@ function BackupCreateModal({ isOpen, onClose }) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-sm bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -284,7 +306,7 @@ function BackupCreateModal({ isOpen, onClose }) {
 }
 
 // ─── 爬虫进度面板（纯展示 + 控制）───
-function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, onStart, onPause, onResume, onStop, fastMode, onToggleFastMode, crawlMode, onToggleCrawlMode }) {
+function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, onStart, onPause, onResume, onStop, fastMode, onToggleFastMode, crawlMode, onToggleCrawlMode, categories, onToggleCategory, onToggleAllCategories }) {
   const doneCount = tasks.filter(t => t.status === 'done').length
   const errorCount = tasks.filter(t => t.status === 'error').length
   const totalCount = tasks.length
@@ -293,7 +315,7 @@ function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, on
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-lg max-h-[70vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -388,18 +410,61 @@ function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, on
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-surface-700 space-y-2">
-          {/* Crawl mode selector */}
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-surface-400">爬取模式</span>
-            <div className="flex items-center rounded-lg bg-surface-800 border border-surface-700 p-0.5">
-              <button onClick={() => onToggleCrawlMode('full')} disabled={running}
-                className={`px-2 py-1 rounded text-xs transition-colors disabled:opacity-50 ${crawlMode === 'full' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}>完整</button>
-              <button onClick={() => onToggleCrawlMode('fill')} disabled={running}
-                className={`px-2 py-1 rounded text-xs transition-colors disabled:opacity-50 ${crawlMode === 'fill' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}>填充</button>
-              <button onClick={() => onToggleCrawlMode('fix')} disabled={running}
-                className={`px-2 py-1 rounded text-xs transition-colors disabled:opacity-50 ${crawlMode === 'fix' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}>修复</button>
+          {/* 爬取内容选择（角色爬虫：勾选后爬取并覆盖对应信息） */}
+          {categories && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-surface-400">爬取内容</span>
+                <button
+                  onClick={onToggleAllCategories}
+                  disabled={running}
+                  className="text-xs text-primary-400 hover:text-primary-300 disabled:opacity-50"
+                >
+                  {categories.length === CHARACTER_CRAWL_CATEGORIES.length ? '全不选' : '全选'}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                {CHARACTER_CRAWL_CATEGORIES.map(cat => {
+                  const checked = categories.includes(cat.key)
+                  return (
+                    <label
+                      key={cat.key}
+                      title={cat.desc}
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors select-none ${
+                        checked
+                          ? 'bg-primary-500/10 text-surface-200'
+                          : 'text-surface-500 hover:text-surface-300 hover:bg-surface-800/60'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => onToggleCategory(cat.key)}
+                        disabled={running}
+                        className="w-3.5 h-3.5 accent-primary-500 shrink-0"
+                      />
+                      <span className="text-xs">{cat.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              <p className="text-[10px] text-surface-500">爬取后将自动覆盖勾选项对应的信息</p>
             </div>
-          </div>
+          )}
+          {/* Crawl mode selector (武器/圣遗物爬虫) */}
+          {!categories && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-surface-400">爬取模式</span>
+              <div className="flex items-center rounded-lg bg-surface-800 border border-surface-700 p-0.5">
+                <button onClick={() => onToggleCrawlMode('full')} disabled={running}
+                  className={`px-2 py-1 rounded text-xs transition-colors disabled:opacity-50 ${crawlMode === 'full' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}>完整</button>
+                <button onClick={() => onToggleCrawlMode('fill')} disabled={running}
+                  className={`px-2 py-1 rounded text-xs transition-colors disabled:opacity-50 ${crawlMode === 'fill' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}>填充</button>
+                <button onClick={() => onToggleCrawlMode('fix')} disabled={running}
+                  className={`px-2 py-1 rounded text-xs transition-colors disabled:opacity-50 ${crawlMode === 'fix' ? 'bg-surface-700 text-white' : 'text-surface-400 hover:text-surface-200'}`}>修复</button>
+              </div>
+            </div>
+          )}
           {/* Fast mode toggle */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -469,7 +534,7 @@ function WeaponLeakCheckModal({ isOpen, onClose, items, loading, onStart, warnin
   const allChecked = items.length > 0 && selectedIds.length === items.length
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-lg max-h-[75vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -572,6 +637,179 @@ function WeaponLeakCheckModal({ isOpen, onClose, items, loading, onStart, warnin
   )
 }
 
+// ─── 挑战爬虫面板：读取 nanoka 目录 → 选择期数 → 填充当前编辑表单 ───
+function ChallengeCrawlerPanel({ isOpen, onClose, type, editing, onFill }) {
+  const { challengeCatalog, challengeDetail } = useDb()
+  const [catalog, setCatalog] = useState(null)  // null=加载中
+  const [error, setError] = useState(null)
+  const [busyId, setBusyId] = useState(null)
+  const [result, setResult] = useState(null)
+
+  const TYPE_LABELS = {
+    spiral_abyss: '深境螺旋',
+    imaginarium_theater: '幻想真境剧诗',
+    perilous_trail: '幽境危战',
+  }
+
+  useEffect(() => {
+    if (!isOpen) return
+    setResult(null)
+    setError(null)
+    setCatalog(null)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await challengeCatalog(type)
+        if (cancelled) return
+        if (!res.success) { setError(res.error || '获取目录失败'); setCatalog([]); return }
+        setCatalog(res.data || [])
+      } catch (e) {
+        if (!cancelled) { setError(e.message); setCatalog([]) }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isOpen, type, challengeCatalog])
+
+  async function handleSelect(item) {
+    if (busyId) return
+    if (!editing) {
+      setResult({ ok: false, msg: '请先打开编辑弹窗（编辑或添加），再选择期数' })
+      return
+    }
+    setBusyId(item.id)
+    setResult(null)
+    try {
+      const res = await challengeDetail(type, item.id)
+      if (!res.success) {
+        setResult({ ok: false, msg: res.error || '获取详情失败' })
+        return
+      }
+      let filled = null
+      if (type === 'spiral_abyss') {
+        const r = parseTowerDetail(res.data)
+        const floorHint = r.hasMonsters ? '' : '（该期 nanoka 第12层暂无怪物数据，怪物未填充）'
+        filled = { type, form: r.form, children: r.children, summary: `已填充「${r.form.name_zh}」：渊月祝福、第12层敌人${floorHint}` }
+      } else if (type === 'imaginarium_theater') {
+        const r = parseTheaterDetail(res.data)
+        filled = { type, form: r.form, children: r.children, summary: '已填充：推荐元素、开幕/特邀角色、回合3/6/8/10 BOSS（圣牌保留现有值）' }
+      } else if (type === 'perilous_trail') {
+        const r = parseLeylineDetail(res.data, res.keyOrder)
+        filled = { type, form: r.form, children: r.children, summary: '已填充：险恶/无畏/绝境 BOSS 名称、等级、优势/劣势、详情（血量/隐藏信息/图片保留现有值）' }
+      }
+      if (!filled) {
+        setResult({ ok: false, msg: '未知挑战类型' })
+        return
+      }
+      onFill(filled)
+      setResult({ ok: true, msg: filled.summary })
+    } catch (e) {
+      setResult({ ok: false, msg: e.message })
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="w-full max-w-lg max-h-[70vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-surface-700">
+          <div className="flex items-center gap-2">
+            <Bug className="w-4 h-4 text-primary-400" />
+            <h3 className="text-sm font-semibold">挑战爬虫 - {TYPE_LABELS[type] || type}</h3>
+            {catalog && catalog.length > 0 && (
+              <span className="text-xs text-surface-500">({catalog.length} 期)</span>
+            )}
+          </div>
+          <button onClick={onClose} className="p-1 rounded text-surface-400 hover:text-surface-200 hover:bg-surface-700">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* 提示 */}
+        <div className="px-5 pt-3">
+          {editing ? (
+            <p className="text-[11px] text-primary-400/80">选择期数后将自动填充到当前编辑弹窗（覆盖对应字段，请检查后保存）</p>
+          ) : (
+            <p className="text-[11px] text-amber-400/90">请先打开编辑弹窗（编辑或添加），再选择期数填充</p>
+          )}
+        </div>
+
+        {/* 结果消息 */}
+        {result && (
+          <div className={`mx-5 mt-2 px-3 py-2 rounded-lg text-xs flex items-center gap-2 ${
+            result.ok ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+            'bg-red-500/10 text-red-400 border border-red-500/20'
+          }`}>
+            {result.ok ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+            {result.msg}
+          </div>
+        )}
+
+        {/* 目录列表 */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+          {error && (
+            <div className="text-center py-8 text-red-400 text-xs">获取目录失败：{error}</div>
+          )}
+          {!error && catalog === null && (
+            <div className="flex items-center justify-center gap-2 py-10 text-surface-500 text-sm">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              正在读取 nanoka 目录...
+            </div>
+          )}
+          {!error && catalog !== null && catalog.length === 0 && (
+            <div className="text-center py-10 text-surface-500 text-sm">目录为空</div>
+          )}
+          {catalog && catalog.map(item => (
+            <button
+              key={item.id}
+              onClick={() => handleSelect(item)}
+              disabled={!!busyId}
+              className={`w-full flex items-center gap-3 p-2.5 rounded-lg text-left transition-colors disabled:opacity-60 ${
+                busyId === item.id
+                  ? 'bg-primary-500/10 border border-primary-500/25'
+                  : 'bg-surface-800/30 border border-transparent hover:bg-surface-800/60'
+              }`}
+            >
+              {busyId === item.id ? (
+                <Loader2 className="w-4 h-4 text-primary-400 animate-spin shrink-0" />
+              ) : (
+                <Clock className="w-4 h-4 text-surface-500 shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-surface-200 truncate">{item.name_zh || `期数 ${item.id}`}</div>
+                {item.begin && (
+                  <div className="text-xs text-surface-500">{item.begin} 至 {item.end || '?'}</div>
+                )}
+              </div>
+              <span className="text-[10px] text-surface-500 font-mono shrink-0">ID: {item.id}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-surface-700 flex items-center justify-between">
+          <span className="text-xs text-surface-500">来源: gi.nanoka.cc</span>
+          <button
+            onClick={() => { setResult(null); setError(null); setCatalog(null); challengeCatalog(type).then(res => {
+              if (res.success) setCatalog(res.data || [])
+              else { setError(res.error || '获取目录失败'); setCatalog([]) }
+            }).catch(e => { setError(e.message); setCatalog([]) }) }}
+            className="px-3 py-1.5 rounded-lg text-xs bg-surface-700 hover:bg-surface-600 text-surface-300 transition-colors"
+          >
+            刷新目录
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── 主开发者工具栏 ───
 export default function DevToolbar() {
   const { devMode } = useDb()
@@ -648,7 +886,8 @@ export default function DevToolbar() {
   const runningRef = useRef(false)
   const [currentTask, setCurrentTask] = useState(null)
   const [fastMode, setFastMode] = useState(false)  // 默认关闭快速模式（页面抓取，精确）
-  const [crawlMode, setCrawlMode] = useState('full')  // 爬取模式：full=完整, skill=技能倍率
+  // 勾选要爬取并覆盖的内容分类（默认全选）
+  const [crawlCategories, setCrawlCategories] = useState(() => CHARACTER_CRAWL_CATEGORIES.map(c => c.key))
 
   // Determine if we're on a character page
   const isCharacterPage = location.pathname.startsWith('/characters')
@@ -660,6 +899,33 @@ export default function DevToolbar() {
   const isArtifactDetailPage = location.pathname.startsWith('/artifacts/') && !!artifactDetailId
   const isWishPage = location.pathname.startsWith('/wishes')
   const isTerminalPage = location.pathname === '/terminal'
+  const isChallengePage = location.pathname.startsWith('/challenges')
+
+  // ── 挑战爬虫状态（由 ChallengesPage 上报当前类型与编辑弹窗状态）──
+  const [challengeCrawlerOpen, setChallengeCrawlerOpen] = useState(false)
+  const [challengeType, setChallengeType] = useState('perilous_trail')
+  const [challengeEditing, setChallengeEditing] = useState(false)
+
+  useEffect(() => {
+    function handleState(e) {
+      if (!e.detail) return
+      if (e.detail.type) setChallengeType(e.detail.type)
+      setChallengeEditing(!!e.detail.editing)
+    }
+    window.addEventListener('devtoolbar-challenge-state', handleState)
+    return () => window.removeEventListener('devtoolbar-challenge-state', handleState)
+  }, [])
+
+  // ── 页面编辑弹窗（EditModal 等）打开状态：弹窗遮罩盖住侧边栏、工具栏却在其上，
+  // 侧边栏区域会显得空荡/截断，需要把工具栏背景向左延伸到侧边栏区域 ──
+  const [overlayOpen, setOverlayOpen] = useState(false)
+  useEffect(() => {
+    function handleModal(e) {
+      setOverlayOpen(!!e.detail?.open)
+    }
+    window.addEventListener('app-modal-open', handleModal)
+    return () => window.removeEventListener('app-modal-open', handleModal)
+  }, [])
 
   // ── 世界树测试状态 ──
   const [genshinStep, setGenshinStep] = useState(null)
@@ -790,15 +1056,6 @@ export default function DevToolbar() {
     setCrawlerOpen(true)
   }
 
-  // 修复模式：同时修复倍率 + 文本附注
-  function openFixCrawler() {
-    setCrawlMode('fix')
-    if (!runningRef.current) {
-      setTasks(buildTaskList())
-    }
-    setCrawlerOpen(true)
-  }
-
   // ── 材料类型修复工具 ──
   async function fixMaterialTypes() {
     if (selectedMats.length === 0) {
@@ -875,6 +1132,7 @@ export default function DevToolbar() {
       try {
         await query('DELETE FROM character_talents WHERE character_id = ?', [t.id])
         await query('DELETE FROM character_constellations WHERE character_id = ?', [t.id])
+        await query('DELETE FROM character_related_effects WHERE character_id = ?', [t.id])
         await query('DELETE FROM character_ascension_materials WHERE character_id = ?', [t.id])
         await query('DELETE FROM character_talent_materials WHERE character_id = ?', [t.id])
         await query('DELETE FROM character_stories WHERE character_id = ?', [t.id])
@@ -926,9 +1184,9 @@ export default function DevToolbar() {
       ))
 
       try {
-        const res = await crawlCharacter(task.name, { fastMode, crawlMode })
+        const res = await crawlCharacter(task.name, { fastMode })
         if (res.success) {
-          await saveCharacterData(task.id, res.data, crawlMode)
+          await saveCharacterData(task.id, res.data, crawlCategories)
           setTasks(prev => prev.map((t, idx) =>
             idx === i ? { ...t, status: 'done', message: '完成' } : t
           ))
@@ -972,384 +1230,142 @@ export default function DevToolbar() {
     setCurrentTask(null)
   }
 
-  // 保存爬取的角色数据到数据库
-  async function saveCharacterData(charId, data, mode = 'full') {
-    // ── 修复模式：同时更新技能倍率 + 天赋/命座描述 ──
-    if (mode === 'fix') {
-      const allTalents = [...(data.talents || []), ...(data.passives || [])]
-      for (const t of allTalents) {
-        if (!t.name_zh) continue
-        const skillTable = t.skill_table ? JSON.stringify(t.skill_table) : null
-        const desc = t.description_zh || ''
-        // 按名称匹配更新 skill_table 和 description_zh
-        const hasSkillTable = skillTable !== null
-        if (hasSkillTable && desc) {
-          await query(
-            `UPDATE character_talents SET skill_table = ?, description_zh = ? WHERE character_id = ? AND name_zh = ?`,
-            [skillTable, desc, charId, t.name_zh]
-          )
-        } else if (hasSkillTable) {
-          await query(
-            `UPDATE character_talents SET skill_table = ? WHERE character_id = ? AND name_zh = ?`,
-            [skillTable, charId, t.name_zh]
-          )
-        } else if (desc) {
-          await query(
-            `UPDATE character_talents SET description_zh = ? WHERE character_id = ? AND name_zh = ?`,
-            [desc, charId, t.name_zh]
-          )
-        }
-        if (t.icon) downloadMaterialImage(t.icon).catch(() => {})
-      }
-      for (const c of (data.constellations || [])) {
-        if (!c.name_zh) continue
-        await query(
-          `UPDATE character_constellations SET description_zh = ? WHERE character_id = ? AND name_zh = ?`,
-          [c.description_zh || '', charId, c.name_zh]
-        )
-      }
-      console.log(`[saveCharacterData] fix mode: updated ${allTalents.length} talents + ${(data.constellations || []).length} constellations`)
-      return
-    }
+  // 保存爬取的角色数据到数据库 — 按勾选的分类覆盖对应信息
+  async function saveCharacterData(charId, data, categories = null) {
+    const selected = new Set(categories && categories.length > 0
+      ? categories
+      : CHARACTER_CRAWL_CATEGORIES.map(c => c.key))
 
-    // ── 倍率修复模式：仅更新天赋技能倍率 ──
-    if (mode === 'scaling') {
-      const allTalents = [...(data.talents || []), ...(data.passives || [])]
-      for (const t of allTalents) {
-        if (!t.name_zh) continue
-        const skillTable = t.skill_table ? JSON.stringify(t.skill_table) : null
-        // 按名称匹配更新 skill_table
-        await query(
-          `UPDATE character_talents SET skill_table = ? WHERE character_id = ? AND name_zh = ?`,
-          [skillTable, charId, t.name_zh]
-        )
-        if (t.icon) downloadMaterialImage(t.icon).catch(() => {})
-      }
-      console.log(`[saveCharacterData] scaling mode: updated ${allTalents.length} talents`)
-      return
-    }
-
-    // ── 技能文本修复模式：仅更新天赋/被动/命座描述 ──
-    if (mode === 'text') {
-      const allTalents = [...(data.talents || []), ...(data.passives || [])]
-      for (const t of allTalents) {
-        if (!t.name_zh) continue
-        await query(
-          `UPDATE character_talents SET description_zh = ? WHERE character_id = ? AND name_zh = ?`,
-          [t.description_zh || '', charId, t.name_zh]
-        )
-      }
-      for (const c of (data.constellations || [])) {
-        if (!c.name_zh) continue
-        await query(
-          `UPDATE character_constellations SET description_zh = ? WHERE character_id = ? AND name_zh = ?`,
-          [c.description_zh || '', charId, c.name_zh]
-        )
-      }
-      console.log(`[saveCharacterData] text mode: updated ${allTalents.length} talents + ${(data.constellations || []).length} constellations`)
-      return
-    }
-
-    // ── 填充模式：只补充缺失的信息 ──
-    if (mode === 'fill') {
-      const curr = await query('SELECT * FROM characters WHERE id = ?', [charId])
-      const row = curr.data?.[0] || {}
+    // ── 基础信息：覆盖 ──
+    if (selected.has('basic')) {
       const fields = []
       const values = []
-
-      // 基础字段：仅当 DB 中为空时更新
-      const textFields = ['name_en', 'title_zh', 'constellation_zh', 'description_zh', 'birthday', 'affiliation', 'release_date']
-      for (const f of textFields) {
-        if (!row[f] && data[f]) { fields.push(`${f} = ?`); values.push(data[f]) }
-      }
-      if (!row.rarity && data.rarity) { fields.push('rarity = ?'); values.push(data.rarity) }
-
-      // 属性：仅当各级均为空时填充
-      if (data.stats) {
-        for (const lvl of ['80', '90', '95', '100']) {
-          if (!row[`hp_${lvl}`] && data.stats[`hp_${lvl}`] != null) { fields.push(`hp_${lvl} = ?`); values.push(data.stats[`hp_${lvl}`]) }
-          if (!row[`atk_${lvl}`] && data.stats[`atk_${lvl}`] != null) { fields.push(`atk_${lvl} = ?`); values.push(data.stats[`atk_${lvl}`]) }
-          if (!row[`def_${lvl}`] && data.stats[`def_${lvl}`] != null) { fields.push(`def_${lvl} = ?`); values.push(data.stats[`def_${lvl}`]) }
-        }
-      }
-      if (!row.ascension_stat && data.ascension_stat_name) { fields.push('ascension_stat = ?'); values.push(data.ascension_stat_name) }
-      if (!row.ascension_stats && data.ascension_stat_value) { fields.push('ascension_stats = ?'); values.push(data.ascension_stat_value) }
-
-      // 名片
-      if (!row.namecard_name && data.namecard) {
-        fields.push('namecard_name = ?', 'namecard_description = ?', 'namecard_art = ?')
-        values.push(data.namecard.name, data.namecard.description || '', extractImageFile(data.namecard.image))
-        if (data.namecard.image) downloadMaterialImage(data.namecard.image).catch(() => {})
-      }
-
-      // 料理
-      if (!row.dish_name && data.special_food) {
-        const sf = data.special_food
-        fields.push('dish_name = ?', 'dish_description = ?', 'dish_effect = ?', 'dish_image = ?')
-        values.push(sf.name_zh, sf.description_zh || '', sf.effect || '', extractImageFile(sf.image))
-        if (sf.image) downloadMaterialImage(sf.image).catch(() => {})
-      }
-
+      if (data.name_en) { fields.push('name_en = ?'); values.push(data.name_en) }
+      if (data.title_zh) { fields.push('title_zh = ?'); values.push(data.title_zh) }
+      if (data.rarity) { fields.push('rarity = ?'); values.push(data.rarity) }
+      if (data.constellation_zh) { fields.push('constellation_zh = ?'); values.push(data.constellation_zh) }
+      if (data.description_zh) { fields.push('description_zh = ?'); values.push(data.description_zh) }
+      if (data.birthday) { fields.push('birthday = ?'); values.push(data.birthday) }
+      if (data.affiliation) { fields.push('affiliation = ?'); values.push(data.affiliation) }
+      if (data.release_date) { fields.push('release_date = ?'); values.push(data.release_date) }
+      // 编辑资料页字段：元素/武器类型/地区（爬取端已映射为本地数据库 ID）
+      if (data.element_id != null) { fields.push('element_id = ?'); values.push(data.element_id) }
+      if (data.weapon_type_id != null) { fields.push('weapon_type_id = ?'); values.push(data.weapon_type_id) }
+      if (data.region_id != null) { fields.push('region_id = ?'); values.push(data.region_id) }
       if (fields.length > 0) {
         await query(`UPDATE characters SET ${fields.join(', ')} WHERE id = ?`, [...values, charId])
       }
-
-      // 天赋：仅当不存在时插入
-      const hasTalents = await query('SELECT COUNT(*) as cnt FROM character_talents WHERE character_id = ?', [charId])
-      if (hasTalents.data?.[0]?.cnt === 0) {
-        const allTalents = [...(data.talents || []), ...(data.passives || [])]
-        for (const t of allTalents) {
-          const skillTable = t.skill_table ? JSON.stringify(t.skill_table) : null
-          await query(
-            `INSERT INTO character_talents (character_id, type, name_zh, description_zh, sort_order, skill_table, icon) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [charId, t.type, t.name_zh, t.description_zh, t.sort_order, skillTable, extractImageFile(t.icon)]
-          )
-          if (t.icon) downloadMaterialImage(t.icon).catch(() => {})
-        }
-        // 命座
-        for (const c of (data.constellations || [])) {
-          await query(
-            `INSERT INTO character_constellations (character_id, level, name_zh, description_zh, icon) VALUES (?, ?, ?, ?, ?)`,
-            [charId, c.level, c.name_zh, c.description_zh, extractImageFile(c.icon)]
-          )
-          if (c.icon) downloadMaterialImage(c.icon).catch(() => {})
-        }
-      }
-
-      // 衣装：仅当不存在时插入
-      const hasOutfits = await query('SELECT COUNT(*) as cnt FROM character_outfits WHERE character_id = ?', [charId])
-      if (hasOutfits.data?.[0]?.cnt === 0 && (data.outfits || []).length > 0) {
-        const outfits = [...data.outfits].sort((a, b) => (b.is_default || 0) - (a.is_default || 0))
-        const splashFile = data.images?.splash ? extractImageFile(data.images.splash) : ''
-        for (const o of outfits) {
-          await query(
-            `INSERT INTO character_outfits (character_id, name_zh, description_zh, image, is_default) VALUES (?, ?, ?, ?, ?)`,
-            [charId, o.name_zh, o.description_zh, o.is_default ? splashFile : '', o.is_default]
-          )
-        }
-      }
-
-      // 故事
-      const hasStories = await query('SELECT COUNT(*) as cnt FROM character_stories WHERE character_id = ?', [charId])
-      if (hasStories.data?.[0]?.cnt === 0) {
-        for (const s of (data.stories || [])) {
-          await query(
-            `INSERT INTO character_stories (character_id, title_zh, content, sort_order) VALUES (?, ?, ?, ?)`,
-            [charId, s.title_zh, s.content, s.sort_order]
-          )
-        }
-      }
-
-      console.log(`[saveCharacterData] fill mode: updated ${fields.length} fields`)
-      return
     }
 
-    // ── 完整模式（覆盖所有信息）──
-    const fields = []
-    const values = []
-    if (data.name_en) { fields.push('name_en = ?'); values.push(data.name_en) }
-    if (data.title_zh) { fields.push('title_zh = ?'); values.push(data.title_zh) }
-    if (data.rarity) { fields.push('rarity = ?'); values.push(data.rarity) }
-    if (data.constellation_zh) { fields.push('constellation_zh = ?'); values.push(data.constellation_zh) }
-    if (data.description_zh) { fields.push('description_zh = ?'); values.push(data.description_zh) }
-    if (data.birthday) { fields.push('birthday = ?'); values.push(data.birthday) }
-    if (data.affiliation) { fields.push('affiliation = ?'); values.push(data.affiliation) }
-    if (data.release_date) { fields.push('release_date = ?'); values.push(data.release_date) }
-    // 基础属性
-    if (data.stats) {
+    // ── 属性数值：覆盖 ──
+    if (selected.has('stats') && data.stats) {
+      const fields = []
+      const values = []
       for (const lvl of ['80', '90', '95', '100']) {
         if (data.stats[`hp_${lvl}`] != null) { fields.push(`hp_${lvl} = ?`); values.push(data.stats[`hp_${lvl}`]) }
         if (data.stats[`atk_${lvl}`] != null) { fields.push(`atk_${lvl} = ?`); values.push(data.stats[`atk_${lvl}`]) }
         if (data.stats[`def_${lvl}`] != null) { fields.push(`def_${lvl} = ?`); values.push(data.stats[`def_${lvl}`]) }
       }
-    }
-    // 突破属性
-    if (data.ascension_stat_name) { fields.push('ascension_stat = ?'); values.push(data.ascension_stat_name) }
-    if (data.ascension_stat_value) { fields.push('ascension_stats = ?'); values.push(data.ascension_stat_value) }
-
-    if (fields.length > 0) {
-      await query(`UPDATE characters SET ${fields.join(', ')} WHERE id = ?`, [...values, charId])
-    }
-
-    // 检查角色是否已有数据（天赋/命座），有则只更新属性，不覆盖已有内容
-    const hasTalents = await query('SELECT COUNT(*) as cnt FROM character_talents WHERE character_id = ?', [charId])
-    const hasConstellations = await query('SELECT COUNT(*) as cnt FROM character_constellations WHERE character_id = ?', [charId])
-    const alreadyPopulated = (hasTalents.data?.[0]?.cnt > 0) || (hasConstellations.data?.[0]?.cnt > 0)
-
-    if (alreadyPopulated) {
-      // 角色已有数据，仅更新属性已结束（上面 UPDATE 已完成）
-      return
-    }
-
-    // 角色无数据，执行完整爬取
-    // Delete existing talents/constellations/materials for this character
-    await query('DELETE FROM character_talents WHERE character_id = ?', [charId])
-    await query('DELETE FROM character_constellations WHERE character_id = ?', [charId])
-    await query('DELETE FROM character_ascension_materials WHERE character_id = ?', [charId])
-    await query('DELETE FROM character_talent_materials WHERE character_id = ?', [charId])
-
-    // Insert talents (active + passive)
-    const allTalents = [...(data.talents || []), ...(data.passives || [])]
-    for (const t of allTalents) {
-      const skillTable = t.skill_table ? JSON.stringify(t.skill_table) : null
-      const iconFile = extractImageFile(t.icon)
-      await query(
-        `INSERT INTO character_talents (character_id, type, name_zh, description_zh, sort_order, skill_table, icon) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [charId, t.type, t.name_zh, t.description_zh, t.sort_order, skillTable, iconFile]
-      )
-      if (t.icon) downloadMaterialImage(t.icon).catch(() => {})
-    }
-
-    // Insert constellations
-    for (const c of (data.constellations || [])) {
-      const iconFile = extractImageFile(c.icon)
-      await query(
-        `INSERT INTO character_constellations (character_id, level, name_zh, description_zh, icon) VALUES (?, ?, ?, ?, ?)`,
-        [charId, c.level, c.name_zh, c.description_zh, iconFile]
-      )
-      if (c.icon) downloadMaterialImage(c.icon).catch(() => {})
-    }
-
-    // Upsert materials and create material links
-    for (const m of (data.ascension_materials || [])) {
-      let matId = m.material_id
-      const imgFile = m.icon ? `${m.icon}.png` : ''
-      // 先按 name_zh 查找已有材料
-      const byName = await query('SELECT id FROM materials WHERE name_zh = ?', [m.material_name])
-      if (byName.data && byName.data.length > 0) {
-        const oldId = byName.data[0].id
-        // 同名材料：用爬取数据覆盖所有字段，并更新 ID 为爬取 ID
-        if (oldId !== m.material_id) {
-          // ID 变更需级联更新外键
-          try {
-            await query('PRAGMA foreign_keys = OFF')
-            await query('UPDATE character_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
-            await query('UPDATE character_talent_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
-            await query('UPDATE weapon_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
-            await query(`UPDATE materials SET id = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
-              [m.material_id, m.material_name_en || '', m.type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, oldId])
-            await query('PRAGMA foreign_keys = ON')
-            matId = m.material_id
-          } catch (e) {
-            console.error('Failed to update material ID:', e)
-            matId = oldId
-          }
-        } else {
-          await query(
-            `UPDATE materials SET name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
-            [m.material_name_en || '', m.type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, matId]
-          )
-        }
-      } else {
-        // 再按 id 查找
-        const existing = await query('SELECT id FROM materials WHERE id = ?', [m.material_id])
-        if (existing.data && existing.data.length === 0) {
-          await query(
-            `INSERT OR IGNORE INTO materials (id, name_zh, name_en, type, rarity, description_zh, source, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [m.material_id, m.material_name, m.material_name_en || '', m.type || 'character_ascension', m.rarity || 1, m.description || '', m.source || '', imgFile]
-          )
-        }
+      if (data.ascension_stat_name) { fields.push('ascension_stat = ?'); values.push(data.ascension_stat_name) }
+      if (data.ascension_stat_value) { fields.push('ascension_stats = ?'); values.push(data.ascension_stat_value) }
+      if (fields.length > 0) {
+        await query(`UPDATE characters SET ${fields.join(', ')} WHERE id = ?`, [...values, charId])
       }
-      // 下载图片（无论材料是否已存在）
-      if (m.icon) downloadMaterialImage(m.icon).catch(() => {})
-      await query(
-        `INSERT OR IGNORE INTO character_ascension_materials (character_id, material_id, quantity) VALUES (?, ?, ?)`,
-        [charId, matId, m.quantity]
-      )
     }
 
-    for (const m of (data.talent_materials || [])) {
-      let matId = m.material_id
-      const imgFile = m.icon ? `${m.icon}.png` : ''
-      const byName = await query('SELECT id FROM materials WHERE name_zh = ?', [m.material_name])
-      if (byName.data && byName.data.length > 0) {
-        const oldId = byName.data[0].id
-        // 同名材料：用爬取数据覆盖所有字段，并更新 ID 为爬取 ID
-        if (oldId !== m.material_id) {
-          // ID 变更需级联更新外键
-          try {
-            await query('PRAGMA foreign_keys = OFF')
-            await query('UPDATE character_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
-            await query('UPDATE character_talent_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
-            await query('UPDATE weapon_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
-            await query(`UPDATE materials SET id = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
-              [m.material_id, m.material_name_en || '', m.type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, oldId])
-            await query('PRAGMA foreign_keys = ON')
-            matId = m.material_id
-          } catch (e) {
-            console.error('Failed to update material ID:', e)
-            matId = oldId
-          }
-        } else {
-          await query(
-            `UPDATE materials SET name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
-            [m.material_name_en || '', m.type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, matId]
-          )
-        }
-      } else {
-        const existing = await query('SELECT id FROM materials WHERE id = ?', [m.material_id])
-        if (existing.data && existing.data.length === 0) {
-          await query(
-            `INSERT OR IGNORE INTO materials (id, name_zh, name_en, type, rarity, description_zh, source, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [m.material_id, m.material_name, m.material_name_en || '', m.type || 'talent', m.rarity || 1, m.description || '', m.source || '', imgFile]
-          )
-        }
-      }
-      if (m.icon) downloadMaterialImage(m.icon).catch(() => {})
-      await query(
-        `INSERT OR IGNORE INTO character_talent_materials (character_id, material_id, quantities) VALUES (?, ?, ?)`,
-        [charId, matId, m.quantity]
-      )
-    }
-
-    // Insert stories (only if not exist)
-    for (const s of (data.stories || [])) {
-      if (s.title_zh && s.content) {
-        const existing = await query(
-          'SELECT id FROM character_stories WHERE character_id = ? AND title_zh = ?',
-          [charId, s.title_zh]
+    // ── 天赋技能（含被动）：覆盖 ──
+    if (selected.has('talents')) {
+      await query('DELETE FROM character_talents WHERE character_id = ?', [charId])
+      const allTalents = [...(data.talents || []), ...(data.passives || [])]
+      for (const t of allTalents) {
+        const skillTable = t.skill_table ? JSON.stringify(t.skill_table) : null
+        await query(
+          `INSERT INTO character_talents (character_id, type, name_zh, description_zh, sort_order, skill_table, icon) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [charId, t.type, t.name_zh, t.description_zh, t.sort_order, skillTable, extractImageFile(t.icon)]
         )
-        if (existing.data && existing.data.length === 0) {
-          await query(
-            `INSERT INTO character_stories (character_id, title_zh, content, sort_order) VALUES (?, ?, ?, ?)`,
-            [charId, s.title_zh, s.content, s.sort_order]
-          )
-        }
+        if (t.icon) downloadMaterialImage(t.icon).catch(() => {})
       }
     }
 
-    // Insert outfits (replace existing)
-    await query('DELETE FROM character_outfits WHERE character_id = ?', [charId])
-    const sortedOutfits = [...(data.outfits || [])].sort((a, b) => (b.is_default || 0) - (a.is_default || 0))
-    for (const o of sortedOutfits) {
-      const imgFile = extractImageFile(o.image)
-      await query(
-        `INSERT INTO character_outfits (character_id, name_zh, description_zh, image, is_default) VALUES (?, ?, ?, ?, ?)`,
-        [charId, o.name_zh, o.description_zh || '', imgFile, o.is_default || 0]
-      )
-      if (o.image) downloadMaterialImage(o.image).catch(() => {})
+    // ── 命之座：覆盖 ──
+    if (selected.has('constellations')) {
+      await query('DELETE FROM character_constellations WHERE character_id = ?', [charId])
+      for (const c of (data.constellations || [])) {
+        await query(
+          `INSERT INTO character_constellations (character_id, level, name_zh, description_zh, icon) VALUES (?, ?, ?, ?, ?)`,
+          [charId, c.level, c.name_zh, c.description_zh, extractImageFile(c.icon)]
+        )
+        if (c.icon) downloadMaterialImage(c.icon).catch(() => {})
+      }
     }
 
-    // Update special food
-    if (data.special_food) {
+    // ── 相关效果（规则术语）：覆盖 ──
+    if (selected.has('effects')) {
+      await query('DELETE FROM character_related_effects WHERE character_id = ?', [charId])
+      for (const ef of (data.related_effects || [])) {
+        if (!ef.name) continue
+        await query(
+          'INSERT INTO character_related_effects (character_id, name, content, sort_order) VALUES (?, ?, ?, ?)',
+          [charId, ef.name, ef.content || '', ef.sort_order || 0]
+        )
+      }
+    }
+
+    // ── 培养材料：覆盖（先清空关联，再按爬取数据重建）──
+    if (selected.has('materials')) {
+      await query('DELETE FROM character_ascension_materials WHERE character_id = ?', [charId])
+      await query('DELETE FROM character_talent_materials WHERE character_id = ?', [charId])
+      for (const m of (data.ascension_materials || [])) {
+        await upsertMaterialAndLink(charId, m, 'character_ascension_materials', 'quantity')
+      }
+      for (const m of (data.talent_materials || [])) {
+        await upsertMaterialAndLink(charId, m, 'character_talent_materials', 'quantities')
+      }
+    }
+
+    // ── 角色故事：覆盖 ──
+    if (selected.has('stories')) {
+      await query('DELETE FROM character_stories WHERE character_id = ?', [charId])
+      for (const s of (data.stories || [])) {
+        if (!s.title_zh && !s.content) continue
+        await query(
+          `INSERT INTO character_stories (character_id, title_zh, content, sort_order) VALUES (?, ?, ?, ?)`,
+          [charId, s.title_zh, s.content, s.sort_order]
+        )
+      }
+    }
+
+    // ── 时装：覆盖 ──
+    if (selected.has('outfits')) {
+      await query('DELETE FROM character_outfits WHERE character_id = ?', [charId])
+      const sortedOutfits = [...(data.outfits || [])].sort((a, b) => (b.is_default || 0) - (a.is_default || 0))
+      for (const o of sortedOutfits) {
+        await query(
+          `INSERT INTO character_outfits (character_id, name_zh, description_zh, image, is_default) VALUES (?, ?, ?, ?, ?)`,
+          [charId, o.name_zh, o.description_zh || '', extractImageFile(o.image), o.is_default || 0]
+        )
+        if (o.image) downloadMaterialImage(o.image).catch(() => {})
+      }
+    }
+
+    // ── 特殊料理：覆盖 ──
+    if (selected.has('food') && data.special_food) {
       const sf = data.special_food
-      const sfImage = extractImageFile(sf.image)
       await query(`UPDATE characters SET dish_name = ?, dish_description = ?, dish_effect = ?, dish_image = ? WHERE id = ?`,
-        [sf.name_zh, sf.description_zh || '', sf.effect || '', sfImage, charId])
+        [sf.name_zh, sf.description_zh || '', sf.effect || '', extractImageFile(sf.image), charId])
       if (sf.image) downloadMaterialImage(sf.image).catch(() => {})
     }
 
-    // Update namecard
-    if (data.namecard) {
+    // ── 名片：覆盖 ──
+    if (selected.has('namecard') && data.namecard) {
       const nc = data.namecard
-      const ncImage = extractImageFile(nc.image)
       await query(`UPDATE characters SET namecard_name = ?, namecard_description = ?, namecard_art = ? WHERE id = ?`,
-        [nc.name, nc.description || '', ncImage, charId])
+        [nc.name, nc.description || '', extractImageFile(nc.image), charId])
       if (nc.image) downloadMaterialImage(nc.image).catch(() => {})
     }
 
-    // Update character images (icon/splash/card)
-    if (data.images) {
+    // ── 图片：覆盖 ──
+    if (selected.has('images') && data.images) {
       const imgUpdates = []
       const imgValues = []
       if (data.images.splash) { imgUpdates.push('splash_art = ?'); imgValues.push(extractImageFile(data.images.splash)) }
@@ -1361,13 +1377,58 @@ export default function DevToolbar() {
       if (data.images.splash) downloadMaterialImage(data.images.splash).catch(() => {})
       if (data.images.icon) downloadMaterialImage(data.images.icon).catch(() => {})
     }
-
-    // Helper: extract image filename from icon name (保留原始图标名)
-    function extractImageFile(iconName) {
-      if (!iconName) return ''
-      return `${iconName}.png`
-    }
   }
+
+  // 材料 upsert + 角色关联（材料信息同样按爬取数据覆盖）
+  async function upsertMaterialAndLink(charId, m, linkTable, qtyCol) {
+    let matId = m.material_id
+    const imgFile = m.icon ? `${m.icon}.png` : ''
+    // 先按 name_zh 查找已有材料
+    const byName = await query('SELECT id FROM materials WHERE name_zh = ?', [m.material_name])
+    if (byName.data && byName.data.length > 0) {
+      const oldId = byName.data[0].id
+      // 同名材料：用爬取数据覆盖所有字段，并更新 ID 为爬取 ID
+      if (oldId !== m.material_id) {
+        // ID 变更需级联更新外键
+        try {
+          await query('PRAGMA foreign_keys = OFF')
+          await query('UPDATE character_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
+          await query('UPDATE character_talent_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
+          await query('UPDATE weapon_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
+          await query(`UPDATE materials SET id = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
+            [m.material_id, m.material_name_en || '', m.type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, oldId])
+          await query('PRAGMA foreign_keys = ON')
+          matId = m.material_id
+        } catch (e) {
+          console.error('Failed to update material ID:', e)
+          try { await query('PRAGMA foreign_keys = ON') } catch (_) {}
+          matId = oldId
+        }
+      } else {
+        await query(
+          `UPDATE materials SET name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
+          [m.material_name_en || '', m.type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, matId]
+        )
+      }
+    } else {
+      // 再按 id 查找
+      const existing = await query('SELECT id FROM materials WHERE id = ?', [m.material_id])
+      if (existing.data && existing.data.length === 0) {
+        const defaultType = linkTable === 'character_talent_materials' ? 'talent' : 'character_ascension'
+        await query(
+          `INSERT OR IGNORE INTO materials (id, name_zh, name_en, type, rarity, description_zh, source, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [m.material_id, m.material_name, m.material_name_en || '', m.type || defaultType, m.rarity || 1, m.description || '', m.source || '', imgFile]
+        )
+      }
+    }
+    // 下载图片（无论材料是否已存在）
+    if (m.icon) downloadMaterialImage(m.icon).catch(() => {})
+    await query(
+      `INSERT OR IGNORE INTO ${linkTable} (character_id, material_id, ${qtyCol}) VALUES (?, ?, ?)`,
+      [charId, matId, m.quantity]
+    )
+  }
+
 
   // ── 武器爬虫逻辑 ──
 
@@ -2308,9 +2369,25 @@ export default function DevToolbar() {
 
   return (
     <>
-      {/* Bottom Toolbar */}
-      <div className={`fixed bottom-0 right-0 z-40 h-10 bg-surface-900/95 border-t border-surface-700 backdrop-blur-sm flex items-center px-4 gap-1 ${sidebarCollapsed ? 'left-14' : 'left-56'}`} onMouseDown={clearSelection}>
+      {/* Bottom Toolbar — z 高于编辑弹窗(z-50)，打开编辑页面时仍可操作 */}
+      {/* 弹窗打开时把工具栏背景延伸到侧边栏区域，避免侧边栏被遮罩压暗形成“截断”感 */}
+      {overlayOpen && (
+        <div
+          className={`fixed bottom-0 left-0 h-10 z-[55] bg-surface-900/95 border-t border-surface-700 backdrop-blur-sm pointer-events-none ${sidebarCollapsed ? 'w-14' : 'w-56'}`}
+        />
+      )}
+      <div className={`fixed bottom-0 right-0 z-[60] h-10 bg-surface-900/95 border-t border-surface-700 backdrop-blur-sm flex items-center px-4 gap-1 ${sidebarCollapsed ? 'left-14' : 'left-56'}`} onMouseDown={clearSelection}>
         <span className="text-[10px] text-surface-500 mr-2 font-mono uppercase tracking-wider">Dev</span>
+
+        {/* 刷新当前页面 — 对所有板块有效 */}
+        <button
+          onClick={() => window.location.reload()}
+          title="刷新当前页面"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
+        >
+          <RefreshCw className="w-3 h-3" />
+          刷新
+        </button>
 
         <button
           onClick={() => setBackupListOpen(true)}
@@ -2362,17 +2439,6 @@ export default function DevToolbar() {
                   <Trash2 className="w-3 h-3" />
                   清除数据
                   {!isDetailPage && selectedChars.length > 0 && (
-                    <span className="text-[10px]">({selectedChars.length})</span>
-                  )}
-                </button>
-                <button
-                  onClick={openFixCrawler}
-                  disabled={running}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-                >
-                  <Bug className="w-3 h-3" />
-                  修复模式
-                  {!running && selectedChars.length > 0 && !isDetailPage && (
                     <span className="text-[10px]">({selectedChars.length})</span>
                   )}
                 </button>
@@ -2543,6 +2609,17 @@ export default function DevToolbar() {
         </div>
         )}
 
+        {/* 挑战爬虫按钮 — 挑战页面显示 */}
+        {isChallengePage && (
+          <button
+            onClick={() => setChallengeCrawlerOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-primary-400 hover:text-primary-300 hover:bg-primary-500/10 transition-colors"
+          >
+            <Bug className="w-3 h-3" />
+            挑战爬虫
+          </button>
+        )}
+
       </div>
 
       {/* Modals */}
@@ -2561,8 +2638,15 @@ export default function DevToolbar() {
         onStop={stopCrawl}
         fastMode={fastMode}
         onToggleFastMode={() => setFastMode(prev => !prev)}
-        crawlMode={crawlMode}
-        onToggleCrawlMode={setCrawlMode}
+        categories={crawlCategories}
+        onToggleCategory={(key) => setCrawlCategories(prev =>
+          prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+        )}
+        onToggleAllCategories={() => setCrawlCategories(prev =>
+          prev.length === CHARACTER_CRAWL_CATEGORIES.length
+            ? []
+            : CHARACTER_CRAWL_CATEGORIES.map(c => c.key)
+        )}
       />
       <CrawlerPanel
         isOpen={weaponCrawlerOpen}
@@ -2619,6 +2703,16 @@ export default function DevToolbar() {
         onToggleFastMode={() => {}}
         crawlMode={'full'}
         onToggleCrawlMode={() => {}}
+      />
+      <ChallengeCrawlerPanel
+        isOpen={challengeCrawlerOpen}
+        onClose={() => setChallengeCrawlerOpen(false)}
+        type={challengeType}
+        editing={challengeEditing}
+        onFill={(filled) => {
+          // 填充数据交给 ChallengesPage 应用到当前编辑表单
+          window.dispatchEvent(new CustomEvent('challenge-crawl-fill', { detail: filled }))
+        }}
       />
     </>
   )

@@ -254,6 +254,91 @@ export default function ChallengesPage() {
     }
   }, [])
 
+  // ── 上报挑战类型与编辑弹窗状态给开发者工具栏（挑战爬虫使用）──
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('devtoolbar-challenge-state', {
+      detail: { type: activeType, editing: modalOpen },
+    }))
+  }, [activeType, modalOpen])
+
+  // ── 接收开发者工具栏挑战爬虫的填充数据，应用到当前编辑表单 ──
+  useEffect(() => {
+    function handleCrawlFill(e) {
+      const d = e.detail
+      if (!d || d.type !== activeType) return
+      if (d.form) setForm(prev => ({ ...prev, ...d.form }))
+      if (d.children) applyCrawlChildren(d.children)
+      if (d.summary) alert(d.summary)
+    }
+    window.addEventListener('challenge-crawl-fill', handleCrawlFill)
+    return () => window.removeEventListener('challenge-crawl-fill', handleCrawlFill)
+  }, [activeType])
+
+  // 按类型将爬取数据合并进 formChildren（保留 nanoka 缺失字段的现有值）
+  function applyCrawlChildren(child) {
+    const t = activeType
+    if (t === 'spiral_abyss') {
+      setFormChildren(prev => {
+        const chambers = (prev?.chambers || []).map(ch => {
+          const fill = (child.chambers || []).find(c => c.chamber === ch.chamber)
+          if (!fill) return ch
+          return {
+            ...ch,
+            upper: { ...ch.upper, enemies: fill.upper || [] },
+            lower: { ...ch.lower, enemies: fill.lower || [] },
+          }
+        })
+        return { chambers }
+      })
+    } else if (t === 'imaginarium_theater') {
+      setFormChildren(prev => {
+        const next = { ...(prev || {}) }
+        if (child.recommended_elements) next.recommended_elements = child.recommended_elements
+        if (child.opening_characters) next.opening_characters = child.opening_characters
+        if (child.special_guests) next.special_guests = child.special_guests
+        if (child.enemy_config) {
+          // 只覆盖回合 BOSS，保留圣牌（nanoka 无圣牌数据）
+          next.enemy_config = { ...(prev?.enemy_config || {}), ...child.enemy_config }
+        }
+        return next
+      })
+    } else if (t === 'perilous_trail') {
+      setFormChildren(prev => {
+        const bosses = {}
+        for (const diff of ['treacherous', 'fearless', 'desperate']) {
+          const crawled = child.bosses?.[diff] || []
+          const existing = prev?.bosses?.[diff] || []
+          bosses[diff] = crawled.map((b, i) => {
+            const ex = existing[i] || { id: -Date.now() - i }
+            return {
+              id: ex.id,
+              boss_name: mergeBossNameWithNote(b.boss_name, ex.boss_name),
+              boss_image: b.boss_image || ex.boss_image || '',
+              boss_level: b.boss_level || ex.boss_level || '',
+              boss_hp: b.boss_hp || ex.boss_hp || '',
+              advantages: b.advantages || ex.advantages || '',
+              disadvantages: b.disadvantages || ex.disadvantages || '',
+              details: b.details || ex.details || '',
+              hidden_info: ex.hidden_info || '',
+            }
+          })
+        }
+        return { bosses }
+      })
+    }
+  }
+
+  // 幽境危战 BOSS 名称合并：现有名称若已手动添加附注（如抗性 [note="..."]），
+  // 保留附注及其内容（含换行、元素图标 {id}），仅将可见名称替换为爬取值
+  // （绝境难度的红色加粗标记随爬取名称一并带入）
+  function mergeBossNameWithNote(crawled, existing) {
+    if (!crawled) return existing || ''
+    if (!existing) return crawled
+    const m = existing.match(/\[note="([^"]*)"\]/)
+    if (!m) return crawled
+    return `[note="${m[1]}"]${crawled}[/note]`
+  }
+
   // 滚动时保存 + activeType 变化时保存
   useLayoutEffect(() => {
     const main = document.querySelector('main')

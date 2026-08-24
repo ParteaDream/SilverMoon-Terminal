@@ -4291,6 +4291,76 @@ async function getAnnotationData() {
   return _cachedAnnotationData;
 }
 
+// 附注数据 → N 代号映射表（'N11430001' → 规则术语名称），供附注转换使用
+function buildNoteNameMap(annotations) {
+  const map = {};
+  for (const [key, value] of Object.entries(annotations || {})) {
+    if (/^\d+$/.test(key) && value && value.name) {
+      map['N' + key] = value.name;
+    }
+  }
+  return map;
+}
+
+// 替换附注 desc 中的 {0}/{1} 占位符（param 值直接代入，与网站展示一致）
+function substituteParams(desc, params = []) {
+  if (!desc) return '';
+  return desc.replace(/\{(\d+)\}/g, (m, i) => {
+    const v = params[parseInt(i, 10)];
+    return (v !== undefined && v !== null && v !== '') ? String(v) : m;
+  });
+}
+
+// 将描述中的附注代号 [note="N1234001"] 替换为数据库相关效果引用 [note="[effect:名称]"]
+function applyEffectNoteRefs(text, noteNameMap) {
+  if (!text || !noteNameMap) return text;
+  return text.replace(/\[note="(N\d+)"\]/g, (m, nid) => {
+    const name = noteNameMap[nid];
+    return name ? `[note="[effect:${name}]"]` : m;
+  });
+}
+
+// ── 元素/地区 → 本地数据库 ID 映射（编辑资料页字段）──
+let _elementIdMap = null;
+let _regionIdMap = null;
+
+function getElementIdMap() {
+  if (_elementIdMap) return _elementIdMap;
+  _elementIdMap = {};
+  try {
+    for (const r of dbAll('SELECT id, name_en FROM elements', [])) {
+      _elementIdMap[String(r.name_en || '').toLowerCase()] = r.id;
+    }
+  } catch (_) {}
+  return _elementIdMap;
+}
+
+function getRegionIdMap() {
+  if (_regionIdMap) return _regionIdMap;
+  _regionIdMap = {};
+  try {
+    for (const r of dbAll('SELECT id, name_en FROM regions', [])) {
+      _regionIdMap[String(r.name_en || '').toLowerCase().replace(/[^a-z0-9]/g, '')] = r.id;
+    }
+  } catch (_) {}
+  return _regionIdMap;
+}
+
+// nanoka 地区代号（ASSOC_TYPE_XXX）→ 数据库 regions.id
+function mapRegionId(code) {
+  if (!code) return null;
+  // 特殊映射：愚人众 → 至冬
+  if (code === 'ASSOC_TYPE_FATUI') return 7;
+  const map = getRegionIdMap();
+  const tokens = code.replace(/^ASSOC_TYPE_/, '').split('_');
+  // 从完整拼接逐步去掉尾部 token 匹配（如 SNEZHNAYA_STAR → SNEZHNAYA）
+  for (let k = tokens.length; k >= 1; k--) {
+    const key = tokens.slice(0, k).join('').toLowerCase();
+    if (map[key] != null) return map[key];
+  }
+  return null;
+}
+
 // 查找角色 ID（通过中文名或英文名匹配）
 async function findCharacterId(name) {
   const list = await getCharacterList();
@@ -4558,7 +4628,7 @@ async function scrapeCharacterStatsFromPage(characterId, existingWin = null) {
 }
 
 ipcMain.handle('crawl-character', async (_event, characterName, options = {}) => {
-  const { fastMode = false, crawlMode = 'full' } = options;
+  const { fastMode = false } = options;
   try {
     // 1. 查找角色ID
     const found = await findCharacterId(characterName);
@@ -4572,12 +4642,8 @@ ipcMain.handle('crawl-character', async (_event, characterName, options = {}) =>
     const detail = await fetchJson(`https://static.nanoka.cc/gi/${version}/zh/character/${id}.json`);
     
     // 3. 获取物品列表（用于材料名称映射和英文名）
-    // 倍率修复/文本修复模式不需要材料数据，跳过以提速
-    let items = {}, itemsEn = {};
-    if (crawlMode !== 'scaling' && crawlMode !== 'text' && crawlMode !== 'fix') {
-      items = await getItemAll();
-      itemsEn = await getItemAllEn();
-    }
+    const items = await getItemAll();
+    const itemsEn = await getItemAllEn();
     
     // 4. 解析基础信息
     const ch = detail.chara_info || {};
@@ -4603,6 +4669,10 @@ ipcMain.handle('crawl-character', async (_event, characterName, options = {}) =>
       element: info.element,
       weapon_type: info.weapon,
       region: ch.region || '',
+      // 编辑资料页字段：元素/武器类型/地区 → 本地数据库 ID（无法映射时为 null，保存时跳过）
+      element_id: getElementIdMap()[String(info.element || '').toLowerCase()] || null,
+      weapon_type_id: WEAPON_TYPE_MAP[info.weapon] || null,
+      region_id: mapRegionId(ch.region),
       birthday: ch.birth && ch.birth[0] && ch.birth[1] ? `${String(ch.birth[0]).padStart(2,'0')}-${String(ch.birth[1]).padStart(2,'0')}` : '',
       affiliation: ch.native || '',
       release_date: ch.release_date ? ch.release_date.split(' ')[0] : '',
@@ -4616,6 +4686,8 @@ ipcMain.handle('crawl-character', async (_event, characterName, options = {}) =>
       talents: [],
       passives: [],
       constellations: [],
+      // 相关效果（规则术语，技能附注引用的效果）
+      related_effects: [],
       ascension_materials: [],
       talent_materials: [],
       stories: [],
@@ -4818,228 +4890,54 @@ ipcMain.handle('crawl-character', async (_event, characterName, options = {}) =>
       });
     });
 
-    // ── 修复模式：同时修复技能倍率 + 文本附注，跳过后续解析 ──
-    if (crawlMode === 'fix' || crawlMode === 'scaling' || crawlMode === 'text') {
-      // 构建 N 前缀 LINK → 描述查找表（中文优先，智能选取最佳技能描述）
-      const linkNotes = {};
+    // 7.5 相关效果（规则术语）解析 + 附注转换
+    // 天赋/被动/命座描述中的附注代号（如 N11430001）对应网站上的规则术语（相关效果），
+    // 这里将其转换为数据库采用的效果引用 [note="[effect:名称]"]，并收集相关效果列表
+    try {
+      const annotations = await getAnnotationData();
+      const noteNameMap = buildNoteNameMap(annotations);
 
-      // 1. 优先：中文技能描述（选取最相关的技能，跳过泛用普攻描述）
-      const seenBases = new Set();
-      for (const s of (detail.skills || [])) {
-        const chDesc = (s.desc || '').trim();
-        if (!chDesc) continue;
-        const nBase = Math.floor((s.id || 0) / 10) * 10;
-        if (seenBases.has(nBase)) continue; // 已有更优先的技能描述
-        // 跳过泛用普攻描述（去除颜色标签后以"普通攻击"开头）
-        const plainDesc = chDesc.replace(/<[^>]+>/g, '').trim();
-        if (plainDesc.startsWith('普通攻击') || plainDesc.startsWith('进行至多')) continue;
-        seenBases.add(nBase);
-        for (const variant of ['001', '002', '003', '004', '005']) {
-          linkNotes['N' + nBase + variant] = chDesc;
+      // 收集角色文本中引用的附注 id（按出现顺序去重）
+      const noteIds = [];
+      const seenIds = new Set();
+      const allDescParts = [
+        ...(result.talents || []).map(t => t.description_zh),
+        ...(result.passives || []).map(p => p.description_zh),
+        ...(result.constellations || []).map(c => c.description_zh),
+      ];
+      for (const part of allDescParts) {
+        const matches = String(part || '').matchAll(/\[note="(N\d+)"\]/g);
+        for (const m of matches) {
+          if (!seenIds.has(m[1])) { seenIds.add(m[1]); noteIds.push(m[1]); }
         }
       }
 
-      // 2. 补充：未被跳过的普攻描述（有些角色普攻也包含特殊机制）
-      for (const s of (detail.skills || [])) {
-        const chDesc = (s.desc || '').trim();
-        if (!chDesc) continue;
-        const plainDesc = chDesc.replace(/<[^>]+>/g, '').trim();
-        if (plainDesc.startsWith('普通攻击') || plainDesc.startsWith('进行至多')) continue;
-        const nBase = Math.floor((s.id || 0) / 10) * 10;
-        for (const variant of ['001', '002', '003', '004', '005']) {
-          const nKey = 'N' + nBase + variant;
-          if (!linkNotes[nKey]) {
-            linkNotes[nKey] = chDesc;
-          }
-        }
+      // 构建相关效果列表（数据库格式：名称金色加粗，内容为富文本）
+      const seenNames = new Set();
+      result.related_effects = noteIds
+        .map(nid => {
+          const ann = annotations[nid.slice(1)];
+          if (!ann || !ann.name || seenNames.has(ann.name)) return null;
+          seenNames.add(ann.name);
+          return {
+            name: `[color=#ffd780][b]${ann.name}[/b][/color]`,
+            content: convertColorMarkup(substituteParams(ann.desc || '', ann.param || [])),
+          };
+        })
+        .filter(Boolean)
+        .map((ef, idx) => ({ ...ef, sort_order: idx + 1 }));
+
+      // 附注代号 → 效果引用（未匹配到的保持原代号）
+      if (Object.keys(noteNameMap).length > 0) {
+        for (const t of (result.talents || [])) t.description_zh = applyEffectNoteRefs(t.description_zh, noteNameMap);
+        for (const p of (result.passives || [])) p.description_zh = applyEffectNoteRefs(p.description_zh, noteNameMap);
+        for (const c of (result.constellations || [])) c.description_zh = applyEffectNoteRefs(c.description_zh, noteNameMap);
       }
-
-      // 3. 兜底：英文 SSR 附注数据
-      try {
-        const annotations = await getAnnotationData();
-        for (const [key, value] of Object.entries(annotations)) {
-          if (/^\d+$/.test(key) && value && value.desc) {
-            const nKey = 'N' + key;
-            if (!linkNotes[nKey]) {
-              linkNotes[nKey] = value.desc || '';
-            }
-          }
-        }
-      } catch (_) {}
-
-      function convertLinks(rawDesc) {
-        if (!rawDesc || typeof rawDesc !== 'string') return rawDesc || '';
-        let result = rawDesc.replace(/\{LINK#([SP]\d+)\}([\s\S]*?)\{\/LINK\}/g, '$2');
-        result = result.replace(/\{LINK#(N\d+)\}\s*([\s\S]*?)\{\/LINK\}/g, (match, linkId, text) => {
-          let noteText = linkNotes[linkId] || linkId;
-          // 清洗附注文本：只去除破坏格式的字符，保留颜色标记
-          const cleanNote = noteText
-            .replace(/"/g, "'")
-            .replace(/[\n\r]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .substring(0, 400);
-          return `[note="${cleanNote}"]${text.trim()}[/note]`;
-        });
-        return result;
-      }
-
-      // Rebuild talents with skill_table preserved + LINK conversion
-      result.talents = [];
-      (detail.skills || []).forEach((s, idx) => {
-        // Re-parse skill_table (same logic as steps 5 above)
-        const skillTable = { rows: [] };
-        if (s.param_names && s.param_names.length > 0 && s.params && s.params.length > 0) {
-          s.param_names.forEach((pname, pi) => {
-            const values = s.params.map(levelArr => {
-              const v = levelArr[pi];
-              if (v === undefined || v === null) return '';
-              if (typeof v === 'number') {
-                if (pname.toLowerCase().includes('rate') || pname.toLowerCase().includes('dmg') || 
-                    pname.toLowerCase().includes('bonus') || pname.toLowerCase().includes('heal') ||
-                    pname.toLowerCase().includes('hp') || pname.toLowerCase().includes('percent')) {
-                  return (v * 100).toFixed(1) + '%';
-                }
-                return v.toFixed(1);
-              }
-              return String(v);
-            });
-            skillTable.rows.push({ label: pname, values });
-          });
-        }
-        if (skillTable.rows.length === 0 && s.promote) {
-          const promoteEntries = Object.entries(s.promote).sort(([a], [b]) => Number(a) - Number(b));
-          if (promoteEntries.length > 0) {
-            const firstDesc = promoteEntries[0][1].desc || [];
-            let paramCursor = 0;
-            for (let di = 0; di < firstDesc.length; di++) {
-              const d = firstDesc[di];
-              if (typeof d !== 'string' || !d.includes('|')) {
-                const label = (typeof d === 'string') ? d : '';
-                const pi = paramCursor;
-                paramCursor++;
-                const values = promoteEntries.map(([, levelData]) => {
-                  const v = (levelData.param || [])[pi];
-                  if (v === undefined || v === null) return '';
-                  if (typeof v === 'number') {
-                    if (label.includes('率') || label.includes('伤害') || label.includes('加成') ||
-                        label.includes('治疗') || label.includes('生命值') || label.includes('攻击力') ||
-                        label.includes('防御力') || label.includes('暴击') || label.includes('充能') ||
-                        label.includes('Bonus') || label.includes('DMG') || label.includes('Rate') ||
-                        label.includes('Heal') || label.includes('HP') || label.includes('ATK') ||
-                        label.includes('DEF') || label.includes('Crit') || label.includes('Recharge')) {
-                      return (v * 100).toFixed(1) + '%';
-                    }
-                    return v.toFixed(1);
-                  }
-                  return String(v);
-                });
-                if (label) skillTable.rows.push({ label, values });
-                continue;
-              }
-              const pipeIdx = d.indexOf('|');
-              const label = d.slice(0, pipeIdx).trim();
-              const template = d.slice(pipeIdx + 1);
-              const isParamFormat = /\{param\d+/.test(template);
-              let refCount, paramIndices;
-              if (isParamFormat) {
-                const paramMatches = [...template.matchAll(/\{param(\d+)(?::([^}]*))?\}/g)];
-                paramIndices = paramMatches.map(m => parseInt(m[1]) - 1);
-                refCount = paramIndices.length;
-              } else {
-                const paramMatches = [...template.matchAll(/\{(\d+)\}/g)];
-                paramIndices = paramMatches.map(m => parseInt(m[1]));
-                refCount = paramIndices.length > 0 ? Math.max(...paramIndices) + 1 : 1;
-                paramIndices = Array.from({ length: refCount }, (_, i) => paramCursor + i);
-              }
-              const values = promoteEntries.map(([, levelData]) => {
-                const lvlParams = levelData.param || [];
-                let result = template;
-                for (let ri = 0; ri < refCount; ri++) {
-                  const pi = isParamFormat ? paramIndices[ri] : (paramCursor + ri);
-                  const v = lvlParams[pi];
-                  let display;
-                  let format = '';
-                  if (isParamFormat) {
-                    const fmtMatch = template.match(new RegExp('\\{param' + (paramIndices[ri] + 1) + ':([^}]*)\\}'));
-                    if (fmtMatch) format = fmtMatch[1] || '';
-                  }
-                  if (v === undefined || v === null) {
-                    display = '?';
-                  } else if (typeof v === 'number') {
-                    if (format.includes('I')) {
-                      display = Math.round(v).toString();
-                    } else if (format.includes('P') || format.includes('%')) {
-                      if (format.includes('F2')) display = (v * 100).toFixed(2) + '%';
-                      else if (format.includes('F1')) display = (v * 100).toFixed(1) + '%';
-                      else display = (v * 100).toFixed(1) + '%';
-                    } else if (format.includes('F2')) {
-                      display = v.toFixed(2);
-                    } else if (format.includes('F1')) {
-                      display = v.toFixed(1);
-                    } else if (template.includes('%') || label.includes('率') || label.includes('伤害') ||
-                        label.includes('加成') || label.includes('治疗') || label.includes('生命值') ||
-                        label.includes('攻击力') || label.includes('防御力') || label.includes('暴击') ||
-                        label.includes('充能') || label.includes('Bonus') || label.includes('DMG') ||
-                        label.includes('Rate') || label.includes('Heal') || label.includes('HP') ||
-                        label.includes('ATK') || label.includes('DEF') || label.includes('Crit') ||
-                        label.includes('Recharge')) {
-                      display = (v * 100).toFixed(1) + '%';
-                    } else {
-                      display = v.toFixed(1);
-                    }
-                  } else {
-                    display = String(v);
-                  }
-                  if (isParamFormat) {
-                    result = result.replace(new RegExp('\\{param' + (paramIndices[ri] + 1) + '(:[^}]*)?\\}', 'g'), display);
-                  } else {
-                    result = result.replace(new RegExp('\\{' + ri + '\\}', 'g'), display);
-                  }
-                }
-                return result;
-              });
-              if (!isParamFormat) paramCursor += refCount;
-              if (label) skillTable.rows.push({ label, values });
-            }
-          }
-        }
-
-        result.talents.push({
-          type: skillTypeMap[idx] || 'normal_attack',
-          name_zh: s.name || '',
-          description_zh: convertColorMarkup(convertLinks(s.desc || '')),
-          icon: (s.promote && s.promote['0'] && s.promote['0'].icon) ? s.promote['0'].icon : '',
-          sort_order: idx + 1,
-          skill_table: skillTable.rows.length > 0 ? skillTable : null,
-        });
-      });
-
-      result.passives = [];
-      (detail.passives || []).forEach((p, idx) => {
-        result.passives.push({
-          type: 'passive',
-          name_zh: p.name || '',
-          description_zh: convertColorMarkup(convertLinks(p.desc || '')),
-          icon: p.icon || '',
-          sort_order: result.talents.length + idx + 1,
-          skill_table: null,
-        });
-      });
-
-      result.constellations = [];
-      (detail.constellations || []).forEach((c, idx) => {
-        result.constellations.push({
-          level: idx + 1,
-          name_zh: c.name || '',
-          description_zh: convertColorMarkup(convertLinks(c.desc || '')),
-          icon: c.icon || '',
-        });
-      });
-
-      return { success: true, data: { mode: 'fix', talents: result.talents, passives: result.passives, constellations: result.constellations } };
+      console.log(`[crawl-character] related effects: ${result.related_effects.length}, note refs: ${noteIds.length}`);
+    } catch (e) {
+      console.warn('[crawl-character] related effects parse failed:', e.message);
     }
-    
+
     // 8. 解析突破材料
     const ascMats = detail.materials?.ascensions || [];
     const ascMatMap = new Map();
@@ -5099,53 +4997,46 @@ ipcMain.handle('crawl-character', async (_event, characterName, options = {}) =>
       });
     });
 
-    // 9.5 获取各级基础属性
+    // 9.5 获取各级基础属性（非快速模式优先页面抓取，失败或快速模式用公式计算）
     const sm = detail.stats_modifier || {};
     let statsScraped = false;
 
-    if (crawlMode === 'full' || crawlMode === 'fill') {
-      // BrowserWindow 抓取仅在完整模式 + 非快速模式
-      if (crawlMode === 'full' && !fastMode) {
-        try {
-          const sharedWin = await getScrapeWindow();
-          const scrapedStats = await scrapeCharacterStatsFromPage(id, sharedWin);
-          if (scrapedStats && !scrapedStats.error && typeof scrapedStats.hp_90 === 'number') {
-            for (const [k, v] of Object.entries(scrapedStats)) {
-              if (k.startsWith('hp_') || k.startsWith('atk_') || k.startsWith('def_')) {
-                result.stats[k] = v;
-              }
+    if (!fastMode) {
+      try {
+        const sharedWin = await getScrapeWindow();
+        const scrapedStats = await scrapeCharacterStatsFromPage(id, sharedWin);
+        if (scrapedStats && !scrapedStats.error && typeof scrapedStats.hp_90 === 'number') {
+          for (const [k, v] of Object.entries(scrapedStats)) {
+            if (k.startsWith('hp_') || k.startsWith('atk_') || k.startsWith('def_')) {
+              result.stats[k] = v;
             }
-            statsScraped = true;
-          } else if (scrapedStats && scrapedStats._debugText) {
-            console.warn('[crawl-character] scraping returned no stats. Debug text:', scrapedStats._debugText.substring(0, 500));
           }
-        } catch (scrapeErr) {
-          console.error('[crawl-character] stats scraping failed:', scrapeErr.message);
+          statsScraped = true;
+        } else if (scrapedStats && scrapedStats._debugText) {
+          console.warn('[crawl-character] scraping returned no stats. Debug text:', scrapedStats._debugText.substring(0, 500));
         }
+      } catch (scrapeErr) {
+        console.error('[crawl-character] stats scraping failed:', scrapeErr.message);
       }
+    }
 
-      // 公式回退（填充模式、快速模式 或 抓取失败时）
-      if (!statsScraped) {
-        if (crawlMode === 'fill') {
-          console.log('[crawl-character] fill mode: using formula for stats');
-        } else if (fastMode) {
-          console.log('[crawl-character] fast mode: using formula for stats');
-        } else {
-          console.log('[crawl-character] using fallback formula for stats');
-        }
-        const baseHp = detail.base_hp || 0;
-        const baseAtk = detail.base_atk || 0;
-        const baseDef = detail.base_def || 0;
-        const curves = { hp: sm.hp || {}, atk: sm.atk || {}, def: sm.def || {} };
-        const lastAsc = (sm.ascension && sm.ascension.length > 0) ? sm.ascension[sm.ascension.length - 1] : {};
-        const ascBonusHp = lastAsc.fight_prop_base_hp || 0;
-        const ascBonusAtk = lastAsc.fight_prop_base_attack || 0;
-        const ascBonusDef = lastAsc.fight_prop_base_defense || 0;
-        for (const lvl of ['80', '90', '95', '100']) {
-          result.stats[`hp_${lvl}`] = Math.round(baseHp * (curves.hp[lvl] || 1) + ascBonusHp);
-          result.stats[`atk_${lvl}`] = Math.round(baseAtk * (curves.atk[lvl] || 1) + ascBonusAtk);
-          result.stats[`def_${lvl}`] = Math.round(baseDef * (curves.def[lvl] || 1) + ascBonusDef);
-        }
+    // 公式回退（快速模式 或 抓取失败时）
+    if (!statsScraped) {
+      console.log(fastMode
+        ? '[crawl-character] fast mode: using formula for stats'
+        : '[crawl-character] using fallback formula for stats');
+      const baseHp = detail.base_hp || 0;
+      const baseAtk = detail.base_atk || 0;
+      const baseDef = detail.base_def || 0;
+      const curves = { hp: sm.hp || {}, atk: sm.atk || {}, def: sm.def || {} };
+      const lastAsc = (sm.ascension && sm.ascension.length > 0) ? sm.ascension[sm.ascension.length - 1] : {};
+      const ascBonusHp = lastAsc.fight_prop_base_hp || 0;
+      const ascBonusAtk = lastAsc.fight_prop_base_attack || 0;
+      const ascBonusDef = lastAsc.fight_prop_base_defense || 0;
+      for (const lvl of ['80', '90', '95', '100']) {
+        result.stats[`hp_${lvl}`] = Math.round(baseHp * (curves.hp[lvl] || 1) + ascBonusHp);
+        result.stats[`atk_${lvl}`] = Math.round(baseAtk * (curves.atk[lvl] || 1) + ascBonusAtk);
+        result.stats[`def_${lvl}`] = Math.round(baseDef * (curves.def[lvl] || 1) + ascBonusDef);
       }
     }
 
@@ -5268,6 +5159,56 @@ ipcMain.handle('get-character-list', async () => {
       simplified[id] = { zh: info.zh, en: info.en, element: info.element, rank: info.rank };
     }
     return { success: true, data: simplified };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 挑战爬虫：nanoka 目录与详情 ──
+// 三类挑战对应 nanoka 静态数据：tower(深境螺旋) / rolecombat(幻想真境剧诗) / leyline(幽境危战)
+const CHALLENGE_TYPE_FILES = {
+  spiral_abyss: 'tower',
+  imaginarium_theater: 'rolecombat',
+  perilous_trail: 'leyline',
+};
+
+// 读取某类型挑战的 nanoka 目录（期数列表）
+ipcMain.handle('challenge-catalog', async (_event, type) => {
+  try {
+    const file = CHALLENGE_TYPE_FILES[type];
+    if (!file) return { success: false, error: `未知挑战类型: ${type}` };
+    const version = await getDataVersion();
+    const data = await fetchWithRetry(`https://static.nanoka.cc/gi/${version}/${file}.json`);
+    // 目录条目：id + 中文名（剧诗无名称，用期数兜底）+ 起止时间
+    const list = Object.entries(data || {})
+      .map(([id, v]) => ({
+        id,
+        name_zh: v.zh || (type === 'imaginarium_theater' ? `第${id}期` : ''),
+        begin: (v.begin || v.begin_time || '').slice(0, 10),
+        end: (v.end || v.end_time || '').slice(0, 10),
+      }))
+      .sort((a, b) => (a.begin || '').localeCompare(b.begin || ''));
+    return { success: true, data: list };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// 读取某期挑战的 nanoka 详情（原始 JSON，解析在渲染进程）
+ipcMain.handle('challenge-detail', async (_event, type, id) => {
+  try {
+    const file = CHALLENGE_TYPE_FILES[type];
+    if (!file) return { success: false, error: `未知挑战类型: ${type}` };
+    const version = await getDataVersion();
+    const raw = await fetchText(`https://static.nanoka.cc/gi/${version}/zh/${file}/${id}.json`);
+    // V8 的 JSON.parse 会把纯数字字符串键（形如 "1009051"）当作数组索引，
+    // 自动按数值排序，破坏 JSON 文件中原本的插入顺序
+    // （幽境危战 level_config 的 BOSS 阶段顺序依赖该顺序，排序后阶段1/2 会颠倒）。
+    // 因此在解析前先从原始文本记录数字键的原始出现顺序，随数据一起返回。
+    const keyOrder = [];
+    raw.replace(/"(\d+)"\s*:/g, (m, k) => { if (!keyOrder.includes(k)) keyOrder.push(k); return m; });
+    const data = JSON.parse(raw);
+    return { success: true, data, keyOrder };
   } catch (e) {
     return { success: false, error: e.message };
   }

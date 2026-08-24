@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkMissingArtifacts: () => ipcRenderer.invoke('check-missing-artifacts'),
   crawlWishes: () => ipcRenderer.invoke('crawl-wishes'),
   crawlWishImages: (periods) => ipcRenderer.invoke('crawl-wish-images', periods),
+  challengeCatalog: (type) => ipcRenderer.invoke('challenge-catalog', type),
+  challengeDetail: (type, id) => ipcRenderer.invoke('challenge-detail', type, id),
   downloadBannerImage: (url, filename) => ipcRenderer.invoke('download-banner-image', url, filename),
   getCharacterList: () => ipcRenderer.invoke('get-character-list'),
   cleanupScrapeWindow: () => ipcRenderer.invoke('cleanup-scrape-window'),

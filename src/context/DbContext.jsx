@@ -219,6 +219,16 @@ function processQueue() {
     return await window.electronAPI.crawlWishImages(periods)
   }, [])
 
+  const challengeCatalog = useCallback(async (type) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.challengeCatalog(type)
+  }, [])
+
+  const challengeDetail = useCallback(async (type, id) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.challengeDetail(type, id)
+  }, [])
+
   const downloadBannerImage = useCallback(async (url, filename) => {
     if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
     return await window.electronAPI.downloadBannerImage(url, filename)
@@ -361,7 +371,7 @@ function processQueue() {
       readImage, importImage, deleteImage,
       getDbPath, updateDatabase, backupDatabase, importDatabase, exportSeed,
       listBackups, createBackup, restoreBackup, deleteBackup,
-      crawlCharacter, crawlWeapon, checkMissingWeapons, crawlArtifact, checkMissingArtifacts, crawlWishes, crawlWishImages, downloadBannerImage, cleanupScrapeWindow, downloadMaterialImage, cleanUnusedImages,
+      crawlCharacter, crawlWeapon, checkMissingWeapons, crawlArtifact, checkMissingArtifacts, crawlWishes, crawlWishImages, challengeCatalog, challengeDetail, downloadBannerImage, cleanupScrapeWindow, downloadMaterialImage, cleanUnusedImages,
       checkDbIntegrity, repairWebsites,
       toggleDevMode, toggleDualDbMode,
       listBaselineDbs, switchBaselineDb,

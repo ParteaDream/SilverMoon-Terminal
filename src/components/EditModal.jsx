@@ -5,6 +5,11 @@ import { useDb } from '../context/DbContext'
 import ColorTextInput from './ColorTextInput'
 
 export default function EditModal({ isOpen, onClose, onSave, title, children, saving, wide, wider, closeOnBackdrop = true }) {
+  // 通知外部（开发者工具栏等）弹窗打开状态，用于处理工具栏与侧边栏区域的视觉衔接
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('app-modal-open', { detail: { open: isOpen } }))
+  }, [isOpen])
+
   if (!isOpen) return null
 
   const maxW = wider ? 'max-w-7xl' : wide ? 'max-w-6xl' : 'max-w-2xl'

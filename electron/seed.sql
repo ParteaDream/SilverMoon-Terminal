@@ -1,6 +1,6 @@
 -- ============================================================================
 -- 银月终端数据库 - 种子数据（导出于 2026-08-24）
--- 数据版本: 7.1.2-origin
+-- 数据版本: 7.1.3-pre
 -- 来源: /Users/stargomia/Files/GenshinWikiData/silvermoon_terminal.db
 -- 不含 image_cache 表数据
 -- ============================================================================
@@ -4771,7 +4771,7 @@ INSERT INTO "characters" ("id", "name_zh", "name_en", "title_zh", "rarity", "ele
 「我迄今为止、波澜壮阔的半生，如果写成回忆录，名字就叫《给邪恶的魔女制裁的铁锤》！」尽管，这个波澜壮阔的半生其实也没几年就是了。', 147),
   (10000133, '桑多涅', 'Sandrone', '镜水析谬', 5, 6, 2, 7, '01-13', '愚人众', '2026-07-01', '镜中奇械座', '[color=#e2e8f0]愚人众执行官第七席，「木偶」。以数理解析事象之人，茶会上永不缺席的优雅淑女。[/color]', NULL, 'UI_Gacha_AvatarImg_MarionetteNew.webp', 'UI_AvatarIcon_MarionetteNew.webp', 'UI_NameCardPic_MarionetteNew_P.webp', '「茶会多重奏」', '桑多涅的特色料理。在茶会中悄然亮相的是一份无比精致的双层茶点…莫非是她亲手做的？你眼底的讶异还未散去，她已抱起双臂，侧身扬起下巴。「哈？你那是什么表情？不过几份茶点而已，怎么可能难得倒我？」丝丝缕缕的甜香轻盈飘来，仿佛无声印证了她的话语。先吃为敬吧！', '队伍中所有角色攀爬和冲刺消耗的体力降低25%，持续1500秒。多人游戏时，仅对自己的角色生效。', 'UI_ItemIcon_108880.webp', 12296, 13226, 13695, 14166, 318, 342, 381, 419, 700, 752, 779, 806, '暴击率', NULL, '19.2%', 'normal', NULL, '桑多涅·茶歇', '名片纹饰。
 桑多涅喜欢茶会这一点，或许是从阿兰那里学来的。只有两个人的茶歇在当时还不觉得无聊。可是自从人多到能开茶会，随后又一个个离开之后，她似乎追上了一点当年阿兰的孤独。', 150),
-  (10000140, '沃雅妮莎', 'Vodyanitsa', '幽歌萦渊', 5, 2, 5, 7, '01-01', '科洛列夫茨基剧团', '1970-01-01', '金鳍座', '测试角色', NULL, 'UI_Gacha_AvatarImg_Vodyanitsa.png', 'UI_AvatarIcon_Vodyanitsa.png', 'UI_NameCardPic_Vodyanitsa_P.png', '鳞光咏叹调', '沃雅妮莎的特色料理。缠绕着珍珠的古董高脚杯盛着梦幻透亮的果汁，轻轻摇晃杯身，液面泛起一层细密的微泡，升腾而后破碎，如同谁在水底吐出了一串笑声。如此奇妙…难道是她在熬煮时哼唱的神秘曲调赋予的？', '立即为选中的角色恢复生命值上限的34%，并在之后的30秒内，每5秒恢复980点生命值。', 'UI_ItemIcon_108906.png', 13776, 14818, 15344, 15871, 100, 108, 120, 132, 450, 484, 501, 519, '生命值', NULL, '28.8%', 'normal', NULL, '？？？', '？？？', NULL),
+  (10000140, '沃雅妮莎', 'Vodyanitsa', '幽歌萦渊', 5, 6, 5, 7, '01-01', '科洛列夫茨基剧团', '1970-01-01', '金鳍座', '测试角色', NULL, 'UI_Gacha_AvatarImg_Vodyanitsa.png', 'UI_AvatarIcon_Vodyanitsa.png', 'UI_NameCardPic_Vodyanitsa_P.png', '鳞光咏叹调', '沃雅妮莎的特色料理。缠绕着珍珠的古董高脚杯盛着梦幻透亮的果汁，轻轻摇晃杯身，液面泛起一层细密的微泡，升腾而后破碎，如同谁在水底吐出了一串笑声。如此奇妙…难道是她在熬煮时哼唱的神秘曲调赋予的？', '立即为选中的角色恢复生命值上限的34%，并在之后的30秒内，每5秒恢复980点生命值。', 'UI_ItemIcon_108906.png', 13776, 14818, 15344, 15871, 100, 108, 120, 132, 450, 484, 501, 519, '生命值', NULL, '28.8%', 'normal', NULL, '？？？', '？？？', NULL),
   (10000143, '薇斯纳', 'Vesna', '雪宴之锋', 5, 3, 1, 7, '01-01', '冬契军', '1970-01-01', '花序座', '测试角色', NULL, 'UI_Gacha_AvatarImg_Vesna.png', 'UI_AvatarIcon_Vesna.png', 'UI_NameCardPic_Vesna_P.png', '霜冻冰花汤', '薇斯纳的特色料理。只见她往锅中轻放入一枚精致的臻冰造物，宣称自己正在制作「风仙一族秘传的霜冻冰花汤」，如若旅者想要品尝，可将自己喜好的食材投于汤中。为多尝几口鲜汤，派蒙经不起诱惑，将你们辛苦收集了一整天的食材悉数交出…而成品的冰汤中全是派蒙方才所献之物，又属薇斯纳吃得最多。', '队伍中所有角色防御力提高282点，持续300秒。多人游戏时，仅对自己的角色生效。', 'UI_ItemIcon_108907.png', 12330, 13262, 13733, 14205, 329, 354, 394, 434, 679, 730, 756, 782, '暴击率', NULL, '19.2%', 'normal', NULL, '？？？', '？？？', NULL),
   (10000148, '阿罗夏', 'Alyosha', '疾掠弋缇', 4, 4, 3, 7, '02-09', '至冬', '2026-08-12', '迅捷犬座', '纵横于至冬雪原的「职业猎手」。其冷静的外表下，似乎隐藏着别样炙热的「理想」。', NULL, 'UI_Gacha_AvatarImg_Alyosha.png', 'UI_AvatarIcon_Alyosha.png', 'UI_NameCardPic_Alyosha_P.webp', '「弹无虚发」', '阿罗夏的特色料理。在图加林欢快的叫声中他递过来了一大串肉串，油脂还在滋滋作响，肉块比寻常的烤串切得更厚。咬开能感觉到野味已经被炭火完全驯服…看来不管是子弹还是火候，他的把控都非常精准！', '队伍中所有角色攀爬和冲刺消耗的体力降低25%，持续1500秒。多人游戏时，仅对自己的角色生效。', 'UI_ItemIcon_108895.png', 11134, 11962, 12376, 12790, 247, 265, 299, 333, 654, 703, 727, 752, '元素充能效率', NULL, '26.7%', 'normal', NULL, '阿罗夏·坐下', '名片纹饰。
 「趴下」和「坐下」对于图加林来说是完全不一样的命令。尘歌壶里一百洞天宝钱的狗狗办得到吗？', NULL),
@@ -5894,11 +5894,11 @@ INSERT INTO "materials" ("id", "name_zh", "name_en", "type", "rarity", "descript
 各国失落的古老民话中，往往有着英雄将空月赐予的「神铁」锻为无坚不摧的兵刃，战胜仇敌或魔怪的传说。只是自空月失坠的金属并非神赐——即便是高居月上的神明，也早在那之前殒落。', '', NULL, 'UI_ItemIcon_112144.png', 0),
   (112145, '无秽的月铁', '无秽的月铁', '通用掉落', 4, '击败游荡于月面的古老机关后，自其内部取得的核心。似乎与提瓦特常见的金属有所不同。
 未曾沾染地上污秽之物，弃绝七灾八苦的永恒之物，曾一度渴慕向无尽深空歌唱之物——在一切演算的结末，留在月宫中的，不过只有无用的冷铁而已。', '', NULL, 'UI_ItemIcon_112145.png', 0),
-  (112146, '幻造萤屑', '幻造萤屑', '通用掉落', 1, '至冬妖精在战斗后的残留。
+  (112146, '幻造萤屑', 'Ethereal Glimmershard', '通用掉落', 1, '至冬妖精在战斗后的残留。
 生长在妖精身躯表面的晶片的碎屑，在掉落下来时失去了颜色，就犹如虫蛾的鳞屑一般。', '', NULL, 'UI_ItemIcon_112146.png', 0),
-  (112147, '幻造裂晶', '幻造裂晶', '通用掉落', 2, '至冬妖精在战斗后的残留。
+  (112147, '幻造裂晶', 'Ethereal Crystal', '通用掉落', 2, '至冬妖精在战斗后的残留。
 生长在妖精身躯表面的晶片的碎块，虽然已经空空如也，但是也能够感受到其中曾蕴含的独特力量。', '', NULL, 'UI_ItemIcon_112147.png', 0),
-  (112148, '幻造晶鳞石', '幻造晶鳞石', '通用掉落', 3, '至冬妖精在战斗后的残留。
+  (112148, '幻造晶鳞石', 'Ethereal Crystalscale Stone', '通用掉落', 3, '至冬妖精在战斗后的残留。
 生长在妖精身躯表面的晶片，据说体表拥有更多晶片的妖精，便能驱使更多的力量。但没人知道力量究竟是蕴藏在他们身躯之中，只是借由晶块发散，还是晶块才是那些力量的载体。', '', NULL, 'UI_ItemIcon_112148.png', 0),
   (112149, '嵌合种', '嵌合种', '通用掉落', 1, '异种合成魔兽体内的核心。
 合成魔兽生长于体内的最简单的核心。即便是最简单的核心，也蕴藏着一切合成造物生长的规划。', '', NULL, 'UI_ItemIcon_112149.png', 0),
@@ -7110,7 +7110,7 @@ INSERT INTO "weapons" ("id", "name_zh", "name_en", "rarity", "weapon_type_id", "
 「为众人守望的长剑啊，你所指引的道途，也必将为来人所行的法度。」', '以宝石为身的长剑，据闻是为了正义的道途而打造，出鞘时会流溢蓝色火焰的光泽。', 'UI_Gacha_EquipIcon_Sword_GlintstoneSword.webp', 'UI_EquipIcon_Sword_GlintstoneSword.webp', NULL, '武器', 0),
   (11437, '新枝', 'Weapon: Sword', 4, 1, 42, 510, '暴击伤害', '12%', '55.1%', '叶脉蔓生', '施放元素战技后的12秒内，装备者的攻击命中敌人时，会获得「蓊郁」：攻击力提升[color=#99FFFF][4%/5%/6%/7%/8%][/color]，元素精通提升[color=#99FFFF][20/25/30/35/40][/color]点。该效果持续6秒，至多叠加3层，每1秒至多触发一次。装备者处于队伍后台时，依然能触发上述效果。
 辉映·星烁：「蓊郁」效果改为攻击力提升[color=#99FFFF][6%/7.5%/9%/10.5%/12%][/color]，且装备者造成的星烁反应伤害提升[color=#99FFFF][8%/10%/12%/14%/16%][/color]。', NULL, '', '', 'UI_Gacha_EquipIcon_Sword_SpikedStake.webp', 'UI_EquipIcon_Sword_SpikedStake.webp', NULL, '武器', 0),
-  (11438, '银釭', 'Weapon: Sword', 4, 1, 42, 510, '攻击力', '9%', '41.3%', '翦霞照水', '施放元素战技后的12秒内，元素精通提升[color=#99FFFF][52/65/78/91/104][/color]点。该效果至多叠加2层，每层持续时间独立计算。', NULL, '', '', 'UI_Gacha_EquipIcon_Sword_Fajian.webp', 'UI_EquipIcon_Sword_Fajian.webp', NULL, '武器', 0),
+  (11438, '银釭', 'Weapon: Sword', 4, 1, 42, 510, '攻击力', '9%', '41.3%', '翦霞照水', '施放元素战技后的12秒内，元素精通提升[color=#99FFFF][52/65/78/91/104][/color]点。该效果至多叠加2层，每层持续时间独立计算。', NULL, '', '璃月归藏三隐之一的「万象风角灵官」留下的长剑。传说为天降的秘银所锻，曾一剑斩断过流动的海水。', 'UI_Gacha_EquipIcon_Sword_Fajian.webp', 'UI_EquipIcon_Sword_Fajian.webp', NULL, '武器', 0),
   (11501, '风鹰剑', 'Aquila Favonia', 5, 1, 48, 674, '物理伤害加成', '9%', '41.3%', '西风之鹰的抗争', '攻击力提高[color=#99FFFF][20%/25%/30%/35%/40%][/color]；受到伤害时触发：高扬抗争旗号的西风鹰之魂苏醒，恢复等同于攻击力的[color=#99FFFF][100%/115%/130%/145%/160%][/color]的生命值，并对周围的敌人造成[color=#99FFFF][200%/230%/260%/290%/320%][/color]攻击力的伤害。该效果每15秒只能触发一次。', NULL, '众所周知，鹰的守望是西风的恩惠。
 鲜有人知西风的恩惠是远方的异族。
 
@@ -7604,10 +7604,12 @@ INSERT INTO "weapons" ("id", "name_zh", "name_en", "rarity", "weapon_type_id", "
 魔王 哦，我几时说过那样可怖的话？我又希望能从谁的口中得到一声感激？ 
 魔王 凭着我的名节起誓，我本来是要将这美丽的剑送给你，此外别无他意。 ', '如同白雪鹄的柔羽一般轻盈的长剑，无论何时都能保持未染的纯净', 'UI_Gacha_EquipIcon_Sword_Swanlake.webp', 'UI_EquipIcon_Sword_Swanlake.webp', NULL, '武器', 0),
   (11521, '星锋剑', 'Exaiphanes Blade', 5, 1, 46, 608, '暴击率', '7.2%', '33.1%', '旅者之路', '[/旅行者装备时，每与一种元素共鸣过，旅行者的暴击伤害就会提升6%。此外，/旅行者装备时，每与一种元素共鸣过，旅行者的暴击伤害就会提升6%。此外，/旅行者装备时，每与一种元素共鸣过，旅行者的暴击伤害就会提升6%。此外，/旅行者装备时，每与一种元素共鸣过，旅行者的暴击伤害就会提升6%。此外，]旅行者装备时，命中敌人后，攻击力提升[color=#99ffff][16%/20%/24%/32%/40%][/color]，持续8秒，并使旅行者恢复[color=#99ffff][3/3/5/5/5][/color]点元素能量。该效果每5秒至多触发一次，角色处于队伍后台也能触发。', NULL, '', '曾经闪耀着苍星辉光的长剑。在踏上旅途之人的手中，成为了不属于任何旧时代的崭新光芒。', 'UI_Gacha_EquipIcon_Sword_WeaponQuestSnezhnaya.webp', 'UI_EquipIcon_Sword_WeaponQuestSnezhnaya.webp', NULL, '武器', 0),
-  (11522, '蝶变', 'Weapon: Sword', 5, 1, 48, 674, '暴击伤害', '9.6%', '44.1%', '破茧的自由舞', '装备者每次施放元素战技或元素爆发时，将按照以下顺序，依次获得以下三种效果中的一种：
-忠忱之风：装备者的暴击伤害提升[color=#99FFFF][48%/62%/76%/90%/104%][/color]，持续10秒；
-叛弃之风：装备者造成的星扩散反应伤害提升[color=#99FFFF][28%/35%/42%/49%/56%][/color]，持续10秒；
-丰获之风：为装备者恢复[color=#99FFFF][3/3.5/4/4.5/5][/color]点元素能量。', NULL, '', '', 'UI_Gacha_EquipIcon_Sword_Samosvist.webp', 'UI_EquipIcon_Sword_Samosvist.webp', NULL, '武器', 0),
+  (11522, '蝶变', 'Beyond the Chrysalis', 5, 1, 48, 674, '暴击伤害', '9.6%', '44.1%', '破茧的自由舞', '装备者每次施放元素战技或元素爆发时，将按照以下顺序，依次获得以下三种效果中的一种：
+忠忱之风：装备者的暴击伤害提升[color=#99FFFF][56%/72%/88%/104%/120%][/color]，持续10秒；
+叛弃之风：装备者造成的星扩散反应伤害提升[color=#99FFFF][36%/45%/54%/63%/72%][/color]，持续10秒；
+丰获之风：为装备者恢复[color=#99FFFF][5/5.5/6/6.5/7][/color]点元素能量（每[color=#99FFFF]4[/color]秒至多通过这种方式恢复[color=#99FFFF][5/5.5/6/6.5/7][/color]点元素能量）。
+
+装备者退场时，将移除上述效果，并重置其顺序。', NULL, '', '溢彩流光的长剑，曾有人以之破除束缚，剑风轻盈如同翩跹的蝶舞。', 'UI_Gacha_EquipIcon_Sword_Samosvist.webp', 'UI_EquipIcon_Sword_Samosvist.webp', NULL, '武器', 0),
   (12101, '训练大剑', 'Waster Greatsword', 1, 2, 23, 217, 'FIGHT_PROP_NONE', 0, 0, '', '', NULL, '使用这种沉重、无锋双手大剑的人最清楚，
 兵器如何都无所谓，重要的是自己的力量。', '仅仅是削出了剑形的厚重铁片。在意志强韧的人手里，也有劈开磐石的力量。', 'UI_Gacha_EquipIcon_Claymore_Aniki.webp', 'UI_EquipIcon_Claymore_Aniki.webp', NULL, '武器', 0),
   (12201, '佣兵重剑', 'Old Merc''s Pal', 2, 2, 33, 289, 'FIGHT_PROP_NONE', 0, 0, '', '', NULL, '他总会提起自己年轻时的冒险经历，
@@ -10703,7 +10705,7 @@ INSERT INTO "weapons" ("id", "name_zh", "name_en", "rarity", "weapon_type_id", "
   (14524, '漩流颂歌', 'Weapon: Catalyst', 5, 5, 44, 542, '生命值', '14.4%', '66.2%', '沉眠的回旋曲', '治疗加成提升[color=#99FFFF][4%/5%/6%/7%/8%][/color]；
 进行治疗时，装备者获得「告真的蜜酿」效果：生命值上限提升[color=#99FFFF][4%/5%/6%/7%/8%][/color]，且基于装备者生命值上限超过40000的部分，每1000点生命值上限都会使队伍中自己的当前场上角色的攻击力提升[color=#99FFFF][0.4%/0.5%/0.6%/0.7%/0.8%][/color]，通过这种方式至多提升[color=#99FFFF][8%/10%/12%/14%/16%][/color]。该效果持续10秒，至多叠加3层。
 队伍中附近的角色触发冻结反应或星扩散反应后的5秒内，上述效果中生命值上限与攻击力提升的效果额外提高75%。
-装备者处于队伍后台时，依然能触发上述效果。', NULL, '', '', 'UI_Gacha_EquipIcon_Catalyst_Bludnye.webp', 'UI_EquipIcon_Catalyst_Bludnye.webp', NULL, '武器', 0),
+装备者处于队伍后台时，依然能触发上述效果。', NULL, '', '蓝玉髓所铸的精致灯盏，仿若自童话中诞生的宝物，据闻尘封着一曲为所有人忘却的颂歌。', 'UI_Gacha_EquipIcon_Catalyst_Bludnye.webp', 'UI_EquipIcon_Catalyst_Bludnye.webp', NULL, '武器', 0),
   (15101, '猎弓', 'Hunter''s Bow', 1, 4, 23, 217, 'FIGHT_PROP_NONE', 0, 0, '', '', NULL, '传说过去在蒙德，曾经有利用弓弦奏乐，
 或者说利用乐器的琴弦放箭的流浪乐手。
 但那只不过是遥远古代的民间传说罢了。', '猎手演奏的音乐由两种音色组成。弓弦颤动的声音，和羽箭破空的低啸。', 'UI_Gacha_EquipIcon_Bow_Hunters.webp', 'UI_EquipIcon_Bow_Hunters.webp', NULL, '武器', 0),
@@ -11397,7 +11399,7 @@ INSERT INTO "weapons" ("id", "name_zh", "name_en", "rarity", "weapon_type_id", "
 「舍弃无用的情感，令冰雪的心脏恒久跳动。」 
 「使我权柄下不失谦卑，责任之中不失良知；」 
 「使我远离怯懦与傲慢，永不背弃这一誓言。」', '为维系秩序所制的长弓，光泽冰冷，恰如最公允无私的法度。', 'UI_Gacha_EquipIcon_Bow_GlintstoneBow.webp', 'UI_EquipIcon_Bow_GlintstoneBow.webp', NULL, '武器', 0),
-  (15437, '柔风游弦', 'Weapon: Bow', 4, 4, 42, 510, '暴击率', '6%', '27.6%', '蝰蛇的谣歌', '元素充能效率提升[color=#99FFFF][20%/25%/30%/35%/40%][/color]。装备者的元素战技或元素爆发命中敌人时，获得一层「纯净者的圣咏」，该效果至多叠加3层，每0.03秒至多获得一层。叠加至3层时，将清除所有「纯净者的圣咏」，获得「蛇信的死毒」：使队伍中附近的所有角色造成的星烁反应伤害提升[color=#99FFFF][24%/30%/36%/42%/48%][/color]，持续12秒，期间无法再次获得「纯净者的圣咏」。装备者处于队伍后台时，依然能触发上述效果。', NULL, '', '', 'UI_Gacha_EquipIcon_Bow_Windtalker.webp', 'UI_EquipIcon_Bow_Windtalker.webp', NULL, '武器', 0),
+  (15437, '柔风游弦', 'Weapon: Bow', 4, 4, 42, 510, '暴击率', '6%', '27.6%', '蝰蛇的谣歌', '元素充能效率提升[color=#99FFFF][20%/25%/30%/35%/40%][/color]。装备者的元素战技或元素爆发命中敌人时，获得一层「纯净者的圣咏」，该效果至多叠加3层，每0.03秒至多获得一层。叠加至3层时，将清除所有「纯净者的圣咏」，获得「蛇信的死毒」：使队伍中附近的所有角色造成的星烁反应伤害提升[color=#99FFFF][24%/30%/36%/42%/48%][/color]，持续12秒，期间无法再次获得「纯净者的圣咏」。装备者处于队伍后台时，依然能触发上述效果。', NULL, '', '由纯净无瑕的宝石制成的苍翠弓弦，引动时总能挽起温暖如春的柔风。', 'UI_Gacha_EquipIcon_Bow_Windtalker.webp', 'UI_EquipIcon_Bow_Windtalker.webp', NULL, '武器', 0),
   (15501, '天空之翼', 'Skyward Harp', 5, 4, 48, 674, '暴击率', '4.8%', '22.1%', '回响长天的诗歌', '暴击伤害提高[color=#99FFFF][20%/25%/30%/35%/40%][/color]；攻击命中时有[color=#99FFFF][60%/70%/80%/90%/100%][/color]概率造成125%攻击力的小范围物理伤害，该效果每[color=#99FFFF][4/3.5/3/2.5/2][/color]秒只能触发一次。', NULL, '通透高天之琴。
 据说，如今的风与人们的心中，仍回响着无比清澈的琴声。
 传说深邃古国的魔龙来到风之国，是因为憧憬这样的乐声。
@@ -13094,24 +13096,24 @@ INSERT INTO "character_ascension_materials" ("id", "character_id", "material_id"
   (1145, 10000150, 112147, '30', NULL),
   (1146, 10000150, 112148, '36', NULL),
   (1147, 10000150, 113090, '46', NULL),
-  (1166, 10000140, 104121, '1', NULL),
-  (1167, 10000140, 101275, '60', NULL),
-  (1168, 10000140, 112149, '15', NULL),
-  (1169, 10000140, 104122, '6', NULL),
-  (1170, 10000140, 113090, '20', NULL),
-  (1171, 10000140, 112150, '18', NULL),
-  (1172, 10000140, 104123, '6', NULL),
-  (1173, 10000140, 112151, '24', NULL),
-  (1174, 10000140, 104124, '6', NULL),
-  (1175, 10000143, 104151, '1', NULL),
-  (1176, 10000143, 101277, '60', NULL),
-  (1177, 10000143, 112146, '15', NULL),
-  (1178, 10000143, 104152, '6', NULL),
-  (1179, 10000143, 113092, '20', NULL),
-  (1180, 10000143, 112147, '18', NULL),
-  (1181, 10000143, 104153, '6', NULL),
-  (1182, 10000143, 112148, '24', NULL),
-  (1183, 10000143, 104154, '6', NULL);
+  (1184, 10000140, 104121, '1', NULL),
+  (1185, 10000140, 101275, '60', NULL),
+  (1186, 10000140, 112149, '15', NULL),
+  (1187, 10000140, 104122, '6', NULL),
+  (1188, 10000140, 113090, '20', NULL),
+  (1189, 10000140, 112150, '18', NULL),
+  (1190, 10000140, 104123, '6', NULL),
+  (1191, 10000140, 112151, '24', NULL),
+  (1192, 10000140, 104124, '6', NULL),
+  (1220, 10000143, 104151, '1', NULL),
+  (1221, 10000143, 101277, '60', NULL),
+  (1222, 10000143, 112146, '15', NULL),
+  (1223, 10000143, 104152, '6', NULL),
+  (1224, 10000143, 113092, '20', NULL),
+  (1225, 10000143, 112147, '18', NULL),
+  (1226, 10000143, 104153, '6', NULL),
+  (1227, 10000143, 112148, '24', NULL),
+  (1228, 10000143, 104154, '6', NULL);
 
 -- ----------------------------------------------------------------------------
 -- character_constellations
@@ -14517,19 +14519,6 @@ INSERT INTO "character_constellations" ("id", "character_id", "level", "name_zh"
 至多提升至15级。', 'UI_Talent_U_Lohen_02.webp', NULL),
   (715, 10000129, 6, '身沦魂销，唯余欢悦', '[color=#e2e8f0]施放特殊元素战技[/color][color=inherit][color=#ffd780][b][note="[effect:镂骨彻心]"]镂骨彻心[/note][/b][/color][/color][color=#e2e8f0]命中敌人或在[/color][color=inherit][color=#ffd780][b][note="[effect:奇谋]"]奇谋[/note][/b][/color][/color][color=#e2e8f0]状态下施放元素爆发[/color][color=#ffd780][b]裁罚遂成[/b][/color][color=#e2e8f0]不会消耗[/color][color=inherit][color=#ffd780][b][note="[effect:争胜]"]争胜[/note][/b][/color][/color][color=#e2e8f0]，并会使洛恩的[/color][color=inherit][color=#ffd780][b][note="[effect:欢悦]"]欢悦[/note][/b][/color][/color][color=#e2e8f0]恢复至上限，且在下一次施放特殊元素战技[/color][color=#ffd780][b]镂骨彻心[/b][/color][color=#e2e8f0]命中敌人时，使本次[/color][color=#ffd780][b]奇谋[/b][/color][color=#e2e8f0]状态的持续时间延长1.25秒，该效果每7秒至多触发一次。[/color]
 [color=#e2e8f0]此外，上述所有伤害的暴击伤害都将提升175%，且本次[/color][color=#ffd780][b]奇谋[/b][/color][color=#e2e8f0]期间，洛恩施放[/color][color=#ffd780][b]镂骨彻心[/b][/color][color=#e2e8f0]的最大次数增加2次。[/color]', 'UI_Talent_S_Lohen_04.webp', NULL),
-  (716, 10000130, 1, '未完成的分类', '[color=#e2e8f0]施放元素战技[/color][color=#ffd780][b]对策·露米呀吼吼！[/b][/color][color=#e2e8f0]时，或触发月笼谐奏时，莉奈娅将获得6层[/color][color=#ffd780][b]「历览编录」[/b][/color][color=#e2e8f0]效果，该效果持续10秒，至多叠加18层。队伍中附近的角色造成月结晶反应伤害时，将消耗一层「历览编录」，提升造成的伤害，提升值相当于莉奈娅防御力的75%。[/color]
-[color=#e2e8f0]此外，露米在[/color][color=#ffd780][b][note="[effect:露米·出击形态]"]究极厉害形态[/note][/b][/color][color=#e2e8f0]下使用[/color][color=#ffd780][b]百万吨重锤[/b][/color][color=#e2e8f0]时，莉奈娅可以消耗至多5层「历览编录」，每层都会使造成的伤害提升，提升值相当于莉奈娅防御力的150%。[/color]', 'UI_Talent_S_Linnea_01.webp', NULL),
-  (717, 10000130, 2, '喜或悲的谕告', '[color=#e2e8f0]触发月笼谐奏后的8秒内，队伍中所有元素类型为[/color][color=#80c0ff][b]水元素[/b][/color][color=#e2e8f0]与[/color][color=#ffe699][b]岩元素[/b][/color][color=#e2e8f0]的角色的暴击伤害提升40%，且露米在[/color][color=#ffd780][b][note="[effect:露米·出击形态]"]究极厉害形态[/note][/b][/color][color=#e2e8f0]下使用[/color][color=#ffd780][b]百万吨重锤[/b][/color][color=#e2e8f0]的暴击伤害额外提升150%。[/color]
-
-[color=#ffd780][b]月兆·满辉[/b][/color][color=#e2e8f0]：露米在[/color][color=#ffd780][b]超厉害形态[/b][/color][color=#e2e8f0]下使用[/color][color=#ffd780][b]加力重锤[/b][/color][color=#e2e8f0]时，或在究极厉害形态下使用[/color][color=#ffd780][b]百万吨重锤[/b][/color][color=#e2e8f0]时，会触发一次月笼谐奏，且本次月笼谐奏视为队伍中所有元素类型为[/color][color=#80c0ff][b]水元素[/b][/color][color=#e2e8f0]与[/color][color=#ffe699][b]岩元素[/b][/color][color=#e2e8f0]的角色均在反应中施加了元素。[/color]', 'UI_Talent_S_Linnea_02.webp', NULL),
-  (718, 10000130, 3, '热闹的记录页', '元素战技[color=#FFD780]对策·露米呀吼吼！[/color]的技能等级提高3级。
-至多提升至15级。', 'UI_Talent_U_Linnea_01.webp', NULL),
-  (719, 10000130, 4, '专家的直感觉', '触发月笼谐奏后的5秒内，莉奈娅与队伍中自己的当前场上角色的防御力分别提升25%。莉奈娅在场上时，上述防御力提升效果可叠加。', 'UI_Talent_S_Linnea_03.webp', NULL),
-  (720, 10000130, 5, '仙乡的赠别礼', '元素爆发[color=#FFD780]备忘·绝境生存指南[/color]的技能等级提高3级。
-至多提升至15级。', 'UI_Talent_U_Linnea_02.webp', NULL),
-  (721, 10000130, 6, '黄金猎犬之梦', '命之座[color=#ffd780]「未完成的分类」[/color]的效果获得强化：施放元素战技[color=#ffd780]对策·露米呀吼吼！[/color]时，或触发月笼谐奏时，莉奈娅将直接获得最大层数的[color=#ffd780]「历览编录」[/color]效果；消耗[color=#ffd780]「历览编录」[/color]时，将消耗原本2倍的层数，并使伤害提升效果提高至原本的150%。
-
-[color=#ffd780]月兆·满辉[/color]：队伍中附近的角色造成的月结晶反应伤害[note="[effect:擢升]"][color=#ffd780]擢升[/color][/note]25%。', 'UI_Talent_S_Linnea_04.webp', NULL),
   (722, 10000131, 1, '「不要惧怕，蒙眷爱的人之子呀」', '队伍中自己的当前场上角色攻击命中敌人时，将会额外召唤出特殊的「奥迹造影·合一」，对敌人进行协同攻击，依据该角色的元素类型，造成对应元素范围伤害，该伤害相当于该角色攻击力的600%，并视为由该角色造成的伤害。
 该效果每6秒至多触发一次。', 'UI_Talent_S_Nicole_01.webp', NULL),
   (723, 10000131, 2, '「我要教导你，指引你应走的路」', '[color=#e2e8f0]元素战技[/color][color=#ffd780][b]圣言默示·未现之光[/b][/color][color=#e2e8f0]的效果获得强化：[/color][color=inherit][color=#ffd780][b][note="[effect:虚己之赐]"]虚己之赐[/note][/b][/color][/color][color=#e2e8f0]还会额外提升300点攻击力（不计入该效果的攻击力加成上限），[/color][color=inherit][color=#ffd780][b][note="[effect:圣祝之引]"]圣祝之引[/note][/b][/color][/color][color=#e2e8f0]还会依据角色的元素类型，使附近敌人的对应元素抗性降低25%，同元素类型的元素抗性降低效果不能叠加。[/color]
@@ -14729,30 +14718,43 @@ INSERT INTO "character_constellations" ("id", "character_id", "level", "name_zh"
   (842, 10000148, 5, '莺啼止时', '元素爆发[color=#FFD780]守猎进踞[/color]的技能等级提高3级。
 至多提升至15级。', 'UI_Talent_U_Alyosha_02.webp', NULL),
   (843, 10000148, 6, '复夺旌幡', '激活[note="[effect:弋猎印记]"][color=#ffd780]弋猎印记[/color][/note]时获得的[color=#ffd780]猎者之准[/color]效果可以叠加。该效果至多叠加2层，叠加至2层时，还会使处于该效果影响下的当前场上角色的元素精通提升100点。', 'UI_Talent_S_Alyosha_04.webp', NULL),
-  (856, 10000140, 1, '聚光灯下的水华', '沃雅妮莎进行治疗时，还会使队伍中附近的所有角色攻击力提升，提升值相当于沃雅妮莎生命值上限的0.7%，持续3秒。', 'UI_Talent_S_Vodyanitsa_01.png', NULL),
-  (857, 10000140, 2, '穿彻风雪的余响', '元素战技[color=#FFD780]宣叙·晨声纷流[/color]中的[color=#FFD780]唤春角笛[/color]攻击敌人时，沃雅妮莎将获得「黑与白的双音」效果，使队伍中当前场上角色造成的[color=#80C0FF]水元素伤害[/color]与[color=#99FFFF]冰元素伤害[/color]的暴击伤害提升50%，持续5秒。
+  (868, 10000140, 1, '聚光灯下的水华', '沃雅妮莎进行治疗时，还会使队伍中附近的所有角色攻击力提升，提升值相当于沃雅妮莎生命值上限的1%，持续5秒。', 'UI_Talent_S_Vodyanitsa_01.png', NULL),
+  (869, 10000140, 2, '穿彻风雪的余响', '元素战技[color=#FFD780]宣叙·晨声纷流[/color]中的[color=#FFD780]唤春角笛[/color]攻击敌人时，沃雅妮莎将获得「黑与白的双音」效果，使队伍中当前场上角色造成的[color=#80C0FF]水元素伤害[/color]与[color=#99FFFF]冰元素伤害[/color]的暴击伤害提升50%，持续5秒。
 若当前场上存在流荡风旋，或处于流荡风旋引爆后的5秒内，则改为使队伍中当前场上角色造成的星扩散反应伤害的暴击伤害提升60%，持续5秒。
 此外，元素战技[color=#FFD780]宣叙·晨声纷流[/color]获得强化：[color=#FFD780]遥久之歌[/color]效果的持续时间延长9秒。', 'UI_Talent_S_Vodyanitsa_02.png', NULL),
-  (858, 10000140, 3, '空音犹响的春晨', '元素战技[color=#FFD780]宣叙·晨声纷流 [/color]的技能等级提高3级。
+  (870, 10000140, 3, '空音犹响的春晨', '元素战技[color=#FFD780]宣叙·晨声纷流 [/color]的技能等级提高3级。
 至多提升至15级。', 'UI_Talent_U_Vodyanitsa_01.png', NULL),
-  (859, 10000140, 4, '柔波摇漾的低诉', '沃雅妮莎进行治疗时，将基于受治疗角色的生命值，触发不同效果。若受治疗角色的生命值：
+  (871, 10000140, 4, '柔波摇漾的低诉', '沃雅妮莎进行治疗时，将基于受治疗角色的生命值，触发不同效果。若受治疗角色的生命值：
 ·低于40%：本次治疗量提升50%；
 ·不低于40%：沃雅妮莎的生命值上限提升20%，持续6秒，该效果至多叠加3层，每层独立计算持续时间。', 'UI_Talent_S_Vodyanitsa_03.png', NULL),
-  (860, 10000140, 5, '沉往深湖的共沦', '元素爆发[color=#FFD780]终奏·伴尔沉沦 [/color]的技能等级提高3级。
+  (872, 10000140, 5, '沉往深湖的共沦', '元素爆发[color=#FFD780]终奏·伴尔沉沦 [/color]的技能等级提高3级。
 至多提升至15级。', 'UI_Talent_U_Vodyanitsa_02.png', NULL),
-  (861, 10000140, 6, '永不落幕的盛歌', '命之座[color=#ffd780]「穿彻风雪的余响」[/color]的效果获得强化：「黑与白的双音」改为对附近队伍中的所有角色生效。
-此外，[color=#ffd780]遥久之歌[/color]效果持续期间，队伍中附近的角色造成的星扩散反应伤害[note="[effect:擢升]"][color=#ffd780]擢升[/color][/note]25%，造成的[color=#80c0ff]水元素伤害[/color]与[color=#99ffff]冰元素伤害[/color]提升50%。', 'UI_Talent_S_Vodyanitsa_04.png', NULL),
-  (862, 10000143, 1, '送冬的华宴', '[color=#ffd780][note="[effect:巡风列装]"]巡风列装[/note][/color]模式下，薇斯纳至多可以施放四次最高境界的[color=#ffd780][note="[effect:翔风剑]"]翔风剑[/note][/color]，而非三次，且每次进入[color=#ffd780]巡风列装[/color]模式后，首次施放最高境界的[color=#ffd780]翔风剑[/color]不消耗[color=#ffd780][note="[effect:剑气]"]「剑气」[/note][/color]。
-此外，薇斯纳在[color=#ffd780]巡风列装[/color]模式下造成的星扩散反应伤害提升20%。', 'UI_Talent_S_Vesna_01.png', NULL),
-  (863, 10000143, 2, '迎春的轮舞', '固有天赋[color=#ffd780]「仪典·春之行列」[/color]获得强化：薇斯纳进入[color=#ffd780][note="[effect:巡风列装]"]巡风列装[/note][/color]模式时，会获得最大层数的[color=#ffd780]整肃[/color]；拥有最大层数的[color=#ffd780]整肃[/color]时，薇斯纳的攻击力提升60%。
+  (873, 10000140, 6, '永不落幕的盛歌', '命之座[color=#ffd780]「穿彻风雪的余响」[/color]的效果获得强化：「黑与白的双音」改为对附近队伍中的所有角色生效。
+此外，[color=#ffd780]遥久之歌[/color]效果持续期间，队伍中附近的角色造成的星扩散反应伤害[note="[effect:擢升]"][color=#ffd780]擢升[/color][/note]30%，造成的[color=#80c0ff]水元素伤害[/color]与[color=#99ffff]冰元素伤害[/color]提升60%。', 'UI_Talent_S_Vodyanitsa_04.png', NULL),
+  (892, 10000143, 1, '送冬的华宴', '[color=#FFD780][note="[effect:巡风列装]"]巡风列装[/note][/color]模式下，薇斯纳至多可以施放四次最高境界的[color=#FFD780][note="[effect:翔风剑]"]翔风剑[/note][/color]，而非三次，且每次进入[color=#FFD780]巡风列装[/color]模式后，首次施放最高境界的[color=#FFD780]翔风剑[/color]不消耗[color=#FFD780][note="[effect:剑气]"]「剑气」[/note][/color]。
+此外，薇斯纳在[color=#FFD780]巡风列装[/color]模式下造成的星扩散反应伤害提升20%。', 'UI_Talent_S_Vesna_01.png', NULL),
+  (893, 10000143, 2, '迎春的轮舞', '固有天赋[color=#FFD780]「仪典·春之行列」[/color]获得强化：薇斯纳进入[color=#FFD780][note="[effect:巡风列装]"]巡风列装[/note][/color]模式时，会获得最大层数的[color=#FFD780]整肃[/color]；拥有最大层数的[color=#FFD780]整肃[/color]时，薇斯纳的攻击力提升60%。
 上述效果需要解锁固有天赋「仪典·春之行列」。', 'UI_Talent_S_Vesna_02.png', NULL),
-  (864, 10000143, 3, '燔燎的献礼', '元素战技[color=#FFD780]操典·制胜有道[/color]的技能等级提高3级。
+  (894, 10000143, 3, '燔燎的献礼', '元素战技[color=#FFD780]操典·制胜有道[/color]的技能等级提高3级。
 至多提升至15级。', 'UI_Talent_U_Vesna_01.png', NULL),
-  (865, 10000143, 4, '先代的荣膺', '固有天赋[color=#FFD780]「理典·冬之凯风」[/color]获得强化：攻击力提升与元素精通提升的效果改为原本的三倍。', 'UI_Talent_S_Vesna_03.png', NULL),
-  (866, 10000143, 5, '贵种的职守', '元素爆发[color=#FFD780]致礼·献予女皇陛下[/color]的技能等级提高3级。
+  (895, 10000143, 4, '先代的荣膺', '固有天赋[color=#FFD780]「理典·冬之凯风」[/color]获得强化：攻击力提升与元素精通提升的效果改为原本的三倍。', 'UI_Talent_S_Vesna_03.png', NULL),
+  (896, 10000143, 5, '贵种的职守', '元素爆发[color=#FFD780]致礼·献予女皇陛下[/color]的技能等级提高3级。
 至多提升至15级。', 'UI_Talent_U_Vesna_02.png', NULL),
-  (867, 10000143, 6, '不移的赤忱', '施放最高境界[color=#ffd780][note="[effect:翔风剑]"]翔风剑[/note][/color]后的5秒内，薇斯纳可以点按普通攻击或元素战技，施放风仙一族秘传的[color=#ffd780]翔风剑·变移[/color]：造成薇斯纳150%攻击力的[color=#80ffd7]风元素伤害[/color]，并召唤出[color=#ffd780][note="[effect:灵剑]"]灵剑[/note][/color]，额外造成薇斯纳200%攻击力的[color=#80ffd7]风元素伤害[/color]。若薇斯纳处于[color=#ffd780][note="[effect:巡风列装]"]巡风列装[/note][/color]模式，还会额外唤出风翎协同攻击敌人。
-此外，薇斯纳造成的星扩散反应伤害[note="[effect:擢升]"][color=#ffd780]擢升[/color][/note]20%。', 'UI_Talent_S_Vesna_04.png', NULL);
+  (897, 10000143, 6, '不移的赤忱', '施放最高境界[color=#FFD780][note="[effect:翔风剑]"]翔风剑[/note][/color]后的5秒内，薇斯纳可以点按普通攻击或元素战技，施放风仙一族秘传的[color=#FFD780]翔风剑·变移[/color]：造成薇斯纳150%攻击力的[color=#80FFD7]风元素伤害[/color]，并召唤出[color=#FFD780][note="[effect:灵剑]"]灵剑[/note][/color]，额外造成薇斯纳200%攻击力的[color=#80FFD7]风元素伤害[/color]。若薇斯纳处于[color=#FFD780][note="[effect:巡风列装]"]巡风列装[/note][/color]模式，还会额外唤出风翎协同攻击敌人。
+此外，薇斯纳造成的星扩散反应伤害[note="[effect:擢升]"][color=#FFD780]擢升[/color][/note]20%。', 'UI_Talent_S_Vesna_04.png', NULL),
+  (898, 10000130, 1, '未完成的分类', '施放元素战技[color=#FFD780]对策·露米呀吼吼！[/color]时，或触发月笼谐奏时，莉奈娅将获得6层[color=#FFD780]「历览编录」[/color]效果，该效果持续10秒，至多叠加18层。队伍中附近的角色造成月结晶反应伤害时，将消耗一层「历览编录」，提升造成的伤害，提升值相当于莉奈娅防御力的75%。
+此外，露米在[color=#FFD780][note="[effect:露米·出击形态]"]究极厉害形态[/note][/color]下使用[color=#FFD780]百万吨重锤[/color]时，莉奈娅可以消耗至多5层「历览编录」，每层都会使造成的伤害提升，提升值相当于莉奈娅防御力的150%。', 'UI_Talent_S_Linnea_01.png', NULL),
+  (899, 10000130, 2, '喜或悲的谕告', '触发月笼谐奏后的8秒内，队伍中所有元素类型为[color=#80C0FF]水元素[/color]与[color=#FFE699]岩元素[/color]的角色的暴击伤害提升40%，且露米在[color=#FFD780][note="[effect:露米·出击形态]"]究极厉害形态[/note][/color]下使用[color=#FFD780]百万吨重锤[/color]的暴击伤害额外提升150%。
+
+[color=#FFD780]月兆·满辉[/color]：露米在[color=#FFD780][note="[effect:露米·出击形态]"]超厉害形态[/note][/color]下使用[color=#FFD780]加力重锤[/color]时，或在究极厉害形态下使用[color=#FFD780]百万吨重锤[/color]时，会触发一次月笼谐奏，且本次月笼谐奏视为队伍中所有元素类型为[color=#80C0FF]水元素[/color]与[color=#FFE699]岩元素[/color]的角色均在反应中施加了元素。', 'UI_Talent_S_Linnea_02.png', NULL),
+  (900, 10000130, 3, '热闹的记录页', '元素战技[color=#FFD780]对策·露米呀吼吼！[/color]的技能等级提高3级。
+至多提升至15级。', 'UI_Talent_U_Linnea_01.png', NULL),
+  (901, 10000130, 4, '专家的直感觉', '触发月笼谐奏后的5秒内，莉奈娅与队伍中自己的当前场上角色的防御力分别提升25%。莉奈娅在场上时，上述防御力提升效果可叠加。', 'UI_Talent_S_Linnea_03.png', NULL),
+  (902, 10000130, 5, '仙乡的赠别礼', '元素爆发[color=#FFD780]备忘·绝境生存指南[/color]的技能等级提高3级。
+至多提升至15级。', 'UI_Talent_U_Linnea_02.png', NULL),
+  (903, 10000130, 6, '黄金猎犬之梦', '命之座[color=#FFD780]「未完成的分类」[/color]的效果获得强化：施放元素战技[color=#FFD780]对策·露米呀吼吼！[/color]时，或触发月笼谐奏时，莉奈娅将直接获得最大层数的[color=#FFD780]「历览编录」[/color]效果；消耗[color=#FFD780]「历览编录」[/color]时，将消耗原本2倍的层数，并使伤害提升效果提高至原本的150%。
+
+[color=#FFD780]月兆·满辉[/color]：队伍中附近的角色造成的月结晶反应伤害[note="[effect:擢升]"][color=#FFD780]擢升[/color][/note]25%。', 'UI_Talent_S_Linnea_04.png', NULL);
 
 -- ----------------------------------------------------------------------------
 -- character_outfits
@@ -15524,9 +15526,9 @@ INSERT INTO "character_outfits" ("id", "character_id", "name_zh", "description_z
 「呜…这么弄得，好像我真的是一切的幕后主使一样了啊——！」'),
   (153, 10000150, '雪鹄之舞', '奥黛塔的装扮款式。制作精良的芭蕾服装，以雪鹄为灵感来源，伴着勤恳的芭蕾舞者度过无数长夜。其上珠宝总在舞台灯光下折射出静雅的辉光，一如剔透的舞者本人。', 'UI_Gacha_AvatarImg_Odette.png', NULL, 1, NULL),
   (154, 10000148, '寒帷伏猎', '阿罗夏的装扮款式。经久耐用的猎装，配以厚实的内衬和毛绒帽边，可以让阿罗夏长时间地潜伏在雪地里，直至猎获自己想要的猎物。至于为什么帽子的款式是小狗的脑袋，因为很可爱，图加林也很喜欢。', '', NULL, 1, NULL),
-  (157, 10000140, '溯涌遗韵', '沃雅妮莎的装扮款式。服饰的造型据说来源于「水妖」的各类传统文化，而这些传统文化具体为何，还请详询沃雅妮莎小姐。
+  (159, 10000140, '溯涌遗韵', '沃雅妮莎的装扮款式。服饰的造型据说来源于「水妖」的各类传统文化，而这些传统文化具体为何，还请详询沃雅妮莎小姐。
 当然，若想详询，还请等到她演出暂歇，有些许空闲的时候。', '', NULL, 1, NULL),
-  (158, 10000143, '春结冬契', '薇斯纳的装扮款式。由薇斯纳亲自在冬契军制服的基础款式上稍作修改后制成，但好看归好看，昂贵也是真昂贵，所以薇斯纳的冬契军整体换装申请到现在也没有通过。', '', NULL, 1, NULL);
+  (163, 10000143, '春结冬契', '薇斯纳的装扮款式。由薇斯纳亲自在冬契军制服的基础款式上稍作修改后制成，但好看归好看，昂贵也是真昂贵，所以薇斯纳的冬契军整体换装申请到现在也没有通过。', '', NULL, 1, NULL);
 
 -- ----------------------------------------------------------------------------
 -- character_related_effects
@@ -15569,19 +15571,6 @@ INSERT INTO "character_related_effects" ("id", "character_id", "name", "content"
 [color=#e2e8f0]此外，解锁突破天赋「慕善」后，队伍中附近的当前场上角色的元素伤害命中敌人后，尼可自己拥有的[/color][color=#ffd780][b]虚己之赐[/b][/color][color=#e2e8f0]也会升变为[/color][color=#ffd780][b]圣祝之引[/b][/color][color=#e2e8f0]，持续8秒。[/color]
 
 [color=#e2e8f0]除尼可外，其他角色拥有的[/color][color=#ffd780][b]圣祝之引[/b][/color][color=#e2e8f0]将在退场时还原为[/color][color=#ffd780][b]虚己之赐[/b][/color][color=#e2e8f0]。[/color]', 2),
-  (15, 10000130, '[color=#FFD780][b]露米·出击形态[/b][/color]', '[color=#e2e8f0]露米有三种不同的出击形态。[/color]
-
-[color=#ffd780][b]超厉害形态[/b][/color]
-[color=#e2e8f0]露米会使用[/color][color=#ffd780][b]捶捶乱打[/b][/color][color=#e2e8f0]不断攻击附近的敌人，每次攻击会造成2次[/color][color=#ffe699][b]岩元素范围伤害[/b][/color][color=#e2e8f0]。[/color]
-[color=#e2e8f0]若附近存在月笼，露米则会交替使用[/color][color=#ffd780][b]捶捶乱打[/b][/color][color=#e2e8f0]与[/color][color=#ffd780][b]加力重锤[/b][/color][color=#e2e8f0]，不断攻击附近的敌人；[/color][color=#ffd780][b]加力重锤[/b][/color][color=#e2e8f0]会造成视为月结晶反应伤害的[/color][color=#ffe699][b]岩元素范围伤害[/b][/color][color=#e2e8f0]。[/color]
-
-[color=#ffd780][b]究极厉害形态[/b][/color]
-[color=#e2e8f0]露米会使用究极厉害的[/color][color=#ffd780][b]百万吨重锤[/b][/color][color=#e2e8f0]，对附近的敌人造成一次格外强力的、视为月结晶反应伤害的[/color][color=#ffe699][b]岩元素范围伤害[/b][/color][color=#e2e8f0]，并切换至[/color][color=#ffd780][b]普通厉害形态[/b][/color][color=#e2e8f0]。[/color]
-
-[color=#ffd780][b]普通厉害形态[/b][/color]
-[color=#e2e8f0]虽然没有其他形态那么厉害，但也很厉害。[/color]
-[color=#e2e8f0]露米会以更长的间隔使用[/color][color=#ffd780][b]捶捶乱打[/b][/color][color=#e2e8f0]，不断攻击附近的敌人，每次攻击会造成2次[/color][color=#ffe699][b]岩元素范围伤害[/b][/color][color=#e2e8f0]。[/color]', 1),
-  (16, 10000130, '[color=#FFD780][b]擢升[/b][/color]', '特殊的伤害提升效果，与其他的伤害提升效果分别独立计算。', 2),
   (17, 10000129, '[color=#FFD780][b]奇谋[/b][/color]', '[color=#e2e8f0]施放元素战技[/color][color=#ffd780][b]奇兵诡出[/b][/color][color=#e2e8f0]后，洛恩将会切换至该状态。奇谋状态具有如下特性：[/color]
 [color=#e2e8f0]·洛恩的普通攻击、重击与下落攻击将转为造成无法被附魔覆盖的[/color][color=#99ffff][b]冰元素伤害[/b][/color][color=#e2e8f0]；[/color]
 [color=#e2e8f0]·洛恩的普通攻击或重击命中敌人时，会为洛恩积攒特殊的[/color][color=#ffd780][b]欢悦[/b][/color][color=#e2e8f0]，用于施放特殊元素战技[/color][color=#ffd780][b]镂骨彻心[/b][/color][color=#e2e8f0]；在[/color][color=#ffd780][b]奇谋[/b][/color][color=#e2e8f0]状态下至多施放3次[/color][color=#ffd780][b]镂骨彻心[/b][/color][color=#e2e8f0]，之后无法获得[/color][color=#ffd780][b]欢悦[/b][/color][color=#e2e8f0]。[/color]
@@ -15758,32 +15747,44 @@ INSERT INTO "character_related_effects" ("id", "character_id", "name", "content"
 
 [color=#ffd780][b]厨艺机关·低温冷藏模式[/b][/color]
 [color=#cbd5e1]将跟随当前场上角色，并将间歇性对附近的敌人发射「冻霜芭菲」，造成[/color][color=#99ffff][b]冰元素伤害[/b][/color][color=#cbd5e1]。[/color]', 2),
-  (67, 10000143, '[color=#ffd780][b]巡风列装[/b][/color]', '[color=#cbd5e1]施放元素战技[/color][color=#ffd780][b][color=#ecfdf5]操典·制胜有道[/color][/b][/color][color=#cbd5e1]后，薇斯纳将[/color]
-[color=#ecfdf5]切换至该模式。该模式至多持续15秒，并具有如下特性：[/color]
-[color=#ecfdf5]·提升薇斯纳的抗打断能力。[/color]
-[color=#ecfdf5]·[/color][color=#cbd5e1]薇斯纳进行普通攻击、重击与下落攻击时，将转为造成无法被附魔覆盖的[/color][color=#80ffd7][b]风元素伤害[/b][/color][color=#cbd5e1]，并[/color][color=#ffd780][b][/b][/color][color=#ecfdf5]唤出风翎协同[/color][color=#cbd5e1]攻击敌人，造成[/color][color=#ecfdf5]额外的[/color][color=#80ffd7][b]风元素伤害[/b][/color][color=#cbd5e1]；每次[/color][color=#ecfdf5]唤出风翎时，都会为薇斯纳恢复一定的[/color][color=#ffd780][b][color=#ecfdf5]剑气[/color][/b][/color][color=#ecfdf5]。[/color]
-[color=#cbd5e1]·薇斯纳可以消耗[/color][color=#ffd780][b][color=#ecfdf5]剑气[/color][/b][/color][color=#ecfdf5]，[/color][color=#cbd5e1]施放特殊[/color][color=#ecfdf5]的[/color][color=#cbd5e1]元素战技[/color][color=#ffd780][b][color=#ecfdf5]翔风剑[/color][/b][/color][color=#ecfdf5]，[/color][color=#cbd5e1]对敌人造成[/color][color=#80ffd7][b]风元素伤害[/b][/color][color=#ecfdf5]。[/color]
-[color=#ecfdf5]·持续时间结束时，或施放三次最高境界的[/color][color=#ffd780][b][color=#ecfdf5]翔风剑[/color][/b][/color][color=#ecfdf5]后，薇斯纳将退出该模式，并清除所有[/color][color=#ffd780][b][color=#ecfdf5]剑气[/color][/b][/color][color=#cbd5e1]。[/color]', 1),
-  (68, 10000143, '[color=#FFD780][b]擢升[/b][/color]', '特殊的伤害提升效果，与其他的伤害提升效果分别独立计算。', 5),
   (69, 10000140, '[color=#FFD780][b]领唱[/b][/color]', '[color=#ecfdf5]队伍中自己的[/color][color=#cbd5e1]当前场上角色的普通攻击、重击、下落攻击、元素战技或元素爆发造成[/color][color=#80c0ff][b]水元素伤害[/b][/color][color=#ecfdf5]或[/color][color=#99ffff][b]冰元素伤害[/b][/color][color=#cbd5e1]时，将消耗一层「[/color][color=#ecfdf5]领唱」，提升造成的伤害；若当前场上存在流荡风旋，或处于流荡风旋引爆后的5秒内，则改为角色造成星扩散反应伤害时才会触发上述效果[/color][color=#cbd5e1]。[/color]
 [color=#cbd5e1]基于沃雅妮莎生命值上限超过40000的部分，每[/color][color=#ecfdf5]1000点生命值上限都会使上述效果中的星扩散反应伤害提升260点，[/color][color=#80c0ff][b]水元素伤害[/b][/color][color=#cbd5e1]与[/color][color=#99ffff][b]冰元素伤害[/b][/color][color=#cbd5e1]提升140点[/color][color=#ecfdf5]；[/color][color=#cbd5e1]通过这种方式[/color][color=#ecfdf5]，[/color][color=#cbd5e1]至多使星扩散[/color][color=#ecfdf5]反应[/color][color=#cbd5e1]伤害提升6500点，[/color][color=#80c0ff][b]水元素伤害[/b][/color][color=#cbd5e1]与[/color][color=#99ffff][b]冰元素伤害[/b][/color][color=#cbd5e1]提升3500点。[/color]', 1),
   (70, 10000140, '[color=#FFD780][b]重唱[/b][/color]', '[color=#ecfdf5]由队伍中后台角色或队伍中附近的其他角色（而非队伍中自己的当前场上角色）触发，效果与「领唱」一致[/color][color=#cbd5e1]。[/color]', 2),
   (71, 10000140, '[color=#FFD780][b]擢升[/b][/color]', '[color=#ecfdf5]特殊的伤害提升效果，与其他的伤害提升效果分别独立计算。[/color]', 3),
-  (72, 10000143, '[color=#FFD780][b]剑气[/b][/color]', '[color=#ecfdf5]用于在[/color][color=#ffd780][b]巡风列装[/b][/color][color=#ecfdf5]模式下施放特殊元素战技[/color][color=#ffd780][b]翔风剑[/b][/color][color=#ecfdf5]的能量。[/color]
-[color=#ecfdf5]薇斯纳可以通过以下方式积攒剑气：[/color]
-[color=#ecfdf5]·在[/color][color=#ffd780][b]巡风列装[/b][/color][color=#ecfdf5]模式下，进行普通攻击、重击、下落攻击，或施放命之座[/color][color=#ffd780][b]「不移的赤忱」[/b][/color][color=#ecfdf5]中的[/color][color=#ffd780][b]翔风剑·变移[/b][/color][color=#ecfdf5]；[/color]
-[color=#ecfdf5]·施放元素战技[/color][color=#ffd780][b]操典·制胜有道[/b][/color][color=#ecfdf5]；[/color]
-[color=#ecfdf5]·施放元素爆发[/color][color=#ffd780][b]致礼·献予女皇陛下[/b][/color][color=#ecfdf5]。[/color]', 2),
-  (73, 10000143, '[color=#FFD780][b]翔风剑[/b][/color]', '[color=#ecfdf5]在[/color][color=#ffd780][b]巡风列装[/b][/color][color=#ecfdf5]模式下，薇斯纳可以消耗[/color][color=#ffd780][b]剑气[/b][/color][color=#ecfdf5]，施放该特殊元素战技，造成[/color][color=#80ffd7][b]风元素伤害[/b][/color][color=#ecfdf5]。[/color]
-[color=#ecfdf5]每次施放特殊元素战技[/color][color=#ffd780][b]翔风剑[/b][/color][color=#ecfdf5]后，本次[/color][color=#ffd780][b]巡风列装[/b][/color][color=#ecfdf5]模式持续期间，其境界都会提升；[/color][color=#ffd780][b]翔风剑[/b][/color][color=#ecfdf5]的初始境界为一阶，至多提升至三阶。[/color]
-[color=#ecfdf5]施放境界提升后的[/color][color=#ffd780][b]翔风剑[/b][/color][color=#ecfdf5]时，还会唤出[/color][color=#ffd780][b]灵剑[/b][/color][color=#ecfdf5]，对敌人造成[/color][color=#80ffd7][b]风元素伤害[/b][/color][color=#ecfdf5]。[/color]', 3),
-  (74, 10000143, '[color=#ecfdf5][color=#ffd780][b]灵剑[/b][/color][/color]', '[color=#ecfdf5]薇斯纳召唤出的灵体武器，会协同薇斯纳对敌人进行攻击，造成[/color][color=#80ffd7][b]风元素伤害[/b][/color][color=#ecfdf5]。[/color]
-[color=#ecfdf5]薇斯纳可以通过以下方式召唤出灵剑：[/color]
-[color=#ecfdf5]·施放境界提升的特殊元素战技[/color][color=#ffd780][b]翔风剑[/b][/color][color=#ecfdf5]；[/color]
-[color=#ecfdf5]·施放元素爆发[/color][color=#ffd780][b]致礼·献予女皇陛下[/b][/color][color=#ecfdf5]；[/color]
-[color=#ecfdf5]·施放命之座[/color][color=#ffd780][b]「不移的赤忱」[/b][/color][color=#ecfdf5]中的[/color][color=#ffd780][b]翔风剑·变移[/b][/color][color=#ecfdf5]。[/color]
+  (75, 10000143, '[color=#ffd780][b]巡风列装[/b][/color]', '施放元素战技[color=#FFD780]操典·制胜有道[/color]后，薇斯纳将切换至该模式。该模式至多持续15秒，并具有如下特性：
+·提升薇斯纳的抗打断能力。
+·薇斯纳进行普通攻击、重击与下落攻击时，将转为造成无法被附魔覆盖的[color=#80FFD7]风元素伤害[/color]，并唤出风翎协同攻击敌人，造成额外的[color=#80FFD7]风元素伤害[/color]；每次唤出风翎时，都会为薇斯纳恢复一定的[color=#FFD780]剑气[/color]。
+·薇斯纳可以消耗[color=#FFD780]剑气[/color]，施放特殊的元素战技[color=#FFD780]翔风剑[/color]，对敌人造成[color=#80FFD7]风元素伤害[/color]。
+·持续时间结束时，或施放三次最高境界的[color=#FFD780]翔风剑[/color]后，薇斯纳将退出该模式，并清除所有[color=#FFD780]剑气[/color]。', 1),
+  (76, 10000143, '[color=#ffd780][b]剑气[/b][/color]', '用于在[color=#FFD780]巡风列装[/color]模式下施放特殊元素战技[color=#FFD780]翔风剑[/color]的能量。
+薇斯纳可以通过以下方式积攒剑气：
+·在[color=#FFD780]巡风列装[/color]模式下，进行普通攻击、重击、下落攻击，或施放命之座[color=#FFD780]「不移的赤忱」[/color]中的[color=#FFD780]翔风剑·变移[/color]；
+·施放元素战技[color=#FFD780]操典·制胜有道[/color]；
+·施放元素爆发[color=#FFD780]致礼·献予女皇陛下[/color]。', 2),
+  (77, 10000143, '[color=#ffd780][b]翔风剑[/b][/color]', '在[color=#FFD780]巡风列装[/color]模式下，薇斯纳可以消耗[color=#FFD780]剑气[/color]，施放该特殊元素战技，造成[color=#80FFD7]风元素伤害[/color]。
+每次施放特殊元素战技[color=#FFD780]翔风剑[/color]后，本次[color=#FFD780]巡风列装[/color]模式持续期间，其境界都会提升；[color=#FFD780]翔风剑[/color]的初始境界为一阶，至多提升至三阶。
+施放境界提升后的[color=#FFD780]翔风剑[/color]时，还会唤出[color=#FFD780]灵剑[/color]，对敌人造成[color=#80FFD7]风元素伤害[/color]。', 3),
+  (78, 10000143, '[color=#ffd780][b]灵剑[/b][/color]', '薇斯纳召唤出的灵体武器，会协同薇斯纳对敌人进行攻击，造成[color=#80FFD7]风元素伤害[/color]。
+薇斯纳可以通过以下方式召唤出灵剑：
+·施放境界提升的特殊元素战技[color=#FFD780]翔风剑[/color]；
+·施放元素爆发[color=#FFD780]致礼·献予女皇陛下[/color]；
+·施放命之座[color=#FFD780]「不移的赤忱」[/color]中的[color=#FFD780]翔风剑·变移[/color]。
 
-[color=#ffd780][b]辉映·星扩散[/b][/color][color=#ecfdf5]：[/color][color=#ffd780][b]灵剑[/b][/color][color=#ecfdf5]转为造成视为星扩散反应伤害的[/color][color=#80ffd7][b]风元素伤害[/b][/color][color=#ecfdf5]。[/color]', 4);
+[color=#FFD780]辉映·星扩散[/color]：[color=#FFD780]灵剑[/color]转为造成视为星扩散反应伤害的[color=#80FFD7]风元素伤害[/color]。', 4),
+  (79, 10000143, '[color=#ffd780][b]擢升[/b][/color]', '特殊的伤害提升效果，与其他的伤害提升效果分别独立计算。', 5),
+  (80, 10000130, '[color=#ffd780][b]露米·出击形态[/b][/color]', '露米有三种不同的出击形态。
+
+[color=#FFD780]超厉害形态[/color]
+露米会使用[color=#FFD780]捶捶乱打[/color]不断攻击附近的敌人，每次攻击会造成2次[color=#FFE699]岩元素范围伤害[/color]。
+若附近存在月笼，露米则会交替使用[color=#FFD780]捶捶乱打[/color]与[color=#FFD780]加力重锤[/color]，不断攻击附近的敌人；[color=#FFD780]加力重锤[/color]会造成视为月结晶反应伤害的[color=#FFE699]岩元素范围伤害[/color]。
+
+[color=#FFD780]究极厉害形态[/color]
+露米会使用究极厉害的[color=#FFD780]百万吨重锤[/color]，对附近的敌人造成一次格外强力的、视为月结晶反应伤害的[color=#FFE699]岩元素范围伤害[/color]，并切换至[color=#FFD780]普通厉害形态[/color]。
+
+[color=#FFD780]普通厉害形态[/color]
+虽然没有其他形态那么厉害，但也很厉害。
+露米会以更长的间隔使用[color=#FFD780]捶捶乱打[/color]，不断攻击附近的敌人，每次攻击会造成2次[color=#FFE699]岩元素范围伤害[/color]。', 1),
+  (81, 10000130, '[color=#ffd780][b]擢升[/b][/color]', '特殊的伤害提升效果，与其他的伤害提升效果分别独立计算。', 2);
 
 -- ----------------------------------------------------------------------------
 -- character_stories
@@ -28093,8 +28094,15 @@ INSERT INTO "character_stories" ("id", "character_id", "title_zh", "content", "s
 「我可以加入你们，不过我不保证听命于你们。」
 「没问题，我们『呼啸社』的理念本就如此，你想做什么是你的自由。」似乎是瞥见了阿罗夏腰间那个散发着纯粹微芒的「小玩意」，那人的脸上极罕见地浮现出了笑容：「况且，从我个人的立场上来看，我也更期待你自己的选择。」
 就这样，呼啸的狂风里，混入了一缕疾掠如雷的气息…', 8),
-  (970, 10000140, '？？？', '？？？', 1),
-  (971, 10000143, '？？？', '？？？', 1);
+  (972, 10000140, '？？？', '？？？', 1),
+  (990, 10000143, '？？？', '？？？', 1),
+  (991, 10000143, '？？？', '？？？', 2),
+  (992, 10000143, '？？？', '？？？', 3),
+  (993, 10000143, '？？？', '？？？', 4),
+  (994, 10000143, '？？？', '？？？', 5),
+  (995, 10000143, '？？？', '？？？', 6),
+  (996, 10000143, '？？？', '？？？', 7),
+  (997, 10000143, '？？？', '？？？', 8);
 
 -- ----------------------------------------------------------------------------
 -- character_talent_materials
@@ -29220,22 +29228,22 @@ INSERT INTO "character_talent_materials" ("id", "character_id", "material_id", "
   (1177, 10000007, 112147, NULL, '66', 6),
   (1178, 10000007, 112148, NULL, '93', 6),
   (1179, 10000007, 113075, NULL, '18', 6),
-  (1196, 10000140, 104368, NULL, '3', NULL),
-  (1197, 10000140, 112149, NULL, '6', NULL),
-  (1198, 10000140, 104369, NULL, '9', NULL),
-  (1199, 10000140, 112150, NULL, '9', NULL),
-  (1200, 10000140, 104370, NULL, '16', NULL),
-  (1201, 10000140, 112151, NULL, '12', NULL),
-  (1202, 10000140, 113082, NULL, '2', NULL),
-  (1203, 10000140, 104319, NULL, '1', NULL),
-  (1204, 10000143, 104371, NULL, '3', NULL),
-  (1205, 10000143, 112146, NULL, '6', NULL),
-  (1206, 10000143, 104372, NULL, '9', NULL),
-  (1207, 10000143, 112147, NULL, '9', NULL),
-  (1208, 10000143, 104373, NULL, '16', NULL),
-  (1209, 10000143, 112148, NULL, '12', NULL),
-  (1210, 10000143, 113089, NULL, '2', NULL),
-  (1211, 10000143, 104319, NULL, '1', NULL);
+  (1212, 10000140, 104368, NULL, '3', NULL),
+  (1213, 10000140, 112149, NULL, '6', NULL),
+  (1214, 10000140, 104369, NULL, '9', NULL),
+  (1215, 10000140, 112150, NULL, '9', NULL),
+  (1216, 10000140, 104370, NULL, '16', NULL),
+  (1217, 10000140, 112151, NULL, '12', NULL),
+  (1218, 10000140, 113082, NULL, '2', NULL),
+  (1219, 10000140, 104319, NULL, '1', NULL),
+  (1244, 10000143, 104371, NULL, '3', NULL),
+  (1245, 10000143, 112146, NULL, '6', NULL),
+  (1246, 10000143, 104372, NULL, '9', NULL),
+  (1247, 10000143, 112147, NULL, '9', NULL),
+  (1248, 10000143, 104373, NULL, '16', NULL),
+  (1249, 10000143, 112148, NULL, '12', NULL),
+  (1250, 10000143, 113089, NULL, '2', NULL),
+  (1251, 10000143, 104319, NULL, '1', NULL);
 
 -- ----------------------------------------------------------------------------
 -- character_talents
@@ -32996,43 +33004,6 @@ INSERT INTO "character_talents" ("id", "character_id", "type", "name_zh", "descr
 
 [color=#ffd780][b]魔导·秘仪[/b][/color]
 [color=#e2e8f0]特殊元素战技[/color][color=inherit][color=#ffd780][b][note="[effect:镂骨彻心]"]镂骨彻心[/note][/b][/color][/color][color=#e2e8f0]命中敌人或施放元素爆发[/color][color=#ffd780][b]裁罚遂成[/b][/color][color=#e2e8f0]时，若[/color][color=inherit][color=#ffd780][b][note="[effect:争胜]"]争胜[/note][/b][/color][/color][color=#e2e8f0]至少为上限的50%，则洛恩的普通攻击与重击造成的伤害提升40%，持续6秒。[/color]', 'UI_Talent_S_Lohen_07.webp', 7, NULL, NULL),
-  (760, 10000130, 'normal_attack', '捕获方案', '[color=#FFD780]普通攻击[/color]
-进行至多三段的连续弓箭射击。
-
-[color=#FFD780]重击[/color]
-进行伤害更高、更为精准的[color=#FFD780]瞄准射击[/color]。
-瞄准时，岩晶会在箭矢上持续积聚。聚满了晶岩的箭矢会造成[color=#FFE699]岩元素伤害[/color]。
-
-[color=#FFD780]下落攻击[/color]
-从空中射出箭雨，并迅速下坠冲击地面，在落地时造成范围伤害。', 'Skill_A_02.png', 1, '{"rows":[{"label":"一段伤害","values":["59.0%","63.8%","68.6%","75.5%","80.3%","85.8%","93.3%","100.8%","108.4%","116.6%","124.9%","133.1%","141.3%","149.6%","157.8%"]},{"label":"二段伤害","values":["51.2%","55.3%","59.5%","65.4%","69.6%","74.3%","80.9%","87.4%","94.0%","101.1%","108.3%","115.4%","122.5%","129.7%","136.8%"]},{"label":"三段伤害","values":["81.6%","88.3%","94.9%","104.4%","111.1%","118.7%","129.1%","139.5%","150.0%","161.4%","172.8%","184.1%","195.5%","206.9%","218.3%"]},{"label":"瞄准射击","values":["43.9%","47.4%","51.0%","56.1%","59.7%","63.7%","69.4%","75.0%","80.6%","86.7%","92.8%","98.9%","105.1%","111.2%","117.3%"]},{"label":"满蓄力瞄准射击","values":["124.0%","133.3%","142.6%","155.0%","164.3%","173.6%","186.0%","198.4%","210.8%","223.2%","235.6%","248.0%","263.5%","279.0%","294.5%"]},{"label":"下坠期间伤害","values":["56.8%","61.5%","66.1%","72.7%","77.3%","82.6%","89.9%","97.1%","104.4%","112.3%","120.3%","128.2%","136.1%","144.1%","152.0%"]},{"label":"低空/高空坠地冲击伤害","values":["113.6%/141.9%","122.9%/153.5%","132.1%/165.0%","145.3%/181.5%","154.6%/193.1%","165.2%/206.3%","179.7%/224.5%","194.2%/242.6%","208.8%/260.8%","224.6%/280.6%","240.5%/300.4%","256.3%/320.2%","272.2%/340.0%","288.0%/359.8%","303.9%/379.6%"]}]}', NULL),
-  (761, 10000130, 'elemental_skill', '对策·露米呀吼吼！', '[color=#e2e8f0]和露米一起冒险！依据不同的点按方式，露米将会以不同的形态出击。[/color]
-
-[color=#ffd780][b]点按[/b][/color]
-[color=#e2e8f0]露米将会以[/color][color=#ffd780][b][note="[effect:露米·出击形态]"]超厉害形态[/note][/b][/color][color=#e2e8f0]出击，不断攻击附近的敌人，造成[/color][color=#ffe699][b]岩元素范围伤害[/b][/color][color=#e2e8f0]；若附近存在月笼，露米还会对附近的敌人造成视为月结晶反应伤害的[/color][color=#ffe699][b]岩元素范围伤害[/b][/color][color=#e2e8f0]。[/color]
-
-[color=#ffd780][b]连续点按[/b][/color]
-[color=#e2e8f0]该拿出超厉害的真本事啦！使用元素战技后，连续点按元素战技或普通攻击，莉奈娅将会向露米投喂亮晶晶的宝石，吃得饱饱的露米会以[/color][color=#ffd780][b][note="[effect:露米·出击形态]"]究极厉害形态[/note][/b][/color][color=#e2e8f0]出击，对附近的敌人造成一次格外强力的、视为月结晶反应伤害的[/color][color=#ffe699][b]岩元素范围伤害[/b][/color][color=#e2e8f0]，并切换至[/color][color=#ffd780][b][note="[effect:露米·出击形态]"]普通厉害形态[/note][/b][/color][color=#e2e8f0]。[/color]
-[color=#e2e8f0]此外，连续点按元素战技时，提高莉奈娅的抗打断能力。[/color]
-
-[color=#e2e8f0][i]「就交给你了，露米！」[/i][/color]', 'Skill_S_Linnea_01.webp', 2, '{"rows":[{"label":"露米捶捶乱打伤害","values":["96.0%防御力*2","103.2%防御力*2","110.4%防御力*2","120.0%防御力*2","127.2%防御力*2","134.4%防御力*2","144.0%防御力*2","153.6%防御力*2","163.2%防御力*2","172.8%防御力*2","182.4%防御力*2","192.0%防御力*2","204.0%防御力*2","216.0%防御力*2","228.0%防御力*2"]},{"label":"露米加力重锤伤害","values":["100.0%防御力","107.5%防御力","115.0%防御力","125.0%防御力","132.5%防御力","140.0%防御力","150.0%防御力","160.0%防御力","170.0%防御力","180.0%防御力","190.0%防御力","200.0%防御力","212.5%防御力","225.0%防御力","237.5%防御力"]},{"label":"露米百万吨重锤伤害","values":["400.0%防御力","430.0%防御力","460.0%防御力","500.0%防御力","530.0%防御力","560.0%防御力","600.0%防御力","640.0%防御力","680.0%防御力","720.0%防御力","760.0%防御力","800.0%防御力","850.0%防御力","900.0%防御力","950.0%防御力"]},{"label":"露米持续时间","values":["25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒"]},{"label":"冷却时间","values":["18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒"]}]}', NULL),
-  (762, 10000130, 'elemental_burst', '备忘·绝境生存指南', '[color=#e2e8f0]就算是大师级的冒险家，也需要适度的休息！莉奈娅呼唤露米以[/color][color=#ffd780][b][note="[effect:露米·出击形态]"]超厉害形态[/note][/b][/color][color=#e2e8f0]出击，为附近的队伍中所有角色恢复生命值，并在接下来的一段时间内，持续为附近的当前场上角色恢复生命值，回复量受益于莉奈娅的防御力。[/color]
-[color=#e2e8f0]若施放元素爆发时，露米已经出击，则改为重置露米的持续时间，并不会改变露米的出击形态。[/color]
-
-[color=#e2e8f0][i]「对于专业的冒险家来说，比起前所未有的发现，在绝境中全身而退才是最高法则！」[/i][/color]', 'Skill_E_Linnea_01.webp', 3, '{"rows":[{"label":"首次治疗量","values":["160.0%防御力+770","172.0%防御力+847","184.0%防御力+931","200.0%防御力+1021","212.0%防御力+1117","224.0%防御力+1220","240.0%防御力+1329","256.0%防御力+1445","272.0%防御力+1567","288.0%防御力+1695","304.0%防御力+1830","320.0%防御力+1971","340.0%防御力+2119","360.0%防御力+2273","380.0%防御力+2433"]},{"label":"持续治疗量","values":["32.0%防御力+154","34.4%防御力+169","36.8%防御力+186","40.0%防御力+204","42.4%防御力+223","44.8%防御力+244","48.0%防御力+266","51.2%防御力+289","54.4%防御力+313","57.6%防御力+339","60.8%防御力+366","64.0%防御力+394","68.0%防御力+424","72.0%防御力+455","76.0%防御力+487"]},{"label":"治疗持续时间","values":["12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒"]},{"label":"冷却时间","values":["15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒"]},{"label":"元素能量","values":["60","60","60","60","60","60","60","60","60","60","60","60","60","60","60"]}]}', NULL),
-  (763, 10000130, 'passive', '野外观察手记', '露米在场上时，露米附近敌人的[color=#FFE699]岩元素抗性[/color]会降低15%。
-
-[color=#FFD780]月兆·满辉[/color]：莉奈娅的元素战技[color=#FFD780]对策·露米呀吼吼！[/color]和元素爆发[color=#FFD780]备忘·绝境生存指南[/color]获得强化，呼唤露米上场后，露米附近敌人的[color=#FFE699]岩元素抗性[/color]还会进一步降低15%。', 'UI_Talent_S_Linnea_05.webp', 4, NULL, NULL),
-  (764, 10000130, 'passive', '万类博物图鉴', '依据队伍中自己的当前场上角色，莉奈娅会提升队伍中特定角色的元素精通，提升值基于莉奈娅防御力的5%。若队伍中自己的当前场上角色：
-·为月兆角色：提升该角色的元素精通；
-·不为月兆角色：提升莉奈娅自己的元素精通。', 'UI_Talent_S_Linnea_06.webp', 5, NULL, NULL),
-  (765, 10000130, 'passive', '月兆祝赐·栖地考察', '队伍中的角色触发水元素结晶反应时，将转为触发月结晶反应，且基于莉奈娅的防御力，提升队伍中角色造成的月结晶反应的基础伤害：每100点防御力都将提升0.7%月结晶反应的基础伤害，至多通过这种方式提升14%伤害。
-
-此外，莉奈娅在队伍中时，队伍的[color=#FFD780]月兆[/color]将会上升一级。', 'UI_Talent_S_Linnea_07.webp', 6, NULL, NULL),
-  (766, 10000130, 'passive', '大师级的冒险者', '不处于战斗状态下时，莉奈娅进行[color=#FFD780]瞄准射击[/color]所需的蓄力时间大幅减少，并会转为射出特制的[color=#FFD780]超便利快捷矢[/color]，依据命中的目标，产生不同的效果。若命中的目标为：
-·特定动物：[color=#FFD780]超便利快捷矢[/color]会转化为特殊的「网」，可以拘出小动物的神形，并以其为媒介，再次化出小动物的形体；每周可使用的「网」数量有限。
-·锻造用矿石的矿脉：莉奈娅会派出露米，快速破坏被[color=#FFD780]超便利快捷矢[/color]标记的矿体，并收集掉落的矿石。若露米不在场上，则会短暂呼唤出露米，帮助莉奈娅获取矿石。
-
-[color=#FFD780]超便利快捷矢[/color]对敌人造成的伤害降低为原本的20%。此外，短时间内发射一定数量的[color=#FFD780]超便利快捷矢[/color]后，莉奈娅需要进行短暂的休息，才能继续发射。', 'UI_Talent_S_Linnea_08.webp', 7, NULL, NULL),
   (767, 10000131, 'normal_attack', '托喻', '[color=#FFD780]普通攻击[/color]
 以原初的言语降下敕命，进行至多三段的攻击，造成[color=#FF9999]火元素伤害[/color]。
 
@@ -33761,7 +33732,7 @@ INSERT INTO "character_talents" ("id", "character_id", "type", "name_zh", "descr
 
 下落攻击
 从空中下坠冲击地面，攻击下落路径上的敌人，并在落地时造成范围伤害。', 'Skill_A_01.png', 1, '{"rows":[{"label":"一段伤害","values":["44.50%","48.10%","51.70%","56.90%","60.50%","64.60%","70.30%","76.00%","81.70%","87.90%","94.10%","100.30%","106.50%","112.70%","118.90%"]},{"label":"二段伤害","values":["43.40%","47.00%","50.50%","55.50%","59.10%","63.10%","68.70%","74.20%","79.80%","85.90%","91.90%","98.00%","104.00%","110.10%","116.10%"]},{"label":"三段伤害","values":["53.00%","57.30%","61.60%","67.80%","72.10%","77.00%","83.80%","90.60%","97.30%","104.70%","112.10%","119.50%","126.90%","134.30%","141.70%"]},{"label":"四段伤害","values":["58.30%","63.10%","67.80%","74.60%","79.30%","84.80%","92.20%","99.70%","107.10%","115.30%","123.40%","131.50%","139.70%","147.80%","155.90%"]},{"label":"五段伤害","values":["70.80%","76.50%","82.30%","90.50%","96.30%","102.90%","111.90%","121.00%","130.00%","139.90%","149.80%","159.70%","169.50%","179.40%","189.30%"]},{"label":"重击伤害","values":["55.9%+72.2%","60.5%+78.1%","65.0%+84.0%","71.5%+92.4%","76.0%+98.3%","81.2%+105.0%","88.4%+114.2%","95.5%+123.5%","102.7%+132.7%","110.5%+142.8%","118.3%+152.9%","126.1%+163.0%","133.9%+173.0%","141.7%+183.1%","149.5%+193.2%"]},{"label":"重击体力消耗","values":["20","20","20","20","20","20","20","20","20","20","20","20","20","20","20"]},{"label":"下坠期间伤害","values":["63.90%","69.10%","74.30%","81.80%","87.00%","92.90%","101.10%","109.30%","117.50%","126.40%","135.30%","144.20%","153.10%","162.10%","171.00%"]},{"label":"低空","values":["127.80%","138.20%","148.60%","163.50%","173.90%","185.80%","202.20%","218.50%","234.90%","252.70%","270.50%","288.40%","306.20%","324.10%","341.90%"]},{"label":"高空坠地冲击伤害","values":["159.70%","172.70%","185.70%","204.20%","217.20%","232.10%","252.50%","272.90%","293.40%","315.60%","337.90%","360.20%","382.50%","404.80%","427.00%"]}]}', 6),
-  (927, 10000140, 'normal_attack', '水色咏叹', '[color=#FFD780]普通攻击[/color]
+  (941, 10000140, 'normal_attack', '水色咏叹', '[color=#FFD780]普通攻击[/color]
 吟咏古老的水妖之歌，进行至多四段的攻击，造成[color=#80C0FF]水元素伤害[/color]。
 
 [color=#FFD780]重击[/color]
@@ -33769,24 +33740,19 @@ INSERT INTO "character_talents" ("id", "character_id", "type", "name_zh", "descr
 
 [color=#FFD780]下落攻击[/color]
 从空中下坠冲击地面，攻击下落路径上的敌人，并在落地时造成[color=#80C0FF]水元素范围伤害[/color]。', 'Skill_A_Catalyst_MD.png', 1, '{"rows":[{"label":"一段伤害","values":["43.4%","46.6%","49.9%","54.2%","57.5%","60.7%","65.1%","69.4%","73.8%","78.1%","82.4%","86.8%","92.2%","97.6%","103.0%"]},{"label":"二段伤害","values":["40.2%","43.2%","46.3%","50.3%","53.3%","56.3%","60.3%","64.4%","68.4%","72.4%","76.4%","80.5%","85.5%","90.5%","95.6%"]},{"label":"三段伤害","values":["49.3%","53.0%","56.7%","61.6%","65.3%","69.0%","74.0%","78.9%","83.8%","88.7%","93.7%","98.6%","104.8%","110.9%","117.1%"]},{"label":"四段伤害","values":["65.6%","70.5%","75.4%","82.0%","86.9%","91.8%","98.3%","104.9%","111.5%","118.0%","124.6%","131.1%","139.3%","147.5%","155.7%"]},{"label":"重击伤害","values":["123.8%","133.0%","142.3%","154.7%","164.0%","173.3%","185.6%","198.0%","210.4%","222.8%","235.1%","247.5%","263.0%","278.5%","293.9%"]},{"label":"重击体力消耗","values":["50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点","50.0点"]},{"label":"下坠期间伤害","values":["56.8%","61.5%","66.1%","72.7%","77.3%","82.6%","89.9%","97.1%","104.4%","112.3%","120.3%","128.2%","136.1%","144.1%","152.0%"]},{"label":"低空/高空坠地冲击伤害","values":["113.6%/141.9%","122.9%/153.5%","132.1%/165.0%","145.3%/181.5%","154.6%/193.1%","165.2%/206.3%","179.7%/224.5%","194.2%/242.6%","208.8%/260.8%","224.6%/280.6%","240.5%/300.4%","256.3%/320.2%","272.2%/340.0%","288.0%/359.8%","303.9%/379.6%"]}]}', NULL),
-  (928, 10000140, 'elemental_skill', '宣叙·晨声纷流', '显现出水妖原本的姿态，造成[color=#80C0FF]水元素范围伤害[/color]，使受到伤害的敌人[color=#80C0FF]水元素抗性[/color]与[color=#99FFFF]冰元素抗性[/color]降低，并获得[color=#FFD780]遥久之歌[/color]效果：持续期间，沃雅妮莎将召唤出古老的[color=#FFD780]唤春角笛[/color]，间歇性快速移动至一名敌人附近，对其进行攻击，造成[color=#80C0FF]水元素伤害[/color]。
-受到上述两种伤害的敌人的[color=#80C0FF]水元素抗性[/color]与[color=#99FFFF]冰元素抗性[/color]降低。此外，[color=#FFD780]遥久之歌[/color]效果持续期间，还会提升队伍中自己的当前场上角色的抗打断能力，并间歇性为其恢复生命值，恢复量受益于沃雅妮莎的生命值上限。
-
-[i]「我不叹惋，不呼唤，也不哀哭。一切都会过去，如薄雾悄然拂过白色的苹果树。」
-「尽管如此，尽管如此——陆地上的生灵啊，我愿你们永远地美好幸福。」[/i]', 'Skill_S_Vodyanitsa_01.png', 2, '{"rows":[{"label":"技能伤害","values":["3.27%生命值上限","3.52%生命值上限","3.76%生命值上限","4.09%生命值上限","4.34%生命值上限","4.58%生命值上限","4.91%生命值上限","5.24%生命值上限","5.56%生命值上限","5.89%生命值上限","6.22%生命值上限","6.54%生命值上限","6.95%生命值上限","7.36%生命值上限","7.77%生命值上限"]},{"label":"持续时间","values":["16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒"]},{"label":"唤春角笛攻击间隔","values":["3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒"]},{"label":"唤春角笛伤害","values":["3.27%生命值上限","3.52%生命值上限","3.76%生命值上限","4.09%生命值上限","4.34%生命值上限","4.58%生命值上限","4.91%生命值上限","5.24%生命值上限","5.56%生命值上限","5.89%生命值上限","6.22%生命值上限","6.54%生命值上限","6.95%生命值上限","7.36%生命值上限","7.77%生命值上限"]},{"label":"遥久之歌治疗量","values":["270+2.80%生命值上限","297+3.01%生命值上限","326+3.22%生命值上限","357+3.50%生命值上限","391+3.71%生命值上限","427+3.92%生命值上限","465+4.20%生命值上限","506+4.48%生命值上限","548+4.76%生命值上限","593+5.04%生命值上限","640+5.32%生命值上限","690+5.60%生命值上限","742+5.95%生命值上限","795+6.30%生命值上限","852+6.65%生命值上限"]},{"label":"遥久之歌治疗间隔","values":["1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒"]},{"label":"水元素/冰元素抗性降低","values":["14.3%","15.6%","16.9%","18.2%","19.5%","20.8%","22.1%","23.4%","24.7%","26.0%","27.6%","29.1%","30.7%","32.2%","33.8%"]},{"label":"抗性降低持续时间","values":["6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒"]},{"label":"技能冷却时间","values":["16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒"]}]}', NULL),
-  (929, 10000140, 'elemental_burst', '终奏·伴尔沉沦', '领唱引诱沉沦的水妖之歌，造成[color=#80C0FF]水元素范围伤害[/color]。
-处于[color=#FFD780]遥久之歌[/color]状态下时，造成的伤害还会进一步提升。
-
-[i]「传说中，水妖的歌声能引诱水手沉沦。但要是所有人都跳进水里了，这个消息又是谁带回来的呢？」
-「可能是矮灵吧，因为矮灵水手就算听到歌声，也翻不过船边的围栏…开玩笑的，不要瞪我啦，奥黛塔！」[/i]', 'Skill_E_Vodyanitsa_01.png', 3, '{"rows":[{"label":"技能伤害","values":["45.7%生命值上限","49.1%生命值上限","52.5%生命值上限","57.1%生命值上限","60.5%生命值上限","63.9%生命值上限","68.5%生命值上限","73.1%生命值上限","77.7%生命值上限","82.2%生命值上限","86.8%生命值上限","91.4%生命值上限","97.1%生命值上限","102.8%生命值上限","108.5%生命值上限"]},{"label":"遥久之歌伤害加成","values":["48.0%","51.6%","55.2%","60.0%","63.6%","67.2%","72.0%","76.8%","81.6%","86.4%","91.2%","96.0%","102.0%","108.0%","114.0%"]},{"label":"冷却时间","values":["15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒"]},{"label":"元素能量","values":["60","60","60","60","60","60","60","60","60","60","60","60","60","60","60"]}]}', NULL),
-  (930, 10000140, 'passive', '最后的塑诗者', '施放元素战技[color=#FFD780]宣叙·晨声纷流[/color]时，将使当前场上的星辉风旋转化为「流荡风旋」，且附近所有角色在[color=#FFD780]遥久之歌[/color]效果持续期间触发星扩散反应时，将取代星辉风旋创造流荡风旋。
-创造或引爆流荡风旋时，还会使附近敌人的[color=#80FFD7]风元素抗性[/color]降低30%，持续6秒。', 'UI_Talent_S_Vodyanitsa_06.png', 4, NULL, NULL),
-  (931, 10000140, 'passive', '十二弦的泪歌', '施放元素战技[color=#ffd780]宣叙·晨声纷流[/color]时，沃雅妮莎还会获得17层[note="[effect:领唱]"][color=#ffd780]「领唱」[/color][/note]与10层[note="[effect:重唱]"][color=#ffd780]「重唱」[/color][/note]。
+  (942, 10000140, 'elemental_skill', '宣叙·晨声纷流', '显现出水妖原本的姿态，造成[color=#80C0FF]水元素范围伤害[/color]，并获得[color=#FFD780]遥久之歌[/color]效果：持续期间，沃雅妮莎将召唤出古老的[color=#FFD780]唤春角笛[/color]，间歇性快速移动至一名敌人附近，对其进行攻击，造成[color=#80C0FF]水元素伤害[/color]。
+受到上述两种伤害的敌人的[color=#80C0FF]水元素抗性[/color]与[color=#99FFFF]冰元素抗性[/color]降低。此外，[color=#FFD780]遥久之歌[/color]效果持续期间，还会提升队伍中自己的当前场上角色的抗打断能力，并间歇性为其恢复生命值，恢复量受益于沃雅妮莎的生命值上限。', 'Skill_S_Vodyanitsa_01.png', 2, '{"rows":[{"label":"技能伤害","values":["3.27%生命值上限","3.52%生命值上限","3.76%生命值上限","4.09%生命值上限","4.34%生命值上限","4.58%生命值上限","4.91%生命值上限","5.24%生命值上限","5.56%生命值上限","5.89%生命值上限","6.22%生命值上限","6.54%生命值上限","6.95%生命值上限","7.36%生命值上限","7.77%生命值上限"]},{"label":"持续时间","values":["16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒","16秒"]},{"label":"唤春角笛攻击间隔","values":["3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒","3.0秒"]},{"label":"唤春角笛伤害","values":["3.27%生命值上限","3.52%生命值上限","3.76%生命值上限","4.09%生命值上限","4.34%生命值上限","4.58%生命值上限","4.91%生命值上限","5.24%生命值上限","5.56%生命值上限","5.89%生命值上限","6.22%生命值上限","6.54%生命值上限","6.95%生命值上限","7.36%生命值上限","7.77%生命值上限"]},{"label":"遥久之歌治疗量","values":["270+2.80%生命值上限","297+3.01%生命值上限","326+3.22%生命值上限","357+3.50%生命值上限","391+3.71%生命值上限","427+3.92%生命值上限","465+4.20%生命值上限","506+4.48%生命值上限","548+4.76%生命值上限","593+5.04%生命值上限","640+5.32%生命值上限","690+5.60%生命值上限","742+5.95%生命值上限","795+6.30%生命值上限","852+6.65%生命值上限"]},{"label":"遥久之歌治疗间隔","values":["1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒","1.5秒"]},{"label":"水元素/冰元素抗性降低","values":["16.5%","18.0%","19.5%","21.0%","22.5%","24.0%","25.5%","27.0%","28.5%","30.0%","31.8%","33.6%","35.4%","37.2%","39.0%"]},{"label":"抗性降低持续时间","values":["6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒","6.0秒"]},{"label":"技能冷却时间","values":["16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒","16.0秒"]}]}', NULL),
+  (943, 10000140, 'elemental_burst', '终奏·伴尔沉沦', '领唱引诱沉沦的水妖之歌，造成[color=#80C0FF]水元素范围伤害[/color]。
+处于[color=#FFD780]遥久之歌[/color]状态下时，造成的伤害还会进一步提升。', 'Skill_E_Vodyanitsa_01.png', 3, '{"rows":[{"label":"技能伤害","values":["45.7%生命值上限","49.1%生命值上限","52.5%生命值上限","57.1%生命值上限","60.5%生命值上限","63.9%生命值上限","68.5%生命值上限","73.1%生命值上限","77.7%生命值上限","82.2%生命值上限","86.8%生命值上限","91.4%生命值上限","97.1%生命值上限","102.8%生命值上限","108.5%生命值上限"]},{"label":"遥久之歌伤害加成","values":["48.0%","51.6%","55.2%","60.0%","63.6%","67.2%","72.0%","76.8%","81.6%","86.4%","91.2%","96.0%","102.0%","108.0%","114.0%"]},{"label":"冷却时间","values":["15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒"]},{"label":"元素能量","values":["60","60","60","60","60","60","60","60","60","60","60","60","60","60","60"]}]}', NULL),
+  (944, 10000140, 'passive', '最后的塑诗者', '施放元素战技[color=#FFD780]宣叙·晨声纷流[/color]时，将使当前场上的星辉风旋转化为「流荡风旋」，且队伍中附近的角色在[color=#FFD780]遥久之歌[/color]效果持续期间触发星扩散反应时，将取代星辉风旋创造流荡风旋。
+创造或引爆流荡风旋时，还会使附近敌人的[color=#80FFD7]风元素抗性[/color]降低35%，持续6秒。
+此外，[color=#FFD780]遥久之歌[/color]持续期间，队伍中附近的角色进入[color=#FFD780]辉映·星扩散[/color]状态时，[color=#FFD780]辉映·星扩散[/color]的持续时间延长4秒。', 'UI_Talent_S_Vodyanitsa_06.png', 4, NULL, NULL),
+  (945, 10000140, 'passive', '十二弦的泪歌', '施放元素战技[color=#ffd780]宣叙·晨声纷流[/color]时，沃雅妮莎还会获得25层[note="[effect:领唱]"][color=#ffd780]「领唱」[/color][/note]与10层[note="[effect:重唱]"][color=#ffd780]「重唱」[/color][/note]。
 上述两种效果分别持续30秒，并会在施放元素战技时刷新层数。', 'UI_Talent_S_Vodyanitsa_05.png', 5, NULL, NULL),
-  (932, 10000140, 'passive', '余声绕冰湖', '不处于战斗状态下时，长按元素战技，沃雅妮莎将显现出水妖的本貌，以消耗体力为代价，进行至多10秒的游动；因为是水妖，所以当然也可以在水面上移动。松开技能、持续时间结束或体力耗尽时，沃雅妮莎将不再维持水妖的本貌。
+  (946, 10000140, 'passive', '余声绕冰湖', '不处于战斗状态下时，长按元素战技，沃雅妮莎将显现出水妖的本貌，以消耗体力为代价，进行至多10秒的游动；因为是水妖，所以当然也可以在水面上移动。再次施放元素战技、持续时间结束或体力耗尽时，沃雅妮莎将不再维持水妖的本貌。
 此外，沃雅妮莎的游泳速度提升，但消耗体力的速度也更快。', 'UI_Talent_S_Vodyanitsa_07.png', 6, NULL, NULL),
-  (933, 10000140, 'passive', '无琴的诱音', '身为科洛列夫茨基剧团首席女高音，沃雅妮莎在演奏乐器时，将改为亲自献唱。', 'UI_Talent_S_Vodyanitsa_08.png', 7, NULL, NULL),
-  (934, 10000143, 'normal_attack', '巡风剑舞', '[color=#FFD780]普通攻击[/color]
+  (947, 10000140, 'passive', '无琴的诱音', '身为科洛列夫茨基剧团首席女高音，沃雅妮莎在演奏乐器时，将改为亲自献唱。', 'UI_Talent_S_Vodyanitsa_08.png', 7, NULL, NULL),
+  (976, 10000143, 'normal_attack', '巡风剑舞', '[color=#FFD780]普通攻击[/color]
 进行至多六段的连续攻击。
 
 [color=#FFD780]重击[/color]
@@ -33794,33 +33760,66 @@ INSERT INTO "character_talents" ("id", "character_id", "type", "name_zh", "descr
 
 [color=#FFD780]下落攻击[/color]
 从空中下坠冲击地面，攻击下落路径上的敌人，并在落地时造成范围伤害。', 'Skill_A_01.png', 1, '{"rows":[{"label":"一段伤害","values":["40.4%","43.7%","47.0%","51.7%","55.0%","58.8%","63.9%","69.1%","74.3%","79.9%","85.5%","91.2%","96.8%","102.5%","108.1%"]},{"label":"二段伤害","values":["48.7%","52.6%","56.6%","62.3%","66.2%","70.8%","77.0%","83.2%","89.4%","96.2%","103.0%","109.8%","116.6%","123.4%","130.2%"]},{"label":"三段伤害","values":["28.1%*2","30.4%*2","32.6%*2","35.9%*2","38.2%*2","40.8%*2","44.4%*2","48.0%*2","51.6%*2","55.5%*2","59.4%*2","63.3%*2","67.3%*2","71.2%*2","75.1%*2"]},{"label":"四段伤害","values":["59.2%","64.0%","68.8%","75.7%","80.5%","86.0%","93.6%","101.1%","108.7%","117.0%","125.2%","133.5%","141.7%","150.0%","158.2%"]},{"label":"五段伤害","values":["62.4%","67.5%","72.6%","79.9%","84.9%","90.8%","98.7%","106.7%","114.7%","123.4%","132.1%","140.8%","149.6%","158.3%","167.0%"]},{"label":"六段伤害","values":["72.2%","78.1%","84.0%","92.4%","98.3%","105.0%","114.2%","123.5%","132.7%","142.8%","152.9%","163.0%","173.0%","183.1%","193.2%"]},{"label":"重击伤害","values":["133.0%","143.9%","154.7%","170.2%","181.0%","193.4%","210.4%","227.4%","244.4%","263.0%","281.6%","300.1%","318.7%","337.2%","355.8%"]},{"label":"重击体力消耗","values":["20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点","20.0点"]},{"label":"下坠期间伤害","values":["63.9%","69.1%","74.3%","81.8%","87.0%","92.9%","101.1%","109.3%","117.5%","126.4%","135.3%","144.2%","153.1%","162.1%","171.0%"]},{"label":"低空/高空坠地冲击伤害","values":["127.8%/159.7%","138.2%/172.7%","148.6%/185.7%","163.5%/204.2%","173.9%/217.2%","185.8%/232.1%","202.2%/252.5%","218.5%/272.9%","234.9%/293.4%","252.7%/315.6%","270.5%/337.9%","288.4%/360.2%","306.2%/382.5%","324.1%/404.8%","341.9%/427.0%"]}]}', NULL),
-  (935, 10000143, 'elemental_skill', '操典·制胜有道', '唤起风仙一族传承的灵剑，造成[color=#80ffd7]风元素范围伤害[/color]，切换至[color=#ffd780][note="[effect:巡风列装]"]巡风列装[/note][/color]模式，并获得两层[color=#ffd780][note="[effect:剑气]"]「剑气」[/note][/color]。
+  (977, 10000143, 'elemental_skill', '操典·制胜有道', '唤起风仙一族传承的灵剑，造成[color=#80FFD7]风元素范围伤害[/color]，切换至[color=#FFD780][note="[effect:巡风列装]"]巡风列装[/note][/color]模式，并获得两层[color=#FFD780][note="[effect:剑气]"]「剑气」[/note][/color]。
 
-[color=#ffd780]巡风列装[/color]
-薇斯纳进行普通攻击、重击与下落攻击时，将转为造成无法被附魔覆盖的[color=#80ffd7]风元素伤害[/color]，并唤出风翎协同攻击敌人，造成额外的[color=#80ffd7]风元素伤害[/color]；每次唤出风翎时，都会为薇斯纳恢复一定的[color=#ffd780]剑气[/color]。
-薇斯纳可以消耗[color=#ffd780]剑气[/color]，施放特殊的元素战技[color=#ffd780][note="[effect:翔风剑]"]翔风剑[/note][/color]，对敌人造成[color=#80ffd7]风元素伤害[/color]。
-每次施放特殊元素战技[color=#ffd780]翔风剑[/color]后，本次[color=#ffd780]巡风列装[/color]模式持续期间，其境界都会提升，造成更高的[color=#80ffd7]风元素伤害[/color]；[color=#ffd780]翔风剑[/color]的初始境界为一阶，至多提升至三阶；施放境界提升后的[color=#ffd780]翔风剑[/color]时，还会唤出[color=#ffd780][note="[effect:灵剑]"]灵剑[/note][/color]，对敌人造成[color=#80ffd7]风元素伤害[/color]。
-持续时间结束时，或施放三次最高境界的[color=#ffd780]翔风剑[/color]后，薇斯纳将退出该模式，并清除所有[color=#ffd780]剑气[/color]。
+[color=#FFD780]巡风列装[/color]
+薇斯纳进行普通攻击、重击与下落攻击时，将转为造成无法被附魔覆盖的[color=#80FFD7]风元素伤害[/color]，并唤出风翎协同攻击敌人，造成额外的[color=#80FFD7]风元素伤害[/color]；每次唤出风翎时，都会为薇斯纳恢复一定的[color=#FFD780]剑气[/color]。
+薇斯纳可以消耗[color=#FFD780]剑气[/color]，施放特殊的元素战技[color=#FFD780][note="[effect:翔风剑]"]翔风剑[/note][/color]，对敌人造成[color=#80FFD7]风元素伤害[/color]。
+每次施放特殊元素战技[color=#FFD780]翔风剑[/color]后，本次[color=#FFD780]巡风列装[/color]模式持续期间，其境界都会提升，造成更高的[color=#80FFD7]风元素伤害[/color]；[color=#FFD780]翔风剑[/color]的初始境界为一阶，至多提升至三阶；施放境界提升后的[color=#FFD780]翔风剑[/color]时，还会唤出[color=#FFD780][note="[effect:灵剑]"]灵剑[/note][/color]，对敌人造成[color=#80FFD7]风元素伤害[/color]。
+持续时间结束时，或施放三次最高境界的[color=#FFD780]翔风剑[/color]后，薇斯纳将退出该模式，并清除所有[color=#FFD780]剑气[/color]。
 此外，在该模式下，薇斯纳的抗打断能力将会提升。
-[color=#ffd780]辉映·星扩散[/color]：[color=#ffd780]灵剑[/color]转为造成视为星扩散反应伤害的[color=#80ffd7]风元素伤害[/color]。
-
-[i]「让一让，让一让——接下来的战场就由我们冬契军接管了。」[/i]', 'Skill_S_Vesna_01.png', 2, '{"rows":[{"label":"技能伤害","values":["40.0%","43.0%","46.0%","50.0%","53.0%","56.0%","60.0%","64.0%","68.0%","72.0%","76.0%","80.0%","85.0%","90.0%","95.0%"]},{"label":"翔风剑一阶伤害","values":["40.0%","43.0%","46.0%","50.0%","53.0%","56.0%","60.0%","64.0%","68.0%","72.0%","76.0%","80.0%","85.0%","90.0%","95.0%"]},{"label":"翔风剑二阶伤害","values":["60.0%","64.5%","69.0%","75.0%","79.5%","84.0%","90.0%","96.0%","102.0%","108.0%","114.0%","120.0%","127.5%","135.0%","142.5%"]},{"label":"翔风剑二阶灵剑伤害","values":["100.0%","107.5%","115.0%","125.0%","132.5%","140.0%","150.0%","160.0%","170.0%","180.0%","190.0%","200.0%","212.5%","225.0%","237.5%"]},{"label":"翔风剑三阶灵剑伤害","values":["40.0%*4","43.0%*4","46.0%*4","50.0%*4","53.0%*4","56.0%*4","60.0%*4","64.0%*4","68.0%*4","72.0%*4","76.0%*4","80.0%*4","85.0%*4","90.0%*4","95.0%*4"]},{"label":"翔风剑三阶灵剑最终段伤害","values":["140.0%","150.5%","161.0%","175.0%","185.5%","196.0%","210.0%","224.0%","238.0%","252.0%","266.0%","280.0%","297.5%","315.0%","332.5%"]},{"label":"翔风剑二阶灵剑星扩散伤害","values":["100.0%","107.5%","115.0%","125.0%","132.5%","140.0%","150.0%","160.0%","170.0%","180.0%","190.0%","200.0%","212.5%","225.0%","237.5%"]},{"label":"翔风剑三阶灵剑星扩散伤害","values":["40.0%*4","43.0%*4","46.0%*4","50.0%*4","53.0%*4","56.0%*4","60.0%*4","64.0%*4","68.0%*4","72.0%*4","76.0%*4","80.0%*4","85.0%*4","90.0%*4","95.0%*4"]},{"label":"翔风剑三阶灵剑最终段星扩散伤害","values":["140.0%","150.5%","161.0%","175.0%","185.5%","196.0%","210.0%","224.0%","238.0%","252.0%","266.0%","280.0%","297.5%","315.0%","332.5%"]},{"label":"风翎伤害","values":["10.4%","11.2%","12.0%","13.0%","13.8%","14.6%","15.6%","16.6%","17.7%","18.7%","19.8%","20.8%","22.1%","23.4%","24.7%"]},{"label":"巡风列装持续时间","values":["15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒"]},{"label":"冷却时间","values":["18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒"]}]}', NULL),
-  (936, 10000143, 'elemental_burst', '致礼·献予女皇陛下', '召唤众多[color=#ffd780][note="[effect:灵剑]"]灵剑[/note][/color]，造成[color=#80ffd7]风元素范围伤害[/color]，并获得一层[color=#ffd780][note="[effect:剑气]"]「剑气」[/note][/color]。
-
-[i]「第一，永远握紧手中的利剑；第二，永远保持整肃的仪容；以及最重要的，永远效忠于女皇陛下！」[/i]', 'Skill_E_Vesna_01.png', 3, '{"rows":[{"label":"灵剑伤害","values":["263.2%","282.9%","302.7%","329.0%","348.7%","368.5%","394.8%","421.1%","447.4%","473.8%","500.1%","526.4%","559.3%","592.2%","625.1%"]},{"label":"灵剑星扩散伤害","values":["263.2%","282.9%","302.7%","329.0%","348.7%","368.5%","394.8%","421.1%","447.4%","473.8%","500.1%","526.4%","559.3%","592.2%","625.1%"]},{"label":"冷却时间","values":["15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒"]},{"label":"元素能量","values":["60","60","60","60","60","60","60","60","60","60","60","60","60","60","60"]}]}', NULL),
-  (937, 10000143, 'passive', '仪典·春之行列', '薇斯纳施放特殊元素战技[color=#ffd780][note="[effect:翔风剑]"]翔风剑[/note][/color]或元素爆发[color=#ffd780]致礼·献予女皇陛下[/color]后，还会获得一层[color=#ffd780]「整肃」[/color]，持续20秒，至多叠加6层，每层独立计算持续时间。
-拥有[color=#ffd780]整肃[/color]时，薇斯纳召唤的[color=#ffd780][note="[effect:灵剑]"]灵剑[/note][/color]将会造成原本100%+整肃层数*10%的伤害；施放元素战技[color=#ffd780]操典·制胜有道[/color]或退场时，清除薇斯纳拥有的[color=#ffd780]整肃[/color]。', 'UI_Talent_S_Vesna_05.png', 4, NULL, NULL),
-  (938, 10000143, 'passive', '理典·冬之凯风', '[color=#FFD780]辉映·星扩散[/color]：依据队伍中角色的元素类型，薇斯纳将获得对应效果。当前队伍中：
+[color=#FFD780]辉映·星扩散[/color]：[color=#FFD780]灵剑[/color]转为造成视为星扩散反应伤害的[color=#80FFD7]风元素伤害[/color]。', 'Skill_S_Vesna_01.png', 2, '{"rows":[{"label":"技能伤害","values":["40.0%","43.0%","46.0%","50.0%","53.0%","56.0%","60.0%","64.0%","68.0%","72.0%","76.0%","80.0%","85.0%","90.0%","95.0%"]},{"label":"翔风剑一阶伤害","values":["40.0%","43.0%","46.0%","50.0%","53.0%","56.0%","60.0%","64.0%","68.0%","72.0%","76.0%","80.0%","85.0%","90.0%","95.0%"]},{"label":"翔风剑二阶伤害","values":["60.0%","64.5%","69.0%","75.0%","79.5%","84.0%","90.0%","96.0%","102.0%","108.0%","114.0%","120.0%","127.5%","135.0%","142.5%"]},{"label":"翔风剑二阶灵剑伤害","values":["112.0%","120.4%","128.8%","140.0%","148.4%","156.8%","168.0%","179.2%","190.4%","201.6%","212.8%","224.0%","238.0%","252.0%","266.0%"]},{"label":"翔风剑三阶灵剑伤害","values":["44.8%*4","48.2%*4","51.5%*4","56.0%*4","59.4%*4","62.7%*4","67.2%*4","71.7%*4","76.2%*4","80.6%*4","85.1%*4","89.6%*4","95.2%*4","100.8%*4","106.4%*4"]},{"label":"翔风剑三阶灵剑最终段伤害","values":["156.8%","168.6%","180.3%","196.0%","207.8%","219.5%","235.2%","250.9%","266.6%","282.2%","297.9%","313.6%","333.2%","352.8%","372.4%"]},{"label":"翔风剑二阶灵剑星扩散伤害","values":["112.0%","120.4%","128.8%","140.0%","148.4%","156.8%","168.0%","179.2%","190.4%","201.6%","212.8%","224.0%","238.0%","252.0%","266.0%"]},{"label":"翔风剑三阶灵剑星扩散伤害","values":["44.8%*4","48.2%*4","51.5%*4","56.0%*4","59.4%*4","62.7%*4","67.2%*4","71.7%*4","76.2%*4","80.6%*4","85.1%*4","89.6%*4","95.2%*4","100.8%*4","106.4%*4"]},{"label":"翔风剑三阶灵剑最终段星扩散伤害","values":["156.8%","168.6%","180.3%","196.0%","207.8%","219.5%","235.2%","250.9%","266.6%","282.2%","297.9%","313.6%","333.2%","352.8%","372.4%"]},{"label":"风翎伤害","values":["10.4%","11.2%","12.0%","13.0%","13.8%","14.6%","15.6%","16.6%","17.7%","18.7%","19.8%","20.8%","22.1%","23.4%","24.7%"]},{"label":"巡风列装持续时间","values":["15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒"]},{"label":"冷却时间","values":["18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒"]}]}', NULL),
+  (978, 10000143, 'elemental_burst', '致礼·献予女皇陛下', '召唤众多[color=#FFD780][note="[effect:灵剑]"]灵剑[/note][/color]，造成[color=#80FFD7]风元素范围伤害[/color]，并获得一层[color=#FFD780][note="[effect:剑气]"]「剑气」[/note][/color]。', 'Skill_E_Vesna_01.png', 3, '{"rows":[{"label":"灵剑伤害","values":["263.2%","282.9%","302.7%","329.0%","348.7%","368.5%","394.8%","421.1%","447.4%","473.8%","500.1%","526.4%","559.3%","592.2%","625.1%"]},{"label":"灵剑星扩散伤害","values":["263.2%","282.9%","302.7%","329.0%","348.7%","368.5%","394.8%","421.1%","447.4%","473.8%","500.1%","526.4%","559.3%","592.2%","625.1%"]},{"label":"冷却时间","values":["15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒"]},{"label":"元素能量","values":["60","60","60","60","60","60","60","60","60","60","60","60","60","60","60"]}]}', NULL),
+  (979, 10000143, 'passive', '仪典·春之行列', '薇斯纳施放特殊元素战技[color=#FFD780][note="[effect:翔风剑]"]翔风剑[/note][/color]或元素爆发[color=#FFD780]致礼·献予女皇陛下[/color]后，还会获得一层[color=#FFD780]「整肃」[/color]，持续20秒，至多叠加6层，每层独立计算持续时间。
+拥有[color=#FFD780]整肃[/color]时，薇斯纳召唤的[color=#FFD780][note="[effect:灵剑]"]灵剑[/note][/color]将会造成原本100%+整肃层数*10%的伤害；施放元素战技[color=#FFD780]操典·制胜有道[/color]或退场时，清除薇斯纳拥有的[color=#FFD780]整肃[/color]。', 'UI_Talent_S_Vesna_05.png', 4, NULL, NULL),
+  (980, 10000143, 'passive', '理典·冬之凯风', '[color=#FFD780]辉映·星扩散[/color]：依据队伍中角色的元素类型，薇斯纳将获得对应效果。当前队伍中：
 ·每有一位元素类型为[color=#99FFFF]冰元素[/color]或[color=#80FFD7]风元素[/color]的角色：薇斯纳的攻击力提升6%；
 ·每有一位不为上述元素类型的角色：薇斯纳的元素精通提升25点。', 'UI_Talent_S_Vesna_06.png', 5, NULL, NULL),
-  (939, 10000143, 'passive', '星耀祝礼·散华序饰', '队伍中的角色触发冰元素扩散反应时，将转为触发星扩散反应，且基于薇斯纳的攻击力，提升队伍中角色造成的星扩散反应的基础伤害：每100点攻击力都将提升0.7%星扩散反应的基础伤害，至多通过这种方式提升14%伤害。
+  (981, 10000143, 'passive', '星耀祝礼·散华序饰', '队伍中的角色触发冰元素扩散反应时，将转为触发星扩散反应，且基于薇斯纳的攻击力，提升队伍中角色造成的星扩散反应的基础伤害：每100点攻击力都将提升0.7%星扩散反应的基础伤害，至多通过这种方式提升14%伤害。
 队伍中的角色在附近触发星扩散反应后的8秒内，薇斯纳将会进入[color=#FFD780]辉映·星扩散[/color]状态。', 'UI_Talent_S_Vesna_07.png', 6, NULL, NULL),
-  (940, 10000143, 'passive', '宝魄巡行', '不处于战斗状态下时，薇斯纳可以通过长按冲刺或跳跃进入[color=#FFD780]「巡游」[/color]状态。
+  (982, 10000143, 'passive', '宝魄巡行', '不处于战斗状态下时，薇斯纳可以通过长按冲刺或跳跃进入[color=#FFD780]「巡游」[/color]状态。
 
 [color=#FFD780]巡游[/color]
 持续消耗体力，维持悬浮状态；进行冲刺或点按跳跃抬升高度时，将额外消耗体力。包括长按跳跃进入[color=#FFD780]巡游[/color]状态在内，每次[color=#FFD780]巡游[/color]至多抬升三次高度。
 
-此外，在至冬地区（挪德卡莱除外），不处于战斗状态下时，队伍中的当前场上角色位于空中时，切换薇斯纳登场时，薇斯纳将直接进入[color=#FFD780]巡游[/color]状态，并恢复50点体力；该效果每10秒至多触发一次。', 'UI_Talent_S_Vesna_08.png', 7, NULL, NULL);
+此外，在至冬地区（挪德卡莱除外），不处于战斗状态下时，队伍中的当前场上角色位于空中时，切换薇斯纳登场时，薇斯纳将直接进入[color=#FFD780]巡游[/color]状态，并恢复50点体力；该效果每10秒至多触发一次，且该效果在秘境、征讨领域、深境螺旋中无效。', 'UI_Talent_S_Vesna_08.png', 7, NULL, NULL),
+  (983, 10000130, 'normal_attack', '捕获方案', '[color=#FFD780]普通攻击[/color]
+进行至多三段的连续弓箭射击。
+
+[color=#FFD780]重击[/color]
+进行伤害更高、更为精准的[color=#FFD780]瞄准射击[/color]。
+瞄准时，岩晶会在箭矢上持续积聚。聚满了晶岩的箭矢会造成[color=#FFE699]岩元素伤害[/color]。
+
+[color=#FFD780]下落攻击[/color]
+从空中射出箭雨，并迅速下坠冲击地面，在落地时造成范围伤害。', 'Skill_A_02.png', 1, '{"rows":[{"label":"一段伤害","values":["59.0%","63.8%","68.6%","75.5%","80.3%","85.8%","93.3%","100.8%","108.4%","116.6%","124.9%","133.1%","141.3%","149.6%","157.8%"]},{"label":"二段伤害","values":["51.2%","55.3%","59.5%","65.4%","69.6%","74.3%","80.9%","87.4%","94.0%","101.1%","108.3%","115.4%","122.5%","129.7%","136.8%"]},{"label":"三段伤害","values":["81.6%","88.3%","94.9%","104.4%","111.1%","118.7%","129.1%","139.5%","150.0%","161.4%","172.8%","184.1%","195.5%","206.9%","218.3%"]},{"label":"瞄准射击","values":["43.9%","47.4%","51.0%","56.1%","59.7%","63.7%","69.4%","75.0%","80.6%","86.7%","92.8%","98.9%","105.1%","111.2%","117.3%"]},{"label":"满蓄力瞄准射击","values":["124.0%","133.3%","142.6%","155.0%","164.3%","173.6%","186.0%","198.4%","210.8%","223.2%","235.6%","248.0%","263.5%","279.0%","294.5%"]},{"label":"下坠期间伤害","values":["56.8%","61.5%","66.1%","72.7%","77.3%","82.6%","89.9%","97.1%","104.4%","112.3%","120.3%","128.2%","136.1%","144.1%","152.0%"]},{"label":"低空/高空坠地冲击伤害","values":["113.6%/141.9%","122.9%/153.5%","132.1%/165.0%","145.3%/181.5%","154.6%/193.1%","165.2%/206.3%","179.7%/224.5%","194.2%/242.6%","208.8%/260.8%","224.6%/280.6%","240.5%/300.4%","256.3%/320.2%","272.2%/340.0%","288.0%/359.8%","303.9%/379.6%"]}]}', NULL),
+  (984, 10000130, 'elemental_skill', '对策·露米呀吼吼！', '和露米一起冒险！依据不同的点按方式，露米将会以不同的形态出击。
+
+[color=#FFD780]点按[/color]
+露米将会以[color=#FFD780][note="[effect:露米·出击形态]"]超厉害形态[/note][/color]出击，不断攻击附近的敌人，造成[color=#FFE699]岩元素范围伤害[/color]；若附近存在月笼，露米还会对附近的敌人造成视为月结晶反应伤害的[color=#FFE699]岩元素范围伤害[/color]。
+
+[color=#FFD780]连续点按[/color]
+该拿出超厉害的真本事啦！使用元素战技后，连续点按元素战技或普通攻击，莉奈娅将会向露米投喂亮晶晶的宝石，吃得饱饱的露米会以[color=#FFD780][note="[effect:露米·出击形态]"]究极厉害形态[/note][/color]出击，对附近的敌人造成一次格外强力的、视为月结晶反应伤害的[color=#FFE699]岩元素范围伤害[/color]，并切换至[color=#FFD780][note="[effect:露米·出击形态]"]普通厉害形态[/note][/color]。
+此外，连续点按元素战技时，提高莉奈娅的抗打断能力。
+
+[i]「就交给你了，露米！」[/i]', 'Skill_S_Linnea_01.png', 2, '{"rows":[{"label":"露米捶捶乱打伤害","values":["96.0%防御力*2","103.2%防御力*2","110.4%防御力*2","120.0%防御力*2","127.2%防御力*2","134.4%防御力*2","144.0%防御力*2","153.6%防御力*2","163.2%防御力*2","172.8%防御力*2","182.4%防御力*2","192.0%防御力*2","204.0%防御力*2","216.0%防御力*2","228.0%防御力*2"]},{"label":"露米加力重锤伤害","values":["100.0%防御力","107.5%防御力","115.0%防御力","125.0%防御力","132.5%防御力","140.0%防御力","150.0%防御力","160.0%防御力","170.0%防御力","180.0%防御力","190.0%防御力","200.0%防御力","212.5%防御力","225.0%防御力","237.5%防御力"]},{"label":"露米百万吨重锤伤害","values":["400.0%防御力","430.0%防御力","460.0%防御力","500.0%防御力","530.0%防御力","560.0%防御力","600.0%防御力","640.0%防御力","680.0%防御力","720.0%防御力","760.0%防御力","800.0%防御力","850.0%防御力","900.0%防御力","950.0%防御力"]},{"label":"露米持续时间","values":["25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒","25.0秒"]},{"label":"冷却时间","values":["18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒","18.0秒"]}]}', NULL),
+  (985, 10000130, 'elemental_burst', '备忘·绝境生存指南', '就算是大师级的冒险家，也需要适度的休息！莉奈娅呼唤露米以[color=#FFD780][note="[effect:露米·出击形态]"]超厉害形态[/note][/color]出击，为附近的队伍中所有角色恢复生命值，并在接下来的一段时间内，持续为附近的当前场上角色恢复生命值，回复量受益于莉奈娅的防御力。
+若施放元素爆发时，露米已经出击，则改为重置露米的持续时间，并不会改变露米的出击形态。
+
+[i]「对于专业的冒险家来说，比起前所未有的发现，在绝境中全身而退才是最高法则！」[/i]', 'Skill_E_Linnea_01.png', 3, '{"rows":[{"label":"首次治疗量","values":["160.0%防御力+770","172.0%防御力+847","184.0%防御力+931","200.0%防御力+1021","212.0%防御力+1117","224.0%防御力+1220","240.0%防御力+1329","256.0%防御力+1445","272.0%防御力+1567","288.0%防御力+1695","304.0%防御力+1830","320.0%防御力+1971","340.0%防御力+2119","360.0%防御力+2273","380.0%防御力+2433"]},{"label":"持续治疗量","values":["32.0%防御力+154","34.4%防御力+169","36.8%防御力+186","40.0%防御力+204","42.4%防御力+223","44.8%防御力+244","48.0%防御力+266","51.2%防御力+289","54.4%防御力+313","57.6%防御力+339","60.8%防御力+366","64.0%防御力+394","68.0%防御力+424","72.0%防御力+455","76.0%防御力+487"]},{"label":"治疗持续时间","values":["12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒","12.0秒"]},{"label":"冷却时间","values":["15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒","15.0秒"]},{"label":"元素能量","values":["60","60","60","60","60","60","60","60","60","60","60","60","60","60","60"]}]}', NULL),
+  (986, 10000130, 'passive', '野外观察手记', '露米在场上时，露米附近敌人的[color=#FFE699]岩元素抗性[/color]会降低15%。
+
+[color=#FFD780]月兆·满辉[/color]：莉奈娅的元素战技[color=#FFD780]对策·露米呀吼吼！[/color]和元素爆发[color=#FFD780]备忘·绝境生存指南[/color]获得强化，呼唤露米上场后，露米附近敌人的[color=#FFE699]岩元素抗性[/color]还会进一步降低15%。', 'UI_Talent_S_Linnea_05.png', 4, NULL, NULL),
+  (987, 10000130, 'passive', '万类博物图鉴', '依据队伍中自己的当前场上角色，莉奈娅会提升队伍中特定角色的元素精通，提升值基于莉奈娅防御力的5%。若队伍中自己的当前场上角色：
+·为月兆角色：提升该角色的元素精通；
+·不为月兆角色：提升莉奈娅自己的元素精通。', 'UI_Talent_S_Linnea_06.png', 5, NULL, NULL),
+  (988, 10000130, 'passive', '月兆祝赐·栖地考察', '队伍中的角色触发水元素结晶反应时，将转为触发月结晶反应，且基于莉奈娅的防御力，提升队伍中角色造成的月结晶反应的基础伤害：每100点防御力都将提升0.7%月结晶反应的基础伤害，至多通过这种方式提升14%伤害。
+
+此外，莉奈娅在队伍中时，队伍的[color=#FFD780]月兆[/color]将会上升一级。', 'UI_Talent_S_Linnea_07.png', 6, NULL, NULL),
+  (989, 10000130, 'passive', '大师级的冒险者', '不处于战斗状态下时，莉奈娅进行[color=#FFD780]瞄准射击[/color]所需的蓄力时间大幅减少，并会转为射出特制的[color=#FFD780]超便利快捷矢[/color]，依据命中的目标，产生不同的效果。若命中的目标为：
+·特定动物：[color=#FFD780]超便利快捷矢[/color]会转化为特殊的「网」，可以拘出小动物的神形，并以其为媒介，再次化出小动物的形体；每周可使用的「网」数量有限。
+·锻造用矿石的矿脉：莉奈娅会派出露米，快速破坏被[color=#FFD780]超便利快捷矢[/color]标记的矿体，并收集掉落的矿石。若露米不在场上，则会短暂呼唤出露米，帮助莉奈娅获取矿石。
+
+[color=#FFD780]超便利快捷矢[/color]对敌人造成的伤害降低为原本的20%。此外，短时间内发射一定数量的[color=#FFD780]超便利快捷矢[/color]后，莉奈娅需要进行短暂的休息，才能继续发射。', 'UI_Talent_S_Linnea_08.png', 7, NULL, NULL);
 
 -- ----------------------------------------------------------------------------
 -- imaginarium_theater_seasons
@@ -33831,7 +33830,7 @@ INSERT INTO "imaginarium_theater_seasons" ("id", "challenge_id", "recommended_el
   (12, 68, '[2,4,6]', '[10000060,10000121,10000120,10000105,10000114,10000074]', '[10000096,10000090,10000047,10000069]', '{"round3":["重拳出击鸭"],"round6":["历经百战的盗宝团精锐"],"round8":["历经百战的先驱秘源统辖阵列"],"round10":["恒常机关阵列"],"card1":["黯色空壳•旗令","黯色空壳•破阵","黯色空壳• 近卫"],"card2":["镀金旅团•魔岩役使","镀金旅团•沙中净水","镀金旅团•炽沙叙事人","镀金旅团•白日鸣留"]}', 0),
   (14, 79, '[2,5,4]', '[10000125,10000025,10000071,10000065,10000119,10000081]', '[10000150,10000133,10000043,10000131]', '{"round3":["翠翎恐蕈"],"round6":["铁甲熔火帝皇"],"round8":["历经百战的皮皮潘偶像"],"round10":["蕴光月幻蝶"],"card1":["黯色空壳•旗令","黯色空壳•破阵","黯色空壳•近卫"],"card2":["历经百战的深海龙蜥•原种"]}', 0),
   (17, 82, '[2,6,3]', '[10000087,10000014,10000107,10000015,10000075,10000132]', '[10000116,10000058,10000050,10000094]', '{"round3":["恒常机关阵列"],"round6":["历经百战的嵌合兽怪箭士"],"round8":["嵌合翼骏狮"],"round10":["秘源机兵·统御械"],"card1":["（坚持战斗）","嗜岩• 兽境猎犬"],"card2":["（坚持战斗）","遗迹重机","遗迹守卫","遗迹龙兽•空巡","遗迹龙兽•地巡"]}', 0),
-  (18, 83, '[2,4,7]', '[10000060,10000121,10000120,10000031,10000030,10000100]', '[10000035,10000039,10000122,10000124]', '{"round3":["翠翎恐蕈"],"round6":["深黯魇语之主"],"round8":["历经百战的丘丘萨满"],"round10":["蕴光月幻蝶"],"card1":["（坚持战斗）","圣骸牙兽","圣骸毒蝎","圣骸角鳄","圣骸赤鹫"],"card2":["历经百战的凛冽•大灵显化身"]}', 0);
+  (19, 83, '[2,4,7]', '[10000060,10000121,10000120,10000031,10000030,10000100]', '[10000035,10000039,10000122,10000124]', '{"round3":["翠翎恐蕈"],"round6":["深黯魇语之主"],"round8":["历经百战的丘丘萨满"],"round10":["蕴光月幻蝶"],"card1":["（坚持战斗）","圣骸牙兽","圣骸毒蝎","圣骸角鳄","圣骸赤鹫"],"card2":["历经百战的凛冽•大灵显化身"]}', 0);
 
 -- ----------------------------------------------------------------------------
 -- perilous_trail_bosses
@@ -34960,123 +34959,113 @@ INSERT INTO "perilous_trail_bosses" ("id", "challenge_id", "difficulty", "boss_i
 2. 强敌进度积累满后将切换状态，首次切换状态时，将永久失去护盾和抗性提升效果
 3. 破除护盾后，强敌会开掘出2块固态燃素，以准备「球状雷炮」。在一定时间内击破固态燃素上方的「汲聚械」（必须通过爬上固态燃素顶端攻击击破），即可打断「球状雷炮」的蓄能，使强敌损失 15% 生命值并陷入 15s 瘫痪，期间全抗降低至 -30%。瘫痪结束后，强敌恢复全抗10%。
 4. 所有机制都只有一次'),
-  (1968, 81, 'treacherous', 1, '[note="抗性
+  (1977, 81, 'treacherous', 1, '[note="抗性
 {6} 30%
 {3} 30%
-其他 10%"]历经百战的矮灵雕刻师·斧凿[/note]', 'UI_MonsterIcon_Churin.png', 100, '5,767,842', '{3}元素角色
-星烁反应角色', NULL, '[color=#cbd5e1][color=#f1f5f9][color=#ffd780]巨口霜精[/color][/color][/color]
-[color=#cbd5e1]战斗开始时，强敌会运用风元素的力量，尝试塑造臻冰雕像。一段时间后，雕像将化为能够持续发射雪球的「巨口霜精」。
-若在塑形期间使强敌处于[color=#ffd780][b]辉映·星烁[/b][/color]效果的影响之下，即可打断该过程，将冰雕转化为无害的小动物雕像。
-[/color]
-[color=#cbd5e1][/color][i][color=#9ca3af][color=#cbd5e1]拥有千锤百炼的体魄，能将风元素化作斧凿的臻冰雕塑师。[/color]
-[color=#cbd5e1]在地脉乱流的裹挟扭曲下，其糟糕的艺术审美与卓越的武道天赋被进一步催化到了极致。如今的他不再满足于雕琢死物，而是妄图以暴虐的风刃为刻刀，将所有的入侵者，凿刻成一具具毫无生机的雕塑。[/color][/color][/i][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, NULL),
-  (1969, 81, 'treacherous', 2, '[note="抗性 10%"]秘源机兵统御械·疾攻[/note]', 'UI_MonsterIcon_DragonCollar.webp', 100, '1,370,390', '{6} 元素角色', NULL, '[color=#cbd5e1][color=#f1f5f9][color=#ffd780]「先制荡除模式」[/color][/color][/color]
-[color=#cbd5e1]战斗开始后将立即进入「荡除模式」：[color=#ffd780][b]所有元素与物理抗性大幅提升[/b][/color]，并会一边产生「液流动量」一边进行攻击，「液流动量」越高，旋转速度与造成的伤害越高。
-受到[color=#99ffff][b]冰元素伤害[/b][/color]后，将损失「液流动量」，「液流动量」低于一定值时，将停止旋转攻击，且[color=#ffd780][b]所有元素与物理抗性大幅降低[/b][/color]。且[color=#99ffff][b]冰元素抗性[/b][/color][color=#ffd780][b]额外降低[/b][/color]。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][color=#ffd780]「应战状态」[/color][/color][/color]
-[color=#cbd5e1]若场上角色进入并维持[color=#ffd780][b]「夜魂加持」[/b][/color]状态一段时间，此敌人将进入「应战状态」，改为使用追踪射线进行攻击，此时其[color=#ffd780][b]所有元素与物理抗性降低[/b][/color]。
-此状态下，受到一定次数的[color=#99ffff][b]冰元素伤害[/b][/color]后，将停止攻击，且[color=#ffd780][b]所有元素与物理抗性进一步降低[/b][/color]。
-[/color]
-[color=#cbd5e1][/color][i][color=#9ca3af][color=#cbd5e1]深古遗迹的统御用机关。[/color]
-[color=#cbd5e1]曾经，一度伟大的古老种族借由这种机关来统御城市的运转，即使在旧日文明崩毁的现在，也依然拥有着极高的权能。[/color]
-[color=#cbd5e1]无论多么老旧的机件，在地脉的叙述中，都能恢复至铸成之初的面貌。就如方才完成战斗调试，这一深古机关足以爆发出更为迅疾致命的战力…[/color][/color][/i][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, NULL),
-  (1970, 81, 'treacherous', 3, '[note="抗性 10%"]游雪的护刃·复奏[/note]', 'UI_MonsterIcon_Snegurochka_Contessa_02.webp', 100, '1,497,421', '星烁反应角色
-{4}{3}元素角色', NULL, '[color=#cbd5e1][color=#f1f5f9][color=#ffd780]冰棺[/color][/color][/color]
-[color=#cbd5e1]战斗中，当强敌的生命值低于一定比例时，会将自身封于「冰棺」之中，并利用「冰棺」的[color=#ffd780][b]冰元素护罩[/b][/color]保护自身。该效果在单次挑战中仅会触发一次。「冰棺」存在期间，强敌会以自身为中心持续释放冰风暴进行攻击。如果「冰棺」未被破坏，强敌将恢复部分生命值并凝造冰剑进行反击；但若性命所寄的「冰棺」被破坏，强敌将陷入一段虚弱期。当强敌受[color=#ffd780][b]辉映·星烁[/b][/color]效果影响时，[color=#ffd780][b]雷元素和风元素[/b][/color]攻击可以更高效地破坏「冰棺」。
-[/color]
-[color=#cbd5e1][/color][color=#9ca3af][i][color=#cbd5e1]在雪精一族之中也拥有相当声望的古老雪精，曾被授予「须毕生守护雪精一族」的重任。[/color]
-[color=#cbd5e1]在地脉的记忆的侵蚀下，她的守护之心已化作冷酷的领地意识。任何妄图染指这片冰原的入侵者，都将直面她那锐利如刃的突袭。[/color][/i][/color][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, NULL),
-  (1971, 81, 'fearless', 1, '[note="抗性
+其他 10%"]历经百战的矮灵雕刻师·斧凿[/note]', 'UI_MonsterIcon_Churin.png', 100, '5,767,842', '星烁反应角色', NULL, '[color=#FFD780][b]巨口霜精[/b][/color]
+战斗开始时，强敌会运用风元素的力量，尝试塑造臻冰雕像。一段时间后，雕像将化为能够持续发射雪球的「巨口霜精」。
+若在塑形期间使强敌处于[color=#FFD780]辉映·星烁[/color]效果的影响之下，即可打断该过程，将冰雕转化为无害的小动物雕像。
+
+[i][color=#9ca3af]拥有千锤百炼的体魄，能将风元素化作斧凿的臻冰雕塑师。
+在地脉乱流的裹挟扭曲下，其糟糕的艺术审美与卓越的武道天赋被进一步催化到了极致。如今的他不再满足于雕琢死物，而是妄图以暴虐的风刃为刻刀，将所有的入侵者，凿刻成一具具毫无生机的雕塑。[/color][/i]', 0, NULL),
+  (1978, 81, 'treacherous', 2, '[note="抗性 10%"]秘源机兵统御械·疾攻[/note]', 'UI_MonsterIcon_DragonCollar.webp', 100, '1,370,390', '{6}元素角色', NULL, '[color=#FFD780][b]「先制荡除模式」[/b][/color]
+战斗开始后将立即进入「荡除模式」：[color=#FFD780]所有元素与物理抗性大幅提升[/color]，并会一边产生「液流动量」一边进行攻击，「液流动量」越高，旋转速度与造成的伤害越高。
+受到[color=#99FFFF]冰元素伤害[/color]后，将损失「液流动量」，「液流动量」低于一定值时，将停止旋转攻击，且[color=#FFD780]所有元素与物理抗性大幅降低[/color]。且[color=#99FFFF]冰元素抗性[/color][color=#FFD780]额外降低[/color]。
+
+[color=#FFD780][b]「应战状态」[/b][/color]
+若场上角色进入并维持[color=#FFD780]「夜魂加持」[/color]状态一段时间，此敌人将进入「应战状态」，改为使用追踪射线进行攻击，此时其[color=#FFD780]所有元素与物理抗性降低[/color]。
+此状态下，受到一定次数的[color=#99FFFF]冰元素伤害[/color]后，将停止攻击，且[color=#FFD780]所有元素与物理抗性进一步降低[/color]。
+
+[i][color=#9ca3af]深古遗迹的统御用机关。
+曾经，一度伟大的古老种族借由这种机关来统御城市的运转，即使在旧日文明崩毁的现在，也依然拥有着极高的权能。
+无论多么老旧的机件，在地脉的叙述中，都能恢复至铸成之初的面貌。就如方才完成战斗调试，这一深古机关足以爆发出更为迅疾致命的战力…[/color][/i]', 0, NULL),
+  (1979, 81, 'treacherous', 3, '[note="抗性 10%"]游雪的护刃·复奏[/note]', 'UI_MonsterIcon_Snegurochka_Contessa_02.webp', 100, '1,497,421', '星烁反应角色
+{4}{3}{1}元素角色', NULL, '[color=#FFD780][b]冰棺[/b][/color]
+战斗中，当强敌的生命值低于一定比例时，会将自身封于「冰棺」之中，并利用「冰棺」的[color=#FFD780]冰元素护罩[/color]保护自身。该效果在单次挑战中仅会触发一次。「冰棺」存在期间，强敌会以自身为中心持续释放冰风暴进行攻击。如果「冰棺」未被破坏，强敌将恢复部分生命值并凝造冰剑进行反击；但若性命所寄的「冰棺」被破坏，强敌将陷入一段虚弱期，并受到反噬伤害。当强敌受[color=#FFD780]辉映·星烁[/color]效果影响时，[color=#FFD780]雷元素和风元素[/color]攻击可以更高效地破坏「冰棺」。
+
+[i][color=#9ca3af]在雪精一族之中也拥有相当声望的古老雪精，曾被授予「须毕生守护雪精一族」的重任。
+在地脉的记忆的侵蚀下，她的守护之心已化作冷酷的领地意识。任何妄图染指这片冰原的入侵者，都将直面她那锐利如刃的突袭。[/color][/i]', 0, NULL),
+  (1980, 81, 'fearless', 1, '[note="抗性
 {6} 30%
 {3} 30%
-其他 10%"]历经百战的矮灵雕刻师·运风成斤[/note]', 'UI_MonsterIcon_Churin.png', 105, '12,126,454', '{3}元素角色
-星烁反应角色', NULL, '[color=#cbd5e1][color=#f1f5f9][color=#ffd780][b]巨口霜精[/b][/color][/color][/color]
-[color=#cbd5e1][color=#f1f5f9][color=#ffd780][/color][/color]战斗开始时，强敌会运用风元素的力量，尝试塑造臻冰雕像。一段时间后，雕像将化为能够持续发射雪球的「巨口霜精」。
-若在塑形期间使强敌处于[color=#ffd780][b]辉映·星烁[/b][/color]效果的影响之下，即可打断该过程，将冰雕转化为无害的小动物雕像。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][color=#ffd780][b]灵感迭出[/b][/color][/color][/color]
-[color=#cbd5e1]受到地脉紊乱的影响，强敌[color=#ffd780][b]将在战斗开始时，获得较高的所有元素抗性与物理抗性[/b][/color]，且会更为频繁地塑造臻冰雕像。
-冰雕被转化为小动物雕像后，会在短暂延迟后爆炸，对强敌造成一定伤害，同时[color=#ffd780][b]降低其所有元素抗性与物理抗性，并额外降低其风元素抗性[/b][/color]，此效果[color=#ffd780][b]至多叠加3层[/b][/color]。
-[/color]
-[color=#cbd5e1][/color][i][color=#9ca3af][color=#cbd5e1]拥有千锤百炼的体魄，能将风元素化作斧凿的臻冰雕塑师。[/color]
-[color=#cbd5e1]在比其审美更为糟糕扭曲的地脉奔流演绎下，这位雕刻师陷入了无可救药的癫狂灵感。他势要以呼啸的狂风雕琢骨肉，用坚不可摧的臻冰封存灵魂，迫不及待地将眼前的所有入侵者，凿刻成这场灾厄展览里的最新杰作。[/color][/color][/i][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, NULL),
-  (1972, 81, 'fearless', 2, '[note="抗性 10%"]秘源机兵统御械·毁灭武装[/note]', 'UI_MonsterIcon_DragonCollar.webp', 105, '7,606,009', '{6} 元素角色', NULL, '[color=#cbd5e1][color=#f1f5f9][color=#ffd780][b]「先制荡除模式」[/b][/color][/color][/color]
-[color=#cbd5e1]战斗开始后将立即进入「荡除模式」：[color=#ffd780][b]所有元素与物理抗性大幅提升[/b][/color]，并会一边产生「液流动量」一边进行攻击，「液流动量」越高，旋转速度与造成的伤害越高。
-受到[color=#99ffff][b]冰元素伤害[/b][/color]后，将损失「液流动量」，「液流动量」低于一定值时，将停止旋转攻击，且[color=#ffd780][b]所有元素与物理抗性大幅降低[/b][/color]。且[color=#99ffff][b]冰元素抗性[/b][/color][color=#ffd780][b]额外降低[/b][/color]。
-每次进入「荡除模式」后首次停止旋转攻击时，将产生额外的元素晶球。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][b][color=#ffd780]「强载应战状态」[/color][/b][/color][/color]
-[color=#cbd5e1]若场上角色进入并维持[color=#ffd780][b]「夜魂加持」[/b][/color]状态一段时间，此敌人将进入「强载应战状态」，改为使用强力的追踪射线进行攻击，此时其[color=#ffd780][b]所有元素与物理抗性降低[/b][/color]。
-此状态下，受到一定次数的[color=#99ffff][b]冰元素伤害[/b][/color]后，将停止攻击，且[color=#ffd780][b]所有元素与物理抗性进一步降低[/b][/color]。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][color=#ffd780][b]「抗损结构」[/b][/color][/color][/color]
-[color=#cbd5e1]受到地脉紊乱的影响，强敌的所有抗性进一步提高，并且受到[color=#99ffff][b]冰元素伤害[/b][/color]时损失的「液流动量」更少。处于「强载应战状态」时，自身的抗性下降程度较低。
-[/color]
-[color=#cbd5e1][/color][i][color=#ffd780][color=#9ca3af][color=#cbd5e1]深古遗迹的统御用机关。[/color]
-[color=#cbd5e1]曾经，一度伟大的古老种族借由这种机关来统御城市的运转，即使在旧日文明崩毁的现在，也依然拥有着极高的权能。[/color]
-[color=#cbd5e1]在地脉乱象的深处，曾因时间流逝而衰损的核心能量重归充盈，甚至达到万分危险的「过载」级别。这一机关足以挣脱星球束缚的恐怖功率，最终以超出设计规格的水准完全释放，驱动起它那可怖的「毁灭武装」…[/color][/color][/color][/i][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, NULL),
-  (1973, 81, 'fearless', 3, '[note="抗性 10%"]游雪的护刃·不绝余音[/note]', 'UI_MonsterIcon_Snegurochka_Contessa_02.webp', 105, '10,335,048', '星烁反应角色
-{4}{3}元素角色', NULL, '[color=#cbd5e1][color=#f1f5f9][b][color=#ffd780]冰棺·孪晶晶格[/color][/b][/color][/color]
-[color=#cbd5e1]战斗中，当强敌生命值低于一定比例时，会将自身封入「冰棺」之中，利用「冰棺」的[color=#ffd780][b]冰元素护罩[/b][/color]保护自身。
-「冰棺」存在期间，强敌会以自身为中心持续释放冰风暴进行攻击。如果「冰棺」未被破坏，强敌将恢复部分生命值并凝造冰剑进行反击；但若性命所寄的「冰棺」被破坏，强敌将陷入一段虚弱期。受地脉紊乱影响，该[color=#ffd780][b]「冰棺」将更加坚韧[/b][/color]；且在首次被破坏的一段时间后，强敌会[color=#ffd780][b]再次将自身封入「冰棺」[/b][/color]。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][color=#ffd780][b]冰棺·畸变晶格[/b][/color][/color][/color]
-[color=#cbd5e1][color=#ffd780][b]「冰棺」存在[/b][/color]期间，若强敌处于[color=#ffd780][b]辉映·星烁[/b][/color]效果影响之下，[color=#ffd780][b]则「冰棺」的冰元素护罩将转化为能够吸收伤害的护盾[/b][/color]。护盾被破坏后，强敌将受到一次高额反噬伤害。[/color][color=#cbd5e1]
-[/color]
-[color=#cbd5e1][/color][i][color=#9ca3af][color=#cbd5e1]在雪精一族之中也拥有相当声望的古老雪精，曾被授予「须毕生守护雪精一族」的重任。[/color]
-[color=#cbd5e1]在地脉洪流的错乱影响下，其名为「守护」的空洞执妄仅余杀戮的本能，她潜藏于冰棺的阴影下，随时准备化作一道不可捉摸的凌厉冰剑，撕裂一切试图靠近的生命。[/color][/color][/i][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, NULL),
-  (1974, 81, 'desperate', 1, '[color=#ef4444][b][note="抗性
+其他 10%"]历经百战的矮灵雕刻师·运风成斤[/note]', 'UI_MonsterIcon_Churin.png', 105, '12,126,454', '星烁反应角色
+{3}元素角色', NULL, '[color=#FFD780][b]巨口霜精[/b][/color]
+战斗开始时，强敌会运用风元素的力量，尝试塑造臻冰雕像。一段时间后，雕像将化为能够持续发射雪球的「巨口霜精」。
+若在塑形期间使强敌处于[color=#FFD780]辉映·星烁[/color]效果的影响之下，即可打断该过程，将冰雕转化为无害的小动物雕像。
+
+[color=#FFD780][b]灵感迭出[/b][/color]
+受到地脉紊乱的影响，强敌[color=#FFD780]将在战斗开始时，获得较高的所有元素抗性与物理抗性[/color]，且会更为频繁地塑造臻冰雕像。
+冰雕被转化为小动物雕像后，会在短暂延迟后爆炸，对强敌造成一定伤害，同时[color=#FFD780]降低其所有元素抗性与物理抗性，并额外降低其风元素抗性[/color]，此效果[color=#FFD780]至多叠加3层[/color]。
+
+[i][color=#9ca3af]拥有千锤百炼的体魄，能将风元素化作斧凿的臻冰雕塑师。
+在比其审美更为糟糕扭曲的地脉奔流演绎下，这位雕刻师陷入了无可救药的癫狂灵感。他势要以呼啸的狂风雕琢骨肉，用坚不可摧的臻冰封存灵魂，迫不及待地将眼前的所有入侵者，凿刻成这场灾厄展览里的最新杰作。[/color][/i]', 0, NULL),
+  (1981, 81, 'fearless', 2, '[note="抗性 10%"]秘源机兵统御械·毁灭武装[/note]', 'UI_MonsterIcon_DragonCollar.webp', 105, '7,606,009', '{6}元素角色', NULL, '[color=#FFD780][b]「先制荡除模式」[/b][/color]
+战斗开始后将立即进入「荡除模式」：[color=#FFD780]所有元素与物理抗性大幅提升[/color]，并会一边产生「液流动量」一边进行攻击，「液流动量」越高，旋转速度与造成的伤害越高。
+受到[color=#99FFFF]冰元素伤害[/color]后，将损失「液流动量」，「液流动量」低于一定值时，将停止旋转攻击，且[color=#FFD780]所有元素与物理抗性大幅降低[/color]。且[color=#99FFFF]冰元素抗性[/color][color=#FFD780]额外降低[/color]。
+每次进入「荡除模式」后首次停止旋转攻击时，将产生额外的元素晶球。
+
+[color=#FFD780][b]「强载应战状态」[/b][/color]
+若场上角色进入并维持[color=#FFD780]「夜魂加持」[/color]状态一段时间，此敌人将进入「强载应战状态」，改为使用强力的追踪射线进行攻击，此时其[color=#FFD780]所有元素与物理抗性降低[/color]。
+此状态下，受到一定次数的[color=#99FFFF]冰元素伤害[/color]后，将停止攻击，且[color=#FFD780]所有元素与物理抗性进一步降低[/color]。
+
+[color=#FFD780][b]「抗损结构」[/b][/color]
+受到地脉紊乱的影响，强敌的所有抗性进一步提高，并且受到[color=#99FFFF]冰元素伤害[/color]时损失的「液流动量」更少。处于「强载应战状态」时，自身的抗性下降程度较低。
+
+[i][color=#9ca3af]深古遗迹的统御用机关。
+曾经，一度伟大的古老种族借由这种机关来统御城市的运转，即使在旧日文明崩毁的现在，也依然拥有着极高的权能。
+在地脉乱象的深处，曾因时间流逝而衰损的核心能量重归充盈，甚至达到万分危险的「过载」级别。这一机关足以挣脱星球束缚的恐怖功率，最终以超出设计规格的水准完全释放，驱动起它那可怖的「毁灭武装」…[/color][/i]', 0, NULL),
+  (1982, 81, 'fearless', 3, '[note="抗性 10%"]游雪的护刃·不绝余音[/note]', 'UI_MonsterIcon_Snegurochka_Contessa_02.webp', 105, '10,335,048', '星烁反应角色
+{1}元素角色', NULL, '[color=#FFD780][b]冰棺·孪晶晶格[/b][/color]
+战斗中，当强敌生命值低于一定比例时，会将自身封入「冰棺」之中，利用「冰棺」的[color=#FFD780]冰元素护罩[/color]保护自身。
+「冰棺」存在期间，强敌会以自身为中心持续释放冰风暴进行攻击。如果「冰棺」未被破坏，强敌将恢复部分生命值并凝造冰剑进行反击；但若性命所寄的「冰棺」被破坏，强敌将陷入一段虚弱期，并受到反噬伤害。受地脉紊乱影响，该[color=#FFD780]「冰棺」将更加坚韧[/color]；且在首次被破坏的一段时间后，强敌会[color=#FFD780]再次将自身封入「冰棺」[/color]。
+
+[color=#FFD780][b]冰棺·畸变晶格[/b][/color]
+[color=#FFD780]「冰棺」存在[/color]期间，若强敌处于[color=#FFD780]辉映·星烁[/color]效果影响之下，[color=#FFD780]则「冰棺」的冰元素护罩将转化为能够吸收伤害的护盾[/color]。护盾被破坏后，强敌将受到一次高额反噬伤害。
+
+[i][color=#9ca3af]在雪精一族之中也拥有相当声望的古老雪精，曾被授予「须毕生守护雪精一族」的重任。
+在地脉洪流的错乱影响下，其名为「守护」的空洞执妄仅余杀戮的本能，她潜藏于冰棺的阴影下，随时准备化作一道不可捉摸的凌厉冰剑，撕裂一切试图靠近的生命。[/color][/i]', 0, NULL),
+  (1983, 81, 'desperate', 1, '[note="抗性
 {6} 30%
 {3} 30%
-其他 10%"]历经百战的矮灵雕刻师·运风成斤[/note][/b][/color]', 'UI_Img_LeyLineChallenge_Karzelek_Tsereteli_01.png', 110, '29,684,898', '{3}元素角色
-星烁反应角色', NULL, '[color=#cbd5e1][color=#f1f5f9][color=#ffd780][b]巨口霜精[/b][/color][/color][/color]
-[color=#cbd5e1][color=#f1f5f9][color=#ffd780][/color][/color]战斗开始时，强敌会运用风元素的力量，尝试塑造臻冰雕像。一段时间后，雕像将化为能够持续发射雪球的「巨口霜精」。
-若在塑形期间使强敌处于[color=#ffd780][b]辉映·星烁[/b][/color]效果的影响之下，即可打断该过程，将冰雕转化为无害的小动物雕像。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][color=#ffd780][b]灵感迭出[/b][/color][/color][/color]
-[color=#cbd5e1]受到地脉紊乱的影响，强敌[color=#ffd780][b]将在战斗开始时，获得较高的所有元素抗性与物理抗性[/b][/color]，且会更为频繁地塑造臻冰雕像。
-冰雕被转化为小动物雕像后，会在短暂延迟后爆炸，对强敌造成一定伤害，同时[color=#ffd780][b]降低其所有元素抗性与物理抗性，并额外降低其风元素抗性[/b][/color]，此效果[color=#ffd780][b]至多叠加3层[/b][/color]。
-[/color]
-[color=#cbd5e1][/color][i][color=#9ca3af][color=#cbd5e1]拥有千锤百炼的体魄，能将风元素化作斧凿的臻冰雕塑师。[/color]
-[color=#cbd5e1]在比其审美更为糟糕扭曲的地脉奔流演绎下，这位雕刻师陷入了无可救药的癫狂灵感。他势要以呼啸的狂风雕琢骨肉，用坚不可摧的臻冰封存灵魂，迫不及待地将眼前的所有入侵者，凿刻成这场灾厄展览里的最新杰作。[/color][/color][/i][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, '• 强敌常态[color=#ffd780] 130％[/color] 全抗
+其他 10%"][color=#ef4444][b]历经百战的矮灵雕刻师·运风成斤[/b][/color][/note]', 'UI_Img_LeyLineChallenge_Karzelek_Tsereteli_01.png', 110, '29,684,898', '星烁反应角色
+{3}元素角色', NULL, '[color=#FFD780][b]巨口霜精[/b][/color]
+战斗开始时，强敌会运用风元素的力量，尝试塑造臻冰雕像。一段时间后，雕像将化为能够持续发射雪球的「巨口霜精」。
+若在塑形期间使强敌处于[color=#FFD780]辉映·星烁[/color]效果的影响之下，即可打断该过程，将冰雕转化为无害的小动物雕像。
+
+[color=#FFD780][b]灵感迭出[/b][/color]
+受到地脉紊乱的影响，强敌[color=#FFD780]将在战斗开始时，获得较高的所有元素抗性与物理抗性[/color]，且会更为频繁地塑造臻冰雕像。
+冰雕被转化为小动物雕像后，会在短暂延迟后爆炸，对强敌造成一定伤害，同时[color=#FFD780]降低其所有元素抗性与物理抗性，并额外降低其风元素抗性[/color]，此效果[color=#FFD780]至多叠加3层[/color]。
+
+[i][color=#9ca3af]拥有千锤百炼的体魄，能将风元素化作斧凿的臻冰雕塑师。
+在比其审美更为糟糕扭曲的地脉奔流演绎下，这位雕刻师陷入了无可救药的癫狂灵感。他势要以呼啸的狂风雕琢骨肉，用坚不可摧的臻冰封存灵魂，迫不及待地将眼前的所有入侵者，凿刻成这场灾厄展览里的最新杰作。[/color][/i]', 0, '• 强敌常态[color=#ffd780] 130％[/color] 全抗
 •入战8s，以及后续每16s，会开始制作2个冰雕，制作时间[color=#ffd780]4s[/color]，制作成功的冰雕会持续打击场上角色
 •若在制作期间使强敌受到[color=#ffd780]辉映·星烁[/color]的影响，即可将冰雕转化为无害的雕像，该雕像会在1.5s后自爆，仅对强敌造成[color=#ffd780]500000[/color]的伤害，并为强敌施加1层降低抗性的效果，每层使强敌降低[color=#ffd780]35%[/color][color=#b7f3ce]风抗[/color]，[color=#ffd780]25%[/color][color=#ffd780]其他抗[/color]，该效果至多叠加[color=#ffd780]3[/color]层，当有冰雕被制作成功，会移除1层该效果'),
-  (1975, 81, 'desperate', 2, '[color=#ef4444][b][note="抗性 10%"]秘源机兵统御械·毁灭武装[/note][/b][/color]', 'UI_Img_LeyLineChallenge_DragonCollar.png', 110, '14,916,723', '{6} 元素角色', NULL, '[color=#cbd5e1][color=#f1f5f9][color=#ffd780][b]「先制荡除模式」[/b][/color][/color][/color]
-[color=#cbd5e1]战斗开始后将立即进入「荡除模式」：[color=#ffd780][b]所有元素与物理抗性大幅提升[/b][/color]，并会一边产生「液流动量」一边进行攻击，「液流动量」越高，旋转速度与造成的伤害越高。
-受到[color=#99ffff][b]冰元素伤害[/b][/color]后，将损失「液流动量」，「液流动量」低于一定值时，将停止旋转攻击，且[color=#ffd780][b]所有元素与物理抗性大幅降低[/b][/color]。且[color=#99ffff][b]冰元素抗性[/b][/color][color=#ffd780][b]额外降低[/b][/color]。
-每次进入「荡除模式」后首次停止旋转攻击时，将产生额外的元素晶球。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][b][color=#ffd780]「强载应战状态」[/color][/b][/color][/color]
-[color=#cbd5e1]若场上角色进入并维持[color=#ffd780][b]「夜魂加持」[/b][/color]状态一段时间，此敌人将进入「强载应战状态」，改为使用强力的追踪射线进行攻击，此时其[color=#ffd780][b]所有元素与物理抗性降低[/b][/color]。
-此状态下，受到一定次数的[color=#99ffff][b]冰元素伤害[/b][/color]后，将停止攻击，且[color=#ffd780][b]所有元素与物理抗性进一步降低[/b][/color]。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][color=#ffd780][b]「抗损结构」[/b][/color][/color][/color]
-[color=#cbd5e1]受到地脉紊乱的影响，强敌的所有抗性进一步提高，并且受到[color=#99ffff][b]冰元素伤害[/b][/color]时损失的「液流动量」更少。处于「强载应战状态」时，自身的抗性下降程度较低。
-[/color]
-[color=#cbd5e1][/color][i][color=#ffd780][color=#9ca3af][color=#cbd5e1]深古遗迹的统御用机关。[/color]
-[color=#cbd5e1]曾经，一度伟大的古老种族借由这种机关来统御城市的运转，即使在旧日文明崩毁的现在，也依然拥有着极高的权能。[/color]
-[color=#cbd5e1]在地脉乱象的深处，曾因时间流逝而衰损的核心能量重归充盈，甚至达到万分危险的「过载」级别。这一机关足以挣脱星球束缚的恐怖功率，最终以超出设计规格的水准完全释放，驱动起它那可怖的「毁灭武装」…[/color][/color][/color][/i][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, '1. BOSS初始抗性[color=#ffd780]270%[/color]，并开始积累能量旋转攻击。可通过[color=#b1fcfe]持续[/color][color=#b1fcfe]冰伤[/color]降低它的能量积累（冰伤频次[color=#ffd780]至少达到0.6秒1次[/color]），进度低于[color=#ffd780]7.4%[/color]时将迫使它停滞在原地，此时冰抗降低为[color=#ffd780]-30%[/color]、其他抗性[color=#ffd780]30%[/color]，并且首次停滞会产出大量元素微粒（18个），相当于[color=#ffd780]36能量[/color]。
+  (1984, 81, 'desperate', 2, '[note="抗性 10%"][color=#ef4444][b]秘源机兵统御械·毁灭武装[/b][/color][/note]', 'UI_Img_LeyLineChallenge_DragonCollar.png', 110, '14,916,723', '{6}元素角色', NULL, '[color=#FFD780][b]「先制荡除模式」[/b][/color]
+战斗开始后将立即进入「荡除模式」：[color=#FFD780]所有元素与物理抗性大幅提升[/color]，并会一边产生「液流动量」一边进行攻击，「液流动量」越高，旋转速度与造成的伤害越高。
+受到[color=#99FFFF]冰元素伤害[/color]后，将损失「液流动量」，「液流动量」低于一定值时，将停止旋转攻击，且[color=#FFD780]所有元素与物理抗性大幅降低[/color]。且[color=#99FFFF]冰元素抗性[/color][color=#FFD780]额外降低[/color]。
+每次进入「荡除模式」后首次停止旋转攻击时，将产生额外的元素晶球。
+
+[color=#FFD780][b]「强载应战状态」[/b][/color]
+若场上角色进入并维持[color=#FFD780]「夜魂加持」[/color]状态一段时间，此敌人将进入「强载应战状态」，改为使用强力的追踪射线进行攻击，此时其[color=#FFD780]所有元素与物理抗性降低[/color]。
+此状态下，受到一定次数的[color=#99FFFF]冰元素伤害[/color]后，将停止攻击，且[color=#FFD780]所有元素与物理抗性进一步降低[/color]。
+
+[color=#FFD780][b]「抗损结构」[/b][/color]
+受到地脉紊乱的影响，强敌的所有抗性进一步提高，并且受到[color=#99FFFF]冰元素伤害[/color]时损失的「液流动量」更少。处于「强载应战状态」时，自身的抗性下降程度较低。
+
+[i][color=#9ca3af]深古遗迹的统御用机关。
+曾经，一度伟大的古老种族借由这种机关来统御城市的运转，即使在旧日文明崩毁的现在，也依然拥有着极高的权能。
+在地脉乱象的深处，曾因时间流逝而衰损的核心能量重归充盈，甚至达到万分危险的「过载」级别。这一机关足以挣脱星球束缚的恐怖功率，最终以超出设计规格的水准完全释放，驱动起它那可怖的「毁灭武装」…[/color][/i]', 0, '1. BOSS初始抗性[color=#ffd780]270%[/color]，并开始积累能量旋转攻击。可通过[color=#b1fcfe]持续[/color][color=#b1fcfe]冰伤[/color]降低它的能量积累（冰伤频次[color=#ffd780]至少达到0.6秒1次[/color]），进度低于[color=#ffd780]7.4%[/color]时将迫使它停滞在原地，此时冰抗降低为[color=#ffd780]-30%[/color]、其他抗性[color=#ffd780]30%[/color]，并且首次停滞会产出大量元素微粒（18个），相当于[color=#ffd780]36能量[/color]。
 2. 若是检测到有纳塔角色持续[color=#ffd780]处于夜魂加持状态[/color]，BOSS会进入应战状态，将抗性从270%降低至[color=#ffd780]110%[/color]，代价是伤害大幅提升，在此期间同样可通过高频冰伤进一步降低其抗性。'),
-  (1976, 81, 'desperate', 3, '[color=#ef4444][b][note="抗性 10%"]游雪的护刃·不绝余音[/note][/b][/color]', 'UI_Img_LeyLineChallenge_Snegurochka_Contessa_02.png', 110, '21,871,500', '星烁反应角色
-{4}{3}元素角色', NULL, '[color=#cbd5e1][color=#f1f5f9][b][color=#ffd780]冰棺·孪晶晶格[/color][/b][/color][/color]
-[color=#cbd5e1]战斗中，当强敌生命值低于一定比例时，会将自身封入「冰棺」之中，利用「冰棺」的[color=#ffd780][b]冰元素护罩[/b][/color]保护自身。
-「冰棺」存在期间，强敌会以自身为中心持续释放冰风暴进行攻击。如果「冰棺」未被破坏，强敌将恢复部分生命值并凝造冰剑进行反击；但若性命所寄的「冰棺」被破坏，强敌将陷入一段虚弱期。受地脉紊乱影响，该[color=#ffd780][b]「冰棺」将更加坚韧[/b][/color]；且在首次被破坏的一段时间后，强敌会[color=#ffd780][b]再次将自身封入「冰棺」[/b][/color]。[/color]
-[color=#cbd5e1]
-[color=#f1f5f9][color=#ffd780][b]冰棺·畸变晶格[/b][/color][/color][/color]
-[color=#cbd5e1][color=#ffd780][b]「冰棺」存在[/b][/color]期间，若强敌处于[color=#ffd780][b]辉映·星烁[/b][/color]效果影响之下，[color=#ffd780][b]则「冰棺」的冰元素护罩将转化为能够吸收伤害的护盾[/b][/color]。护盾被破坏后，强敌将受到一次高额反噬伤害。[/color][color=#cbd5e1]
-[/color]
-[color=#cbd5e1][/color][i][color=#9ca3af][color=#cbd5e1]在雪精一族之中也拥有相当声望的古老雪精，曾被授予「须毕生守护雪精一族」的重任。[/color]
-[color=#cbd5e1]在地脉洪流的错乱影响下，其名为「守护」的空洞执妄仅余杀戮的本能，她潜藏于冰棺的阴影下，随时准备化作一道不可捉摸的凌厉冰剑，撕裂一切试图靠近的生命。[/color][/color][/i][color=#cbd5e1][/color][color=#cbd5e1]
-[/color]', 0, '• 强敌不再拥有50% 冰抗，而是10%
+  (1985, 81, 'desperate', 3, '[note="抗性 10%"][color=#ef4444][b]游雪的护刃·不绝余音[/b][/color][/note]', 'UI_Img_LeyLineChallenge_Snegurochka_Contessa_02.png', 110, '21,871,500', '星烁反应角色
+{1}元素角色', NULL, '[color=#FFD780][b]冰棺·孪晶晶格[/b][/color]
+战斗中，当强敌生命值低于一定比例时，会将自身封入「冰棺」之中，利用「冰棺」的[color=#FFD780]冰元素护罩[/color]保护自身。
+「冰棺」存在期间，强敌会以自身为中心持续释放冰风暴进行攻击。如果「冰棺」未被破坏，强敌将恢复部分生命值并凝造冰剑进行反击；但若性命所寄的「冰棺」被破坏，强敌将陷入一段虚弱期，并受到反噬伤害。受地脉紊乱影响，该[color=#FFD780]「冰棺」将更加坚韧[/color]；且在首次被破坏的一段时间后，强敌会[color=#FFD780]再次将自身封入「冰棺」[/color]。
+
+[color=#FFD780][b]冰棺·畸变晶格[/b][/color]
+[color=#FFD780]「冰棺」存在[/color]期间，若强敌处于[color=#FFD780]辉映·星烁[/color]效果影响之下，[color=#FFD780]则「冰棺」的冰元素护罩将转化为能够吸收伤害的护盾[/color]。护盾被破坏后，强敌将受到一次高额反噬伤害。
+
+[i][color=#9ca3af]在雪精一族之中也拥有相当声望的古老雪精，曾被授予「须毕生守护雪精一族」的重任。
+在地脉洪流的错乱影响下，其名为「守护」的空洞执妄仅余杀戮的本能，她潜藏于冰棺的阴影下，随时准备化作一道不可捉摸的凌厉冰剑，撕裂一切试图靠近的生命。[/color][/i]', 0, '• 强敌不再拥有50% 冰抗，而是10%
 • 强敌的血量为[color=#ffd780]80%[/color]时，会锁血5s，并展开 [color=#ffd780]42U[/color][color=#b1fcfe]冰元素护盾[/color]，护盾存在期间使强敌受到 辉映-星烁 的影响，会使护盾转化为相当于强敌最大生命值[color=#ffd780]15%[/color]的血量盾，两种护盾共享 [color=#ffd780]20s[/color] 持续时间
 • 若护盾未被击破，无论护盾类型，强敌都会恢复10%生命值，若击破的是[color=#b1fcfe]冰元素护盾[/color]，强敌会损失 [color=#ffd780][/color][color=#ffd780][color=#ffd780]10%[/color]生命值[/color]，若击破的是血量盾，则强敌会损失[color=#ffd780][/color][color=#ffd780][color=#ffd780]10%[/color]生命值+[color=#ffd780]60%[/color] 持有护盾期间受到的伤害[/color]，不超过强敌最大生命值的19%，击破两种护盾均会使其瘫痪 10s，期间全抗为-40%
 • 破盾后[color=#ffd780]30s[/color]，会再次展开冰元素护盾，在这之后不再展开护盾
@@ -37597,16 +37586,6 @@ INSERT INTO "weapon_ascension_materials" ("id", "weapon_id", "material_id", "qua
   (3236, 14524, 112154, '27'),
   (3237, 14524, 112148, '18'),
   (3238, 14524, 114092, '6'),
-  (3239, 11522, 114085, '5'),
-  (3240, 11522, 112155, '18'),
-  (3241, 11522, 112149, '12'),
-  (3242, 11522, 114086, '9'),
-  (3243, 11522, 112156, '18'),
-  (3244, 11522, 112150, '14'),
-  (3245, 11522, 114087, '9'),
-  (3246, 11522, 112157, '27'),
-  (3247, 11522, 112151, '18'),
-  (3248, 11522, 114088, '6'),
   (3249, 11438, 114021, '3'),
   (3250, 11438, 112041, '12'),
   (3251, 11438, 112032, '8'),
@@ -37616,7 +37595,17 @@ INSERT INTO "weapon_ascension_materials" ("id", "weapon_id", "material_id", "qua
   (3255, 11438, 114023, '6'),
   (3256, 11438, 112043, '18'),
   (3257, 11438, 112034, '12'),
-  (3258, 11438, 114024, '4');
+  (3258, 11438, 114024, '4'),
+  (3259, 11522, 114085, '5'),
+  (3260, 11522, 112155, '18'),
+  (3261, 11522, 112149, '12'),
+  (3262, 11522, 114086, '9'),
+  (3263, 11522, 112156, '18'),
+  (3264, 11522, 112150, '14'),
+  (3265, 11522, 114087, '9'),
+  (3266, 11522, 112157, '27'),
+  (3267, 11522, 112151, '18'),
+  (3268, 11522, 114088, '6');
 
 -- ----------------------------------------------------------------------------
 -- wish_banners
