@@ -58,21 +58,26 @@ export function DbProvider({ children }) {
   }, [])
 
 // ── 全局图片请求去重 + 内存缓存 + 并发控制 ──
-const _imageRequestMap = new Map()     // filename → Promise（在途请求去重）
-const _imageCache = new Map()          // filename → base64 data（持久缓存，上限 500）
-const _IMAGE_CACHE_MAX = 500
+// 缓存 key 含尺寸（filename::w200），同一文件不同尺寸分别缓存，互不覆盖
+const _imageRequestMap = new Map()     // key → Promise（在途请求去重）
+const _imageCache = new Map()          // key → base64 data（持久缓存，上限 1200）
+const _IMAGE_CACHE_MAX = 1200
 const _MAX_CONCURRENT = 6              // 最大并发 IPC 调用数（过高会阻塞主进程导致窗口拖动卡顿）
 let _concurrentCount = 0
-const _pendingQueue = []               // { filename, resolve, reject }
+const _pendingQueue = []               // { key, filename, maxWidth, resolve, reject }
+
+function _imageKey(filename, maxWidth) {
+  return maxWidth ? `${filename}::w${maxWidth}` : filename
+}
 
 function processQueue() {
   while (_concurrentCount < _MAX_CONCURRENT && _pendingQueue.length > 0) {
-    const { filename, resolve, reject } = _pendingQueue.shift()
+    const { key, filename, maxWidth, resolve, reject } = _pendingQueue.shift()
     _concurrentCount++
-    window.electronAPI.readImage(filename).then(result => {
+    window.electronAPI.readImage(filename, maxWidth).then(result => {
       _concurrentCount--
       if (result.success) {
-        _imageCache.set(filename, result.data)
+        _imageCache.set(key, result.data)
         // LRU: 淘汰最旧的
         if (_imageCache.size > _IMAGE_CACHE_MAX) {
           const oldest = _imageCache.keys().next().value
@@ -91,22 +96,23 @@ function processQueue() {
   }
 }
 
-  const readImage = useCallback(async (filename) => {
+  const readImage = useCallback(async (filename, maxWidth) => {
     if (!filename || !window.electronAPI) return null
+    const key = _imageKey(filename, maxWidth)
     // 1. 内存缓存命中
-    const cached = _imageCache.get(filename)
+    const cached = _imageCache.get(key)
     if (cached) return cached
-    // 2. 已有相同 filename 的在途请求，复用其 Promise
-    const pending = _imageRequestMap.get(filename)
+    // 2. 已有相同 key 的在途请求，复用其 Promise
+    const pending = _imageRequestMap.get(key)
     if (pending) return pending
     // 3. 新请求：通过并发队列调度
     const promise = new Promise((resolve, reject) => {
-      _pendingQueue.push({ filename, resolve, reject })
+      _pendingQueue.push({ key, filename, maxWidth, resolve, reject })
       processQueue()
     })
-    _imageRequestMap.set(filename, promise)
+    _imageRequestMap.set(key, promise)
     return promise.finally(() => {
-      _imageRequestMap.delete(filename)
+      _imageRequestMap.delete(key)
     })
   }, [])
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback, memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
@@ -20,7 +20,7 @@ const SECTION_CONFIG = {
   character: { label: '角色', icon: User },
   weapon: { label: '武器', icon: Crosshair },
   artifact: { label: '圣遗物', icon: Sparkles },
-  outfit: { label: '角色时装', icon: Shirt },
+  outfit: { label: '角色衣装', icon: Shirt },
   material: { label: '重要材料', icon: Package },
   game_data: { label: '游戏数据', icon: BarChart3 },
   wish: { label: '祈愿', icon: Star },
@@ -174,8 +174,8 @@ export default function ChangelogPage() {
   }, [search, sortAsc, expandedVersions])
 
   async function loadAll() {
-    // Load lookup data
-    const [chars, weps, arts, mats, wishes, fits, gds, vms] = await Promise.all([
+    // Load lookup data（version_tags/version_additions 一并查询，供按需加载 wish 数据与构建版本数据，避免重复查询）
+    const [chars, weps, arts, mats, wishes, fits, gds, vms, tagsRes, addsRes] = await Promise.all([
       query('SELECT id, name_zh, card_art, rarity FROM characters'),
       query('SELECT id, name_zh, image, simple_art, rarity FROM weapons'),
       query('SELECT id, name_zh, image, flower_image FROM artifacts'),
@@ -184,6 +184,8 @@ export default function ChangelogPage() {
       query('SELECT id, character_id, name_zh, avatar_image FROM character_outfits'),
       query('SELECT id, title_zh FROM game_data'),
       query('SELECT version, images FROM version_meta'),
+      query('SELECT * FROM version_tags ORDER BY sort_order, id'),
+      query('SELECT * FROM version_additions ORDER BY sort_order, id'),
     ])
 
     // Build outfit avatar map (only those with avatars, for character display)
@@ -202,37 +204,6 @@ export default function ChangelogPage() {
     for (const g of gdsData) gdm[g.id] = g
     setGameDataMap(gdm)
 
-    // Build version images map (parse JSON arrays, pick one random for display)
-    const vmsData = vms.data || []
-    const viMap = {}
-    const rvi = {}
-    for (const v of vmsData) {
-      let images = []
-      try { images = JSON.parse(v.images || '[]') } catch (_) { images = v.image ? [v.image] : [] }
-      images = images.filter(Boolean)
-      if (images.length > 0) {
-        viMap[v.version] = images
-        // 保持已有随机选择不变，避免每次数据加载重新选取导致 useLazyImage 重复加载
-        if (!randomVersionImages.current[v.version]) {
-          rvi[v.version] = images[Math.floor(Math.random() * images.length)]
-        } else {
-          rvi[v.version] = randomVersionImages.current[v.version]
-        }
-      }
-    }
-    setVersionImages(viMap)
-    randomVersionImages.current = rvi
-    // 预热版本图 — 可见图立即加载，其余延时加载避免阻塞渲染
-    const allVersionImages = [...new Set(Object.values(viMap).flat())]
-    const selectedSet = new Set(Object.values(rvi).filter(Boolean))
-    // 可见图立即预热
-    for (const fn of selectedSet) readImage(fn)
-    // 其余图延时预热，不干扰首屏
-    setTimeout(() => {
-      for (const fn of allVersionImages) {
-        if (!selectedSet.has(fn)) readImage(fn)
-      }
-    }, 2000)
     // Read outfit selections from user.json
     let outfitSelections = {}
     try {
@@ -263,13 +234,16 @@ export default function ChangelogPage() {
     const wishMapTemp = {}
     for (const w of wishData) wishMapTemp[w.id] = { ...w, banners: [] }
 
-    // Load wish banners and items
-    if (wishData.length > 0) {
-      const wishIds = wishData.map(w => w.id)
-      const placeholders = wishIds.map(() => '?').join(',')
+    // 按需加载 wish banners/items：仅加载 version_additions 中出现过的 wish
+    // （其余 wish 仅用于编辑表单下拉选项，不需要 banners/items，避免全量拉取 1600+ 行）
+    const addedWishIds = [...new Set((addsRes.data || [])
+      .filter(a => a.item_type === 'wish')
+      .map(a => a.item_id))]
+    if (addedWishIds.length > 0) {
+      const placeholders = addedWishIds.map(() => '?').join(',')
       const [bRes, biRes] = await Promise.all([
-        query(`SELECT * FROM wish_banners WHERE wish_id IN (${placeholders}) ORDER BY sort_order, id`, wishIds),
-        query(`SELECT wbi.* FROM wish_banner_items wbi JOIN wish_banners wb ON wbi.banner_id = wb.id WHERE wb.wish_id IN (${placeholders}) ORDER BY wbi.rarity DESC, wbi.sort_order, wbi.id`, wishIds),
+        query(`SELECT * FROM wish_banners WHERE wish_id IN (${placeholders}) ORDER BY sort_order, id`, addedWishIds),
+        query(`SELECT wbi.* FROM wish_banner_items wbi JOIN wish_banners wb ON wbi.banner_id = wb.id WHERE wb.wish_id IN (${placeholders}) ORDER BY wbi.rarity DESC, wbi.sort_order, wbi.id`, addedWishIds),
       ])
       const bannersData = bRes.data || []
       const itemsData = biRes.data || []
@@ -312,20 +286,27 @@ export default function ChangelogPage() {
     }))
     setGameDataOptions(gdOpts)
 
-    // Load version data
-    await loadVersionData(cm, wm, am, mm, wishMapTemp, om, gdm)
+    // Load version data（复用本次已查询的 tags/adds/meta，不再重复查询）
+    await loadVersionData(cm, wm, am, mm, wishMapTemp, om, gdm, {
+      tagsData: tagsRes.data || [],
+      addsData: addsRes.data || [],
+      metaData: vms.data || [],
+    })
     setLoaded(true)
   }
 
-  async function loadVersionData(cm, wm, am, mm, wishMapTemp, om, gdm) {
-    const [tagsRes, addsRes, metaRes] = await Promise.all([
-      query('SELECT * FROM version_tags ORDER BY sort_order, id'),
-      query('SELECT * FROM version_additions ORDER BY sort_order, id'),
-      query('SELECT version, images FROM version_meta'),
-    ])
-    const tagsData = tagsRes.data || []
-    const addsData = addsRes.data || []
-    const metaData = metaRes.data || []
+  async function loadVersionData(cm, wm, am, mm, wishMapTemp, om, gdm, extra = {}) {
+    // extra: { tagsData, addsData, metaData } — 由 loadAll 提供时复用，避免重复查询
+    const [tagsRes, addsRes, metaRes] = extra.tagsData
+      ? [null, null, null]
+      : await Promise.all([
+          query('SELECT * FROM version_tags ORDER BY sort_order, id'),
+          query('SELECT * FROM version_additions ORDER BY sort_order, id'),
+          query('SELECT version, images FROM version_meta'),
+        ])
+    const tagsData = extra.tagsData ?? (tagsRes.data || [])
+    const addsData = extra.addsData ?? (addsRes.data || [])
+    const metaData = extra.metaData ?? (metaRes.data || [])
 
     // Build version images from meta (parse JSON arrays)
     const viMap = {}
@@ -346,15 +327,6 @@ export default function ChangelogPage() {
     }
     setVersionImages(viMap)
     randomVersionImages.current = rvi
-    // 预热版本图 — 可见图立即加载，其余延时加载
-    const allVersionImages = [...new Set(Object.values(viMap).flat())]
-    const selectedSet = new Set(Object.values(rvi).filter(Boolean))
-    for (const fn of selectedSet) readImage(fn)
-    setTimeout(() => {
-      for (const fn of allVersionImages) {
-        if (!selectedSet.has(fn)) readImage(fn)
-      }
-    }, 2000)
 
     const verMap = {}
     for (const t of tagsData) {
@@ -424,7 +396,8 @@ export default function ChangelogPage() {
     setModalOpen(true)
   }
 
-  function openEdit(version) {
+  // useCallback 固定引用，保证 VersionEntry（memo）在折叠/展开/搜索时跳过重渲染
+  const handleEditVersion = useCallback((version) => {
     const data = versions[version]
     setEditingVersion(version)
     setFormVersion(version)
@@ -436,7 +409,19 @@ export default function ChangelogPage() {
     setFormAdditions(adds)
     setFormVersionImages(versionImages[version] || [])
     setModalOpen(true)
-  }
+  }, [versions, versionImages])
+
+  const handleToggleExpand = useCallback((version, currentlyCollapsed) => {
+    hasRestored.current = true
+    setExpandedVersions(prev => {
+      const next = new Set(prev)
+      // If currently collapsed → expand (add to set)
+      // If currently expanded → collapse (remove from set)
+      if (currentlyCollapsed) next.add(version)
+      else next.delete(version)
+      return next
+    })
+  }, [])
 
   async function handleSave() {
     if (!formVersion.trim()) return
@@ -596,20 +581,10 @@ export default function ChangelogPage() {
               gameDataMap={gameDataMap}
               versionImages={versionImages[version] || []}
               randomVersionImage={randomVersionImages.current[version] || null}
-              onEdit={() => openEdit(version)}
+              onEdit={handleEditVersion}
               isExpanded={isExpanded}
               defaultExpanded={version === latestVersion}
-              onToggleExpand={(currentlyCollapsed) => {
-                hasRestored.current = true
-                setExpandedVersions(prev => {
-                  const next = new Set(prev)
-                  // If currently collapsed → expand (add to set)
-                  // If currently expanded → collapse (remove from set)
-                  if (currentlyCollapsed) next.add(version)
-                  else next.delete(version)
-                  return next
-                })
-              }}
+              onToggleExpand={handleToggleExpand}
             />
             )
           })}
@@ -663,9 +638,10 @@ export default function ChangelogPage() {
 }
 
 // ── Item card（定义在组件外部，避免每次渲染重新创建函数引用导致 useLazyImage 卸载重装）──
-function ItemCard({ imageFile, name, rarity, navTo }) {
+// React.memo：搜索/折叠状态变化时跳过未变化条目的重渲染
+const ItemCard = memo(function ItemCard({ imageFile, name, rarity, navTo }) {
   const navigate = useNavigate()
-  const { ref, src } = useLazyImage(imageFile, '200px')
+  const { ref, src } = useLazyImage(imageFile, 256)
   const rarityBorder = rarity === 5 ? 'border-amber-400/60' : rarity === 4 ? 'border-purple-400/60' : 'border-surface-600'
 
   return (
@@ -688,7 +664,7 @@ function ItemCard({ imageFile, name, rarity, navTo }) {
       </span>
     </button>
   )
-}
+})
 
 // ── Version image background (right-to-left opacity gradient, lazy loaded) ──
 // ── Version image background (right-to-left opacity gradient, lazy loaded) ──
@@ -696,7 +672,9 @@ function ItemCard({ imageFile, name, rarity, navTo }) {
 //    图片从不以全亮状态出现，避免了忽亮忽暗的闪烁
 //    永久 maskImage inline style 保持右端微露/左端全显梯度
 function VersionImageBg({ imageFile }) {
-  const { ref: containerRef, src } = useLazyImage(imageFile, 300)
+  // 1024 缩略：卡片展开时背景图有效显示宽度可达 ~890px，480 会糊；
+  // 1MB+ 的壁纸源图缩到 1024 后载荷约降 5 倍，且不会糊
+  const { ref: containerRef, src } = useLazyImage(imageFile, 1024)
   const imgRef = useRef(null)
   const prevSrcRef = useRef(null)
 
@@ -949,7 +927,8 @@ function DragScrollArea({ className = '', children }) {
 }
 
 // ── Version entry display ──
-function VersionEntry({ version, data, charMap, weaponMap, artifactMap, materialMap, wishMap, outfitMap, gameDataMap, versionImages, randomVersionImage, onEdit, isExpanded, defaultExpanded, onToggleExpand }) {
+// React.memo：版本数据、map 引用、onEdit/onToggleExpand 均为稳定引用时跳过重渲染
+const VersionEntry = memo(function VersionEntry({ version, data, charMap, weaponMap, artifactMap, materialMap, wishMap, outfitMap, gameDataMap, versionImages, randomVersionImage, onEdit, isExpanded, defaultExpanded, onToggleExpand }) {
   const navigate = useNavigate()
   const [lightboxIndex, setLightboxIndex] = useState(-1) // -1 = closed, >=0 = open at index
   const additions = data.additions || {}
@@ -983,7 +962,7 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
       {randomVersionImage && <VersionImageBg imageFile={randomVersionImage} />}
       {/* Version header */}
       <div
-        onClick={() => onToggleExpand(collapsed)}
+        onClick={() => onToggleExpand(version, collapsed)}
         className="px-5 py-4 border-b border-surface-700 flex items-center gap-3 flex-wrap cursor-pointer hover:bg-surface-800/30 transition-colors relative"
         style={{ zIndex: 1 }}
       >
@@ -1028,7 +1007,7 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
         )}
         <div className="flex-1" />
         <button
-          onClick={e => { e.stopPropagation(); onEdit() }}
+          onClick={e => { e.stopPropagation(); onEdit(version) }}
           className="px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 text-surface-400 hover:text-white text-xs transition-colors"
         >
           编辑
@@ -1177,10 +1156,11 @@ function VersionEntry({ version, data, charMap, weaponMap, artifactMap, material
       )}
     </div>
   )
-}
+})
 
 // ── Wish display (like BannerCard detail mode) ──
-function WishDisplay({ wish, charMap, weaponMap }) {
+// React.memo：wish 对象与 map 引用稳定时跳过重渲染
+const WishDisplay = memo(function WishDisplay({ wish, charMap, weaponMap }) {
   const banners = wish.banners || []
   const typeLabel = BANNER_TYPES[wish.banner_type] || ''
 
@@ -1241,7 +1221,7 @@ function WishDisplay({ wish, charMap, weaponMap }) {
       </div>
     </div>
   )
-}
+})
 
 // ── Edit form ──
 function EditForm({
@@ -1260,7 +1240,7 @@ function EditForm({
     { key: 'character', label: '角色' },
     { key: 'weapon', label: '武器' },
     { key: 'artifact', label: '圣遗物' },
-    { key: 'outfit', label: '时装' },
+    { key: 'outfit', label: '衣装' },
     { key: 'material', label: '材料' },
     { key: 'game_data', label: '数据' },
     { key: 'wish', label: '祈愿' },

@@ -55,6 +55,11 @@ function ensureGlobalStarted() {
   startMutationObserver()
 }
 
+// ── 预加载缓冲带：可视区外 800px 内的图片提前加载 ──
+// 此前为 3000px，几乎覆盖整页（材料页 526 张在挂载时全量触发），
+// 改为 800px 后仅预加载视口附近图片；快速滚动由下方同步回退兜底，不闪白。
+const PRELOAD_MARGIN = 800
+
 // ── 共享 IntersectionObserver（异步预加载）──
 let _globalObserver = null
 const _elementLoaders = new Map()   // Element → () => void
@@ -72,13 +77,16 @@ function getSharedObserver() {
           loader()
         }
       }
-    }, { rootMargin: '3000px' })
+    }, { rootMargin: `${PRELOAD_MARGIN}px` })
   }
   return _globalObserver
 }
 
 // ── 同步滚动回退（单 rAF-throttled listener，确保快速滚动不丢帧）──
+// 每帧最多处理 SCROLL_BATCH 个元素，避免对数百个 pending 元素逐个
+// getBoundingClientRect() 造成每帧强制布局（此前 500+ 次布局/帧导致滚动卡顿）。
 const _pendingElements = new Map()  // Element → () => void
+const SCROLL_BATCH = 40
 let _scrollCheckActive = false
 let _scrollTicking = false
 
@@ -92,9 +100,12 @@ function ensureScrollCheck() {
     _scrollTicking = true
     requestAnimationFrame(() => {
       _scrollTicking = false
-      const margin = 3000
+      const margin = PRELOAD_MARGIN
       const ih = window.innerHeight
+      let checked = 0
       for (const [el, loader] of _pendingElements) {
+        if (checked >= SCROLL_BATCH) break
+        checked++
         try {
           const rect = el.getBoundingClientRect()
           if (rect.bottom > -margin && rect.top < ih + margin) {
@@ -115,13 +126,14 @@ function ensureScrollCheck() {
 /**
  * 懒加载图片 — IntersectionObserver + 同步滚动回退混合方案
  * - Observer 在空闲时检测，管理所有实例
- * - 单 rAF-throttled scroll listener 作为同步回退，确保快速滚动不丢帧
- * - rootMargin 800px 提供充足预加载缓冲
+ * - 单 rAF-throttled scroll listener 作为同步回退（每帧分批检查），确保快速滚动不丢帧
+ * - PRELOAD_MARGIN 800px 提供充足预加载缓冲
  *
  * @param {string} filename 图片文件名
- * @param {number|string} _rootMargin 兼容旧参数，现由全局统一管理
+ * @param {number|string} maxWidth 可选的目标显示宽度提示（如 100 / '100px'）。
+ *        传给 readImage 生成/直读对应尺寸的图片，减小 IPC 载荷；不传则返回原图
  */
-export function useLazyImage(filename, _rootMargin) {
+export function useLazyImage(filename, maxWidth) {
   const [src, setSrc] = useState(null)
   const { readImage } = useDb()
   const ref = useRef(null)
@@ -149,11 +161,16 @@ export function useLazyImage(filename, _rootMargin) {
       setSrc(null)
     }
 
+    // 归一化尺寸提示：300 → 300；'100px' → 100；undefined → 原图
+    const sizeHint = typeof maxWidth === 'number'
+      ? (maxWidth > 0 ? Math.round(maxWidth) : undefined)
+      : (parseInt(maxWidth || '', 10) > 0 ? parseInt(maxWidth, 10) : undefined)
+
     function doLoad() {
       if (loaded.current) return
       loaded.current = true
       const current = filename
-      readImage(current).then(data => {
+      readImage(current, sizeHint).then(data => {
         if (data && current === filename) setSrc(data)
       })
     }
@@ -161,7 +178,7 @@ export function useLazyImage(filename, _rootMargin) {
     if (loaded.current) return
 
     // 同步检查：元素已在视口或预加载范围内 → 立即加载
-    const margin = Math.max(3000, typeof _rootMargin === 'number' ? _rootMargin : parseInt(_rootMargin || '3000') || 3000)
+    const margin = PRELOAD_MARGIN
     try {
       const rect = el.getBoundingClientRect()
       if (rect.bottom > -margin && rect.top < window.innerHeight + margin) {

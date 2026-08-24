@@ -665,8 +665,15 @@ export default function ChallengesPage() {
   }
 
   const searchLower = search.toLowerCase()
+  // 版本号敏感搜索：搜索词形如 "6.7"（数字+小数点）时，视为版本号，
+  // 只精确匹配该版本下的挑战，剔除名称/BOSS 血量（如 216.7%）等包含该数字串的多余结果
+  const searchTrimmed = searchLower.trim()
+  const versionLike = /^\d+(\.\d+)+$/.test(searchTrimmed)
   const filtered = challenges.filter(c => {
     if (!search) return true
+    if (versionLike) {
+      return c.version.toLowerCase() === searchTrimmed
+    }
     if (c.version.toLowerCase().includes(searchLower)) return true
     if (c.name_zh && c.name_zh.toLowerCase().includes(searchLower)) return true
     // Search child data (boss names, advantages, details, etc.)
@@ -1043,6 +1050,7 @@ function PerilousTrailContent({ childData, elemMap, elemIcons, onLightbox }) {
 // 折叠态：紧凑一行（小头像、名称、等级、血量）
 // 空间不足时自动换行：名称独占一行（或与头像同行），等级血量信息排到下一行
 function PerilousBossCompact({ boss }) {
+  // 怪物图片保持原图（不缩略）：来源可能是大尺寸场景图
   const { ref, src } = useLazyImage(boss.boss_image)
 
   return (
@@ -1062,7 +1070,8 @@ function PerilousBossCompact({ boss }) {
 }
 
 function PerilousBossCard({ boss, elemMap, elemIcons, onLightbox, expanded }) {
-  const { ref, src } = useLazyImage(boss.boss_image, '200px')
+  // 怪物图片保持原图（不缩略）：卡片宽度可达数百 px，缩略会明显变糊
+  const { ref, src } = useLazyImage(boss.boss_image)
 
   const advParts = parseAdvDisadv(boss.advantages, elemMap)
   const disadvParts = parseAdvDisadv(boss.disadvantages, elemMap)
@@ -1164,7 +1173,7 @@ function ElementIcon({ elem, elemIcons, size = 'sm' }) {
 function CharThumb({ char, size = 'xs' }) {
   const navigate = useNavigate()
   const imageFile = char.card_art
-  const { ref, src } = useLazyImage(imageFile)
+  const { ref, src } = useLazyImage(imageFile, 256)
   const sizeClass = size === 'xs' ? 'w-8 h-8' : 'w-10 h-10'
 
   function handleClick(e) {

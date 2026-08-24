@@ -30,6 +30,7 @@ import {
   Eye, EyeOff,
 } from 'lucide-react'
 import { useNav } from '../context/NavContext'
+import { notifyDomainSourcesChanged } from '../utils/domainSources'
 
 // ═══════════════════════════════════════
 // 常量
@@ -463,6 +464,8 @@ const MarkerGrid = memo(({
             ).catch(() => {})
             loadMarkers(currentMapId)
             setMovingMarkerId(null)
+            // 标点位置变化：同步刷新材料/圣遗物板块的秘境标点定位数据
+            notifyDomainSourcesChanged()
           }
           window.addEventListener('mousemove', onMove)
           window.addEventListener('mouseup', onUp)
@@ -693,8 +696,10 @@ const TextboxGrid = memo(({
 // ═══════════════════════════════════════
 // 摹忆中枢 — 原神大地图
 // ═══════════════════════════════════════
-export default function MemoryHub() {
+export default function MemoryHub({ initialData }) {
   const { devMode } = useDb()
+  // 从材料/圣遗物「获取来源」跳转进入时的定位目标：{ mapId, placementId?, worldX, worldY }
+  const initialDataRef = useRef(initialData)
   const [maps, setMaps] = useState([])            // 所有地图列表
   const [currentMapId, setCurrentMapId] = useState(null) // 当前地图 ID
   const [mapConfig, setMapConfig] = useState(null)       // 当前地图配置
@@ -912,6 +917,22 @@ export default function MemoryHub() {
     const cw = rect?.width || containerSize.current.w || 800
     const ch = rect?.height || containerSize.current.h || 600
     return { x: cw / 2 - wx * z, y: ch / 2 - wy * z }
+  }
+
+  // 定位到世界坐标点：以该点为中心（从材料/圣遗物获取来源跳转到秘境标点）
+  function focusWorldPoint(wx, wy) {
+    const config = mapConfigRef.current
+    if (!config) return
+    const rect = mapContainerRef.current?.getBoundingClientRect()
+    const cw = rect?.width || containerSize.current.w || 800
+    const ch = rect?.height || containerSize.current.h || 600
+    // 同步容器尺寸：地图容器在 loading 结束后才挂载，ResizeObserver 晚于本函数
+    // 首次回调时 previousViewport 仍是默认 800×600，会把视图中心再平移
+    // (实际宽 - 800)/2 造成标点水平偏右；同步后其增量计算为 0，定位保持居中。
+    containerSize.current = { w: cw, h: ch }
+    const dv = config.defaultView
+    const z = clampZoomToNative(dv?.zoom ?? 1, config)
+    setView(z, worldToViewCenter(wx, wy, z), config)
   }
   const [tilesTick, setTilesTick] = useState(0)  // 仅用于触发 visibleTiles 重算（拖拽/缩放结束时递增）
   const [tileLayerReady, setTileLayerReady] = useState(false)  // 首批切片就绪后设为 true，触发切片层显现
@@ -1252,23 +1273,35 @@ export default function MemoryHub() {
         }))
         setMaps(parsed)
         if (parsed.length > 0 && !currentMapId) {
-          const m = parsed[0]
+          // 从材料/圣遗物获取来源跳转时优先打开目标地图
+          const focus = initialDataRef.current
+          const m = focus?.mapId
+            ? (parsed.find(x => x.id === focus.mapId) || parsed[0])
+            : parsed[0]
           currentMapIdRef.current = m.id
           setCurrentMapId(m.id)
           setMapConfig(m.config)
           mapConfigRef.current = m.config
-          const dv = m.config?.defaultView
-          const z = clampZoomToNative(dv?.zoom ?? 1, m.config)
-          const initialVC = dv
-            ? worldToViewCenter(dv.x, dv.y, z)
-            : getCenteredMapViewCenter({ config: m.config, zoom: z, viewport: containerSize.current })
-          setView(z, initialVC, m.config)
-          requestAnimationFrame(() => {
-            const nextVC = dv
+          if (focus && focus.mapId === m.id && typeof focus.worldX === 'number' && typeof focus.worldY === 'number') {
+            // 定位到对应标点中心（容器就绪后执行两次，与默认视图逻辑一致）
+            requestAnimationFrame(() => {
+              focusWorldPoint(focus.worldX, focus.worldY)
+              requestAnimationFrame(() => focusWorldPoint(focus.worldX, focus.worldY))
+            })
+          } else {
+            const dv = m.config?.defaultView
+            const z = clampZoomToNative(dv?.zoom ?? 1, m.config)
+            const initialVC = dv
               ? worldToViewCenter(dv.x, dv.y, z)
               : getCenteredMapViewCenter({ config: m.config, zoom: z, viewport: containerSize.current })
-            setView(z, nextVC, m.config)
-          })
+            setView(z, initialVC, m.config)
+            requestAnimationFrame(() => {
+              const nextVC = dv
+                ? worldToViewCenter(dv.x, dv.y, z)
+                : getCenteredMapViewCenter({ config: m.config, zoom: z, viewport: containerSize.current })
+              setView(z, nextVC, m.config)
+            })
+          }
         }
       }
     } catch (e) {
@@ -1422,6 +1455,24 @@ export default function MemoryHub() {
     setView(z, nextVC, m.config)
     setShowMapMenu(false)
   }, [cancelActiveInteraction, maps, setView])
+
+  // ── 运行中接收新的定位目标（材料/圣遗物获取来源跳转）：切换地图并居中到标点 ──
+  // 注意：必须定义在 handleSelectMap 之后（deps 数组中引用该 const，避免 TDZ）
+  useEffect(() => {
+    const focus = initialData
+    if (!focus || focus === initialDataRef.current) return
+    initialDataRef.current = focus
+    if (!focus.mapId) return
+    if (currentMapIdRef.current !== focus.mapId) {
+      handleSelectMap(focus.mapId)  // 走完整的地图切换流程（清缓存/加载切片/标点）
+    }
+    if (typeof focus.worldX === 'number' && typeof focus.worldY === 'number') {
+      requestAnimationFrame(() => {
+        focusWorldPoint(focus.worldX, focus.worldY)
+        requestAnimationFrame(() => focusWorldPoint(focus.worldX, focus.worldY))
+      })
+    }
+  }, [initialData, maps, handleSelectMap])
 
   // ── 创建地图（打开标定） ──
   const handleCreateMap = useCallback(async () => {
@@ -2214,6 +2265,8 @@ export default function MemoryHub() {
       }
       setPlacementEditor(null)
       loadMarkers(currentMapId)
+      // 关联材料/圣遗物可能已变化，通知材料/圣遗物板块刷新「获取来源」
+      notifyDomainSourcesChanged()
     } catch (e) {
       console.error('[MemoryHub] place marker error:', e)
     }
@@ -4133,6 +4186,8 @@ export default function MemoryHub() {
               const delRes = await window.electronAPI?.mapDeletePlacement(placedMenu.pm.id)
               console.log('[MemoryHub] delete result', delRes)
               setPlacedMenu(null); loadMarkers(currentMapId)
+              // 删除标点：同步刷新材料/圣遗物板块的「获取来源」
+              notifyDomainSourcesChanged()
             }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10">删除</button>
           </div>
           <div className="fixed inset-0 z-[-1]" onClick={() => setPlacedMenu(null)} />

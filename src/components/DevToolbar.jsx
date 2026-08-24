@@ -1116,7 +1116,7 @@ export default function DevToolbar() {
         }
       }
 
-      // 时装：仅当不存在时插入
+      // 衣装：仅当不存在时插入
       const hasOutfits = await query('SELECT COUNT(*) as cnt FROM character_outfits WHERE character_id = ?', [charId])
       if (hasOutfits.data?.[0]?.cnt === 0 && (data.outfits || []).length > 0) {
         const outfits = [...data.outfits].sort((a, b) => (b.is_default || 0) - (a.is_default || 0))
@@ -1551,7 +1551,7 @@ export default function DevToolbar() {
       ? [{ id: weaponId, name: weaponName }]
       : selectedWeapons
     if (targets.length === 0) return
-    if (!window.confirm(`确定清除 ${targets.length} 个武器的天赋/命座/材料/故事/时装数据？\n（基础信息和属性将保留）`)) return
+    if (!window.confirm(`确定清除 ${targets.length} 个武器的天赋/命座/材料/故事/衣装数据？\n（基础信息和属性将保留）`)) return
     for (const w of targets) {
       await query('DELETE FROM weapon_ascension_materials WHERE weapon_id = ?', [w.id])
     }

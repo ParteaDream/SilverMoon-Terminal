@@ -9,6 +9,8 @@ import { ArrowLeft, Edit3, Package, Info, ChevronDown } from 'lucide-react'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
+import DomainSourceChips from '../components/DomainSourceChips'
+import { useDomainSources } from '../utils/domainSources'
 
 const MATERIAL_TYPES = {
   character_ascension: '角色突破', weapon_ascension: '武器突破', talent: '天赋书',
@@ -46,6 +48,8 @@ function MaterialDetailContent() {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [lightbox, setLightbox] = useState(null)
+  // 炼武秘境关联标点（摹忆中枢变更时自动刷新）
+  const domainIndex = useDomainSources()
   useDetailScroll('material', id)
 
   useEffect(() => { consumeBackToList(); loadAll() }, [id])
@@ -148,6 +152,12 @@ function MaterialDetailContent() {
               <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-300">
                 {MATERIAL_TYPES[material.type] || material.type}
               </span>
+              {/* 关联炼武秘境标点（自动同步摹忆中枢的关联，点击打开摹忆中枢定位） */}
+              {domainIndex.materials.get(material.id)?.length > 0 && (
+                <div className="mt-2.5">
+                  <DomainSourceChips domains={domainIndex.materials.get(material.id)} />
+                </div>
+              )}
             </div>
           </div>
           <button onClick={() => setEditOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-[rgb(var(--color-1))] text-[rgb(var(--btn-text-1)_/_0.8)] hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:scale-105 transition-all">

@@ -7,7 +7,7 @@ export default function ItemThumb({ item, charMap, weaponMap, small, compact }) 
   const navigate = useNavigate()
   const entity = item.item_type === 'character' ? charMap[item.item_id] : weaponMap[item.item_id]
   const imageFile = item.item_type === 'character' ? entity?._displayCardArt : entity?.simple_art || entity?.image
-  const { ref, src } = useLazyImage(imageFile, '100px')
+  const { ref, src } = useLazyImage(imageFile, 256)
 
   const size = compact ? 'w-10 h-10' : (small ? 'w-12 h-12' : 'w-16 h-16')
   const textSize = compact ? 'text-[9px] max-w-[48px]' : 'text-[10px] leading-tight max-w-[60px]'

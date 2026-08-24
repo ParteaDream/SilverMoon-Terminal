@@ -423,7 +423,7 @@ function IconCell({ filename }) {
 // 独立组件，不在 WebsitesPage 内部定义，避免每次渲染重新创建函数引用
 // 导致 useLazyImage 卸载重装 → 所有图片重新加载
 function GalleryCard({ website, onRowClick, onEdit, multiSelect, activeDetailId }) {
-  const { ref, src } = useLazyImage(website.image, '300px')
+  const { ref, src } = useLazyImage(website.image, 300)
   const handleDrag = useImageDrag(website.image)
   const isActive = activeDetailId != null && website.id === activeDetailId
   return (

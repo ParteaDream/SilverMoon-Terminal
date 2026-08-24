@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, memo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
@@ -7,6 +7,8 @@ import DataTable, { useSortFilter, SortBar, FilterBar } from '../components/Data
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
+import { SourceCell } from '../components/DomainSourceChips'
+import { useDomainSources } from '../utils/domainSources'
 import { LayoutList, LayoutGrid, Plus, Package, ArrowUpDown, Filter } from 'lucide-react'
 
 // 星级背景图片 URL（只计算一次，避免每条记录重复拼接字符串和创建 style 对象）
@@ -277,7 +279,14 @@ export default function MaterialsPage() {
     window.dispatchEvent(new CustomEvent('devtoolbar-material-selection', { detail: selectedData }))
   }, [selected, materials])
 
-  const columns = [
+  // 炼武秘境关联索引（摹忆中枢变更时自动刷新）
+  const domainIndex = useDomainSources()
+  // ref 让 columns（useMemo 固定引用）内部的 render 始终读到最新索引，避免同步刷新触发全量重排
+  const domainIndexRef = useRef(domainIndex)
+  domainIndexRef.current = domainIndex
+
+  // 表格/画廊列定义 — useMemo 固定引用，避免每次渲染重建导致 useSortFilter 全量重排
+  const columns = useMemo(() => [
     { key: 'image', label: '', width: '64px', render: row => <MatThumb filename={row.image} rarity={row.rarity} /> },
     { key: 'id', label: 'ID', width: '60px',
       render: row => <span className="text-xs text-surface-400 font-mono">{row.id}</span>,
@@ -292,10 +301,12 @@ export default function MaterialsPage() {
       render: row => <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-300">{MATERIAL_TYPES[row.type] || row.type}</span>,
       filterType: 'select', filterValue: v => MATERIAL_TYPES[v] || v,
       filterOptions: () => Object.entries(MATERIAL_TYPES).map(([k, v]) => ({ value: k, label: v })) },
-    { key: 'source', label: '获取来源', render: row => <span className="text-xs text-surface-400">{row.source || '-'}</span>, filterType: 'text' },
+    { key: 'source', label: '获取来源', render: row => (
+      <SourceCell source={row.source} domains={domainIndexRef.current.materials.get(row.id)} />
+    ), filterType: 'text' },
     { key: 'description_zh', label: '说明',
       render: row => <span className="text-xs text-surface-500 max-w-xs line-clamp-2"><ColoredText text={row.description_zh || '-'} /></span>, filterType: 'text' },
-  ]
+  ], [])
 
   const {
     sortKeys, setSortKeys, handleSort, removeSort, clearSorts, reorderSorts,
@@ -436,7 +447,7 @@ export default function MaterialsPage() {
 // ── 辅助组件 ──
 
 function MatThumb({ filename, rarity }) {
-  const { ref, src } = useLazyImage(filename)
+  const { ref, src } = useLazyImage(filename, 256)
   const bgStyle = RARITY_BG_STYLES[rarity || 1]
   return (
     <div ref={ref} className="w-10 h-10 rounded-lg overflow-hidden shrink-0 flex items-center justify-center" style={bgStyle}>
@@ -446,7 +457,7 @@ function MatThumb({ filename, rarity }) {
 }
 
 function MatThumbGallery({ filename }) {
-  const { ref, src } = useLazyImage(filename)
+  const { ref, src } = useLazyImage(filename, 256)
   return (
     <div ref={ref} className="w-full h-full flex items-center justify-center">
       {src ? <img src={src} alt="" className="max-w-[85%] max-h-[85%] object-contain drop-shadow-md" /> : null}

@@ -9,11 +9,12 @@ import { ArrowLeft, Edit3, Sword, Info, Star, ChevronDown, Plus, Upload, Trash2,
 import EditModal, { FormInput, FormSelect, ImagePicker, SearchSelect } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
+import GalleryDropConfirm from '../components/GalleryDropConfirm'
 
 const RARITY_STARS = { 1: '★', 2: '★★', 3: '★★★', 4: '★★★★', 5: '★★★★★' }
 const CATEGORY_OPTIONS = [
   { value: '武器', label: '武器' },
-  { value: '皮肤', label: '皮肤' },
+  { value: '武器装扮', label: '武器装扮' },
   { value: 'TPS', label: 'TPS' },
 ]
 const MATERIAL_TYPE_ZH = {
@@ -60,6 +61,9 @@ function WeaponDetailContent() {
   const [refinement, setRefinement] = useState(1)
   const [gallery, setGallery] = useState([])
   const [galleryDragOver, setGalleryDragOver] = useState(false)
+  const [pendingDrops, setPendingDrops] = useState(null)  // 拖拽待确认 [{ id, name, path, previewUrl }]
+  const [importingDrops, setImportingDrops] = useState(false)
+  const pendingDropIdRef = useRef(0)
   const [lightbox, setLightbox] = useState(null)
   const [ascMats, setAscMats] = useState([])
   const [allMaterials, setAllMaterials] = useState([])
@@ -152,29 +156,62 @@ function WeaponDetailContent() {
   async function handleGalleryDrop(e) {
     e.preventDefault()
     setGalleryDragOver(false)
+    // 拖入图片后仅暂存，等待用户点击「确定导入」才真正导入（避免误拖重复添加）
+    const items = []
     const files = e.dataTransfer?.files
-    if (!files?.length) {
+    if (files && files.length > 0) {
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) continue
+        items.push({ id: ++pendingDropIdRef.current, name: file.name || file.path, path: file.path, file })
+      }
+    } else {
       // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
       const text = e.dataTransfer?.getData('text/plain')
       if (text) {
-        try {
-          const result = await window.electronAPI?.importImageFile(text)
-          if (result?.filename) await addGalleryImage(result.filename)
-        } catch (err) {
-          console.error('Import failed:', err)
-        }
+        const name = String(text).split(/[\\/]/).pop() || text
+        items.push({ id: ++pendingDropIdRef.current, name, path: text })
       }
-      return
     }
-    for (const file of files) {
-      if (file.type.startsWith('image/')) {
-        try {
-          const result = await window.electronAPI?.importImageFile(file.path)
-          if (result?.filename) await addGalleryImage(result.filename)
-        } catch (err) {
-          console.error('Import failed:', err)
-        }
+    if (items.length === 0) return
+    for (const it of items) {
+      if (it.file) {
+        try { it.previewUrl = URL.createObjectURL(it.file) } catch (_) {}
       }
+    }
+    releasePendingPreviews(pendingDrops)
+    setPendingDrops(items)
+  }
+
+  function releasePendingPreviews(items) {
+    for (const it of (items || [])) {
+      if (it.previewUrl) { try { URL.revokeObjectURL(it.previewUrl) } catch (_) {} }
+    }
+  }
+
+  function cancelPendingDrops() {
+    releasePendingPreviews(pendingDrops)
+    setPendingDrops(null)
+  }
+
+  // 确认后才执行导入并加入图库
+  async function confirmPendingDrops() {
+    if (!pendingDrops || importingDrops) return
+    setImportingDrops(true)
+    const newImages = []
+    for (const it of pendingDrops) {
+      try {
+        const result = await window.electronAPI?.importImageFile(it.path)
+        if (result?.conflict) { alert(result.message); continue }
+        if (result?.filename) newImages.push({ label: result.filename, filename: result.filename })
+      } catch (err) {
+        console.error('Import failed:', err)
+      }
+    }
+    cancelPendingDrops()
+    setImportingDrops(false)
+    if (newImages.length > 0) {
+      const updated = [...gallery, ...newImages]
+      await saveGallery(updated)
     }
   }
 
@@ -438,6 +475,14 @@ function WeaponDetailContent() {
       {lightbox && (
         <Lightbox filename={lightbox} onClose={() => setLightbox(null)} />
       )}
+
+      {/* 图库拖拽导入确认浮条 */}
+      <GalleryDropConfirm
+        items={pendingDrops}
+        importing={importingDrops}
+        onConfirm={confirmPendingDrops}
+        onCancel={cancelPendingDrops}
+      />
       {/* Ascension Material edit modal */}
       {editAscMat && (
         <EditModal isOpen={!!editAscMat} onClose={() => setEditAscMat(null)} onSave={handleSaveAscMat} saving={saving}

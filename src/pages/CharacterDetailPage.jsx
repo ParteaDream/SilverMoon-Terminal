@@ -14,6 +14,7 @@ import {
 import EditModal, { FormInput, FormSelect, SearchSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
+import GalleryDropConfirm from '../components/GalleryDropConfirm'
 import ColorTextInput from '../components/ColorTextInput'
 import { ELEM_ID_TO_SETTINGS_INDEX, stripFormatting } from '../utils/colorMarkup'
 
@@ -33,7 +34,7 @@ const SECTION_LABELS = {
   constellations: '命之座',
   materials: '培养素材',
   lore: '角色故事',
-  outfits: '时装',
+  outfits: '衣装',
   dish: '特殊料理',
   namecard: '名片',
   gallery: '图库',
@@ -117,9 +118,9 @@ function CharacterDetailContent() {
   const [elementColors, setElementColors] = useState(null)  // 元素颜色配置
   const [useNamecardBg, setUseNamecardBg] = useState(false) // 立绘使用名片背景
   const [saving, setSaving] = useState(false)
-  const [activeOutfitId, setActiveOutfitId] = useState(null)  // 当前激活的时装 ID
-  const [outfitDragOver, setOutfitDragOver] = useState({})   // { [outfitId]: true } — 时装卡片的拖放高亮
-  const [storyPreview, setStoryPreview] = useState(null)       // 时装故事预览
+  const [activeOutfitId, setActiveOutfitId] = useState(null)  // 当前激活的衣装 ID
+  const [outfitDragOver, setOutfitDragOver] = useState({})   // { [outfitId]: true } — 衣装卡片的拖放高亮
+  const [storyPreview, setStoryPreview] = useState(null)       // 衣装故事预览
   const [readerOpen, setReaderOpen] = useState(false)           // 角色故事阅读器
   const [readerMode, setReaderMode] = useState('scroll')        // scroll | page
   const [readerTheme, setReaderTheme] = useState('dark')        // dark | light | sepia
@@ -366,6 +367,10 @@ function CharacterDetailContent() {
   // ── 图库拖拽导入 ──
   const [galleryDragOver, setGalleryDragOver] = useState(false)
   const [lightbox, setLightbox] = useState(null)  // { filename, label }
+  // 拖拽待确认列表：拖入图片后先展示确认浮条，点击「确定导入」才真正导入
+  const [pendingDrops, setPendingDrops] = useState(null)  // [{ id, name, path, previewUrl }]
+  const [importingDrops, setImportingDrops] = useState(false)
+  const pendingDropIdRef = useRef(0)
 
   function handleGalleryDragOver(e) {
     e.preventDefault()
@@ -382,33 +387,57 @@ function CharacterDetailContent() {
     }
   }
 
+  function releasePendingPreviews(items) {
+    for (const it of (items || [])) {
+      if (it.previewUrl) { try { URL.revokeObjectURL(it.previewUrl) } catch (_) {} }
+    }
+  }
+
+  // 拖入图片 → 仅暂存（不导入），等待用户确认
   async function handleGalleryDrop(e) {
     e.preventDefault()
     e.stopPropagation()
     setGalleryDragOver(false)
 
+    const items = []
     const files = e.dataTransfer?.files
-    if (!files || files.length === 0) {
+    if (files && files.length > 0) {
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) continue
+        items.push({ id: ++pendingDropIdRef.current, name: file.name || file.path, path: file.path, file })
+      }
+    } else {
       // fallback: 从 text/plain 获取文件路径（支持资源面板拖来的文件）
       const text = e.dataTransfer?.getData('text/plain')
-      if (!text) return
-      try {
-        const result = await window.electronAPI?.importImageFile(text)
-        if (result?.filename) {
-          const updated = [...gallery, { label: result.filename, filename: result.filename }]
-          setGallery(updated)
-          await saveGallery(updated)
-        }
-      } catch (_) {}
-      return
+      if (text) {
+        const name = String(text).split(/[\\/]/).pop() || text
+        items.push({ id: ++pendingDropIdRef.current, name, path: text })
+      }
     }
+    if (items.length === 0) return
+    // 生成缩略图预览（仅 File 对象可用）
+    for (const it of items) {
+      if (it.file) {
+        try { it.previewUrl = URL.createObjectURL(it.file) } catch (_) {}
+      }
+    }
+    releasePendingPreviews(pendingDrops)  // 替换旧待确认列表
+    setPendingDrops(items)
+  }
 
-    // 处理所有拖入的图片文件
+  function cancelPendingDrops() {
+    releasePendingPreviews(pendingDrops)
+    setPendingDrops(null)
+  }
+
+  // 确认后才执行导入并加入图库
+  async function confirmPendingDrops() {
+    if (!pendingDrops || importingDrops) return
+    setImportingDrops(true)
     const newImages = []
-    for (const file of files) {
-      if (!file.type.startsWith('image/')) continue
+    for (const it of pendingDrops) {
       try {
-        const result = await window.electronAPI?.importImageFile(file.path)
+        const result = await window.electronAPI?.importImageFile(it.path)
         if (result?.conflict) {
           alert(result.message)
           continue
@@ -418,6 +447,8 @@ function CharacterDetailContent() {
         }
       } catch (_) { /* skip failed imports */ }
     }
+    cancelPendingDrops()
+    setImportingDrops(false)
     if (newImages.length > 0) {
       const updated = [...gallery, ...newImages]
       setGallery(updated)
@@ -517,7 +548,7 @@ function CharacterDetailContent() {
   }
 
   async function deleteOutfit(id) {
-    if (!confirm('确定删除此时装？')) return
+    if (!confirm('确定删除此衣装？')) return
     try {
       await query('DELETE FROM character_outfits WHERE id = ?', [id])
       await loadAll()
@@ -1036,7 +1067,7 @@ function CharacterDetailContent() {
         {effectiveVisible.outfits && (
           <SectionCard
             icon={<Shirt className="w-4 h-4" />}
-            title="时装"
+            title="衣装"
             onAdd={() => setEditOutfit({ name_zh: '', description_zh: '', story_zh: '', image: null })}
             count={outfits.length}
           >
@@ -1044,7 +1075,7 @@ function CharacterDetailContent() {
               {outfits.map(o => {
                 const isSelected = o.id === activeOutfitId
                 const isDragOver = !!outfitDragOver[o.id]
-                // 默认时装自动继承角色默认立绘和头像
+                // 默认衣装自动继承角色默认立绘和头像
                 const displayImage = o.image || (o.is_default ? character.splash_art : null)
                 const displayAvatar = o.avatar_image || (o.is_default ? character.card_art : null)
                 return (
@@ -1055,7 +1086,7 @@ function CharacterDetailContent() {
                     ? 'border-primary-400 ring-1 ring-primary-400/20 bg-primary-500/5'
                     : 'border-surface-700 hover:border-surface-600'}
                 `}>
-                  {/* 时装主图（点击放大） */}
+                  {/* 衣装主图（点击放大） */}
                   <div
                     className="aspect-[3/4] bg-surface-700 flex items-center justify-center overflow-hidden relative cursor-pointer"
                     onClick={() => displayImage && setLightbox({ filename: displayImage, label: o.name_zh })}
@@ -1091,7 +1122,7 @@ function CharacterDetailContent() {
                       )}
                     </div>
                   </div>
-                  {/* 信息栏（点击切换激活时装，支持拖放导入头像） */}
+                  {/* 信息栏（点击切换激活衣装，支持拖放导入头像） */}
                   <div
                     className={`p-3 transition-colors cursor-pointer flex-1
                       ${isSelected
@@ -1161,7 +1192,7 @@ function CharacterDetailContent() {
                         <ColoredText text={o.description_zh || '无描述'}  effectMap={effectMap} />
                       </p>
                     </div>
-                    {/* 导入头像按钮（非默认时装且无头像时显示） */}
+                    {/* 导入头像按钮（非默认衣装且无头像时显示） */}
                     {!o.is_default && !o.avatar_image && (
                       <button
                         onClick={async e => {
@@ -1187,7 +1218,7 @@ function CharacterDetailContent() {
                 )
               })}
             </div>
-            {outfits.length === 0 && <Empty text="暂无时装数据" />}
+            {outfits.length === 0 && <Empty text="暂无衣装数据" />}
           </SectionCard>
         )}
 
@@ -1383,7 +1414,7 @@ function CharacterDetailContent() {
               })()}
               {character.namecard_art && <ImageTile label="名片" filename={character.namecard_art} large onClick={() => setLightbox({ filename: character.namecard_art, label: '名片' })} />}
               {character.card_art && <ImageTile label="头像" filename={character.card_art} onClick={() => setLightbox({ filename: character.card_art, label: '头像' })} />}
-              {/* 时装头像 */}
+              {/* 衣装头像 */}
               {outfits.filter(o => o.avatar_image).map(o => (
                 <ImageTile key={`outfit-avatar-${o.id}`} label={`${o.name_zh} 头像`} filename={o.avatar_image} onClick={() => setLightbox({ filename: o.avatar_image, label: `${o.name_zh} 头像` })} />
               ))}
@@ -1560,11 +1591,11 @@ function CharacterDetailContent() {
 
       {/* Outfit edit */}
       {editOutfit && (
-        <EditModal isOpen={!!editOutfit} onClose={() => setEditOutfit(null)} onSave={handleSaveOutfit} saving={saving} title={editOutfit.id ? '编辑时装' : '添加时装'}>
+        <EditModal isOpen={!!editOutfit} onClose={() => setEditOutfit(null)} onSave={handleSaveOutfit} saving={saving} title={editOutfit.id ? '编辑衣装' : '添加衣装'}>
           <FormInput label="名称" value={editOutfit.name_zh} onChange={v => setEditOutfit({ ...editOutfit, name_zh: v })} />
           <FormInput label="描述" value={editOutfit.description_zh} onChange={v => setEditOutfit({ ...editOutfit, description_zh: v })} multiline effects={relatedEffects} effectMap={effectMap} />
           <FormInput label="故事" value={editOutfit.story_zh} onChange={v => setEditOutfit({ ...editOutfit, story_zh: v })} multiline effects={relatedEffects} effectMap={effectMap} />
-          <ImagePicker label="时装图片" currentImage={editOutfit.image} onSelect={v => setEditOutfit({ ...editOutfit, image: v })} onRemove={() => setEditOutfit({ ...editOutfit, image: null })} />
+          <ImagePicker label="衣装图片" currentImage={editOutfit.image} onSelect={v => setEditOutfit({ ...editOutfit, image: v })} onRemove={() => setEditOutfit({ ...editOutfit, image: null })} />
           <ImagePicker label="头像图片" currentImage={editOutfit.avatar_image} onSelect={v => setEditOutfit({ ...editOutfit, avatar_image: v })} onRemove={() => setEditOutfit({ ...editOutfit, avatar_image: null })} />
         </EditModal>
       )}
@@ -1685,6 +1716,14 @@ function CharacterDetailContent() {
       {lightbox && (
         <Lightbox filename={lightbox.filename} label={lightbox.label} onClose={() => setLightbox(null)} />
       )}
+
+      {/* 图库拖拽导入确认浮条 */}
+      <GalleryDropConfirm
+        items={pendingDrops}
+        importing={importingDrops}
+        onConfirm={confirmPendingDrops}
+        onCancel={cancelPendingDrops}
+      />
     </div>
   )
 }

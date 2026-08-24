@@ -203,12 +203,35 @@ export function TerminalProvider({ children }) {
     setNextZ(z => { const nz = z + 1; setRunningApps(prev => prev.map(a => a.id === 'traincalc' ? { ...a, state: { ...a.state, zIndex: nz } } : a)); return nz })
   }, [])
 
+  // 从外部页面启动摹忆中枢并定位到指定地图的标点（材料/圣遗物「获取来源」跳转）
+  // data: { mapId, placementId?, worldX, worldY, markerName? }
+  const launchMemoryHub = useCallback((data, pagePath) => {
+    setSelectedAppIds([])
+    const app = { id: 'memoryhub', name: '摹忆中枢', icon: Compass, placeholder: false, color: 'from-amber-500 to-yellow-400', iconClass: 'text-white drop-shadow-md' }
+    setRunningApps(prev => {
+      const existing = prev.find(a => a.id === 'memoryhub')
+      if (existing) {
+        return prev.map(a => a.id === 'memoryhub'
+          ? { ...a, data, state: { ...a.state, hidden: false, showOnPage: pagePath } }
+          : a
+        )
+      }
+      const pos = getDefaultPosition(prev.length, 'memoryhub')
+      return [...prev, { ...app, data, state: { ...pos, hidden: false, fullscreen: false, zIndex: 100 + prev.length + 1, showOnPage: pagePath } }]
+    })
+    setNextZ(z => {
+      const nz = z + 1
+      setRunningApps(prev => prev.map(a => a.id === 'memoryhub' ? { ...a, state: { ...a.state, zIndex: nz } } : a))
+      return nz
+    })
+  }, [])
+
   return (
     <TerminalContext.Provider value={{
       runningApps,
       selectedAppIds, setSelectedAppIds, clearSelection,
       launchApp, closeApp, updateAppState,
-      toggleApp, summonApp, bringToFront, launchTrainCalc,
+      toggleApp, summonApp, bringToFront, launchTrainCalc, launchMemoryHub,
       hasRunningNonSystem,
     }}>
       {children}

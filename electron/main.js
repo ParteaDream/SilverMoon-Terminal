@@ -1090,12 +1090,30 @@ function migrateSchema() {
       sort_order INTEGER DEFAULT 0
     )`);
 
-    // 为 weapons 添加 category 列（武器/皮肤/TPS）
+    // 为 weapons 添加 category 列（武器/武器装扮/TPS）
     {
       const wpCols = dbAll('PRAGMA table_info(weapons)', []);
       if (!wpCols.some(c => c.name === 'category')) {
         console.log('[migrate] adding category column to weapons');
         dbRun("ALTER TABLE weapons ADD COLUMN category TEXT DEFAULT '武器'");
+      }
+    }
+
+    // 武器分类改名：皮肤 → 武器装扮（幂等，无该值时无操作）
+    {
+      const renamed = dbAll("SELECT COUNT(*) AS cnt FROM weapons WHERE category = '皮肤'", []);
+      if (renamed[0]?.cnt > 0) {
+        console.log('[migrate] renaming weapon category 皮肤 → 武器装扮 (' + renamed[0].cnt + ' rows)');
+        dbRun("UPDATE weapons SET category = '武器装扮' WHERE category = '皮肤'");
+      }
+    }
+
+    // 为 artifacts 添加 source 列（获取来源文字，材料板块同名字段；秘境标点自动同步展示）
+    {
+      const artCols = dbAll('PRAGMA table_info(artifacts)', []);
+      if (!artCols.some(c => c.name === 'source')) {
+        console.log('[migrate] adding source column to artifacts');
+        dbRun('ALTER TABLE artifacts ADD COLUMN source TEXT');
       }
     }
 
@@ -3032,7 +3050,7 @@ ipcMain.handle('map-read-tile', async (_event, mapId, worldRow, worldCol, maxWid
     if (!fp) return { error: '切片不存在' };
     // 地图切片可能是体积不大的超大 JPEG；必须兑现 maxWidth，否则渲染器仍会
     // 解码完整 2816px 切片，在 10% 层级切换时形成明显的解码/GPU 峰值。
-    return await readImageFile(fp, maxWidth, undefined, false);
+    return await readImageFile(fp, maxWidth);
   } catch (e) {
     return { error: e.message };
   }
@@ -3540,7 +3558,7 @@ async function generateThumbnailBuffer(fp, maxWidth) {
 // 通用图片文件读取（供 read-image 和 read-user-image 复用）
 // saveAsPath: 可选，若提供则将缩略图 PNG 写入该路径（用于 [Thumbnail] 缓存）
 const fsPromises = fs.promises;
-async function readImageFile(fp, maxWidth, saveAsPath, allowSmallRawImage = false) {
+async function readImageFile(fp, maxWidth, saveAsPath) {
   // 命中缓存直接返回（注意：如果 maxWidth 不同，缓存 key 也不同）
   const cacheKey = maxWidth ? `${fp}::w${maxWidth}` : fp;
   const cached = getCachedImage(cacheKey);
@@ -3559,22 +3577,38 @@ async function readImageFile(fp, maxWidth, saveAsPath, allowSmallRawImage = fals
     }
     // 二进制图片 — 如需缩放则使用 generateThumbnailBuffer
     if (maxWidth && maxWidth > 0) {
-      // 对 JPEG/WebP 源文件走"直读"路径：浏览器解码缩放比 nativeImage 快得多
       const headBytes = head.subarray(0, Math.min(bytesRead, 4));
       const isJpeg = headBytes[0] === 0xFF && headBytes[1] === 0xD8;
       const isWebp = headBytes[0] === 0x52 && headBytes[1] === 0x49;
-      if (allowSmallRawImage && (isJpeg || isWebp)) {
-        const stat = await handle.stat();
-        if (stat.size < 5 * 1024 * 1024) {  // < 5MB 直接给浏览器，跳过 nativeImage
-          const rawCacheKey = maxWidth ? `${fp}::w${maxWidth}::raw` : fp;
-          const rawCached = getCachedImage(rawCacheKey);
-          if (rawCached) return { success: true, data: rawCached };
-          const rawBuf = await fsPromises.readFile(fp);
-          const mime = isJpeg ? 'image/jpeg' : 'image/webp';
-          const r = `data:${mime};base64,${rawBuf.toString('base64')}`;
-          setCachedImage(rawCacheKey, r);
-          return { success: true, data: r };
+      const isPng = headBytes[0] === 0x89 && headBytes[1] === 0x50;
+      const stat = await handle.stat();
+      // 直读路径（跳过 nativeImage 解码/重编码，浏览器解码缩放比 nativeImage 快得多）：
+      // 1. JPEG/WebP 且体积 < 200KB —— 典型的小图标（武器/圣遗物/头像等）；
+      //    更大的 webp（如 1MB+ 的版本壁纸）必须走缩略，否则全尺寸载荷会抵消缩略收益。
+      // 2. PNG 且像素宽高 <= maxWidth —— 已是目标尺寸或更小（如 256px 材料图标请求 300px），
+      //    直接给原文件，避免无意义的重编码。
+      const rawPath = (() => {
+        if ((isJpeg || isWebp) && stat.size < 200 * 1024) {
+          return isJpeg ? 'image/jpeg' : 'image/webp';
         }
+        if (isPng && stat.size < 5 * 1024 * 1024 && bytesRead >= 24) {
+          // PNG 结构：8 字节签名 + 4 字节长度 + 4 字节 "IHDR" + 宽(16-19) + 高(20-23)
+          const w = head.readUInt32BE(16);
+          const h = head.readUInt32BE(20);
+          if (w > 0 && h > 0 && w <= maxWidth && h <= maxWidth) {
+            return 'image/png';
+          }
+        }
+        return null;
+      })();
+      if (rawPath) {
+        const rawCacheKey = `${cacheKey}::raw`;
+        const rawCached = getCachedImage(rawCacheKey);
+        if (rawCached) return { success: true, data: rawCached };
+        const rawBuf = await fsPromises.readFile(fp);
+        const r = `data:${rawPath};base64,${rawBuf.toString('base64')}`;
+        setCachedImage(rawCacheKey, r);
+        return { success: true, data: r };
       }
       const buf = await generateThumbnailBuffer(fp, maxWidth);
       if (buf) {

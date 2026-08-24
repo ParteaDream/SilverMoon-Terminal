@@ -258,6 +258,11 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
   const processed = extProcessed ?? internal.processed
   const activeFilterCount = extActiveFilterCount ?? internal.activeFilterCount
 
+  // 行数较多时启用 content-visibility（浏览器跳过离屏行的渲染/布局），
+  // 行数少时保持原生表格行为，避免列宽/行高计算风险
+  const virtualizeRows = processed.length > 60
+  const rowStyle = virtualizeRows ? { contentVisibility: 'auto', containIntrinsicSize: 'auto 53px' } : undefined
+
   return (
     <div className="animate-fade-in">
       {/* Header — only show when not using external state (i.e. standalone mode) */}
@@ -362,6 +367,7 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
               {processed.map((row, i) => (
                 <tr key={`${row.id || i}--s${sortKeys.map(s => s.key + s.dir).join(',')}|f${Object.entries(filters).flat().join(',')}`}
                   data-item-id={itemIdKey ? row[itemIdKey] : undefined}
+                  style={rowStyle}
                   className={`border-b border-surface-800/50 last:border-b-0 transition-colors ${onRowClick ? 'cursor-pointer' : ''} ${onRowReorder ? 'cursor-grab active:cursor-grabbing' : ''} ${activeId != null && (itemIdKey ? row[itemIdKey] : row.id) === activeId ? 'bg-primary-500/10 ring-1 ring-inset ring-primary-500/30' : 'hover:bg-surface-800/30'}`}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   onContextMenu={onRowContextMenu ? (e) => { e.preventDefault(); onRowContextMenu(e, row) } : undefined}

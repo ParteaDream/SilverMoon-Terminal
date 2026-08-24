@@ -6,6 +6,8 @@ import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import DataTable, { useSortFilter, SortBar, FilterBar } from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
+import { SourceCell } from '../components/DomainSourceChips'
+import { useDomainSources } from '../utils/domainSources'
 import { LayoutList, LayoutGrid, Plus, Gem, ArrowUpDown, Filter } from 'lucide-react'
 
 // 星级背景图片 URL（只计算一次）
@@ -232,6 +234,11 @@ export default function ArtifactsPage() {
     !search || a.name_zh.includes(search) || (a.name_en || '').toLowerCase().includes(search.toLowerCase())
   )
 
+  // 炼武秘境关联索引（摹忆中枢变更时自动刷新）；ref 保持 columns 引用稳定
+  const domainIndex = useDomainSources()
+  const domainIndexRef = useRef(domainIndex)
+  domainIndexRef.current = domainIndex
+
   const columns = [
     { key: 'image', label: '', width: '56px', render: row => <ArtThumb filename={row.flower_image || row.image || row.circlet_image} rarity={row.max_rarity} /> },
     { key: 'id', label: 'ID', width: '50px',
@@ -242,6 +249,9 @@ export default function ArtifactsPage() {
     { key: 'name_zh', label: '名称', width: '160px',
       render: row => <span className="font-medium text-white hover:text-primary-400 cursor-pointer transition-colors" onClick={e => { e.stopPropagation(); navigateToDetail(row.id) }}>{row.name_zh}</span>,
       filterType: 'text' },
+    { key: 'source', label: '获取来源', render: row => (
+      <SourceCell source={row.source} domains={domainIndexRef.current.artifacts.get(row.id)} />
+    ), filterType: 'text' },
     { key: 'two_piece_bonus', label: '2件套', render: row => <span className="text-xs text-surface-400 whitespace-normal">{row.two_piece_bonus || '-'}</span> },
     { key: 'four_piece_bonus', label: '4件套', render: row => <span className="text-xs text-surface-400 whitespace-normal">{row.four_piece_bonus || '-'}</span> },
   ]
@@ -346,6 +356,7 @@ export default function ArtifactsPage() {
           <FormInput label="英文名" value={form.name_en} onChange={v => setForm({ ...form, name_en: v })} />
           <FormInput label="最高稀有度" value={form.max_rarity} onChange={v => setForm({ ...form, max_rarity: Number(v) })} type="number" />
         </div>
+        <FormInput label="获取来源" value={form.source ?? ''} onChange={v => setForm({ ...form, source: v })} placeholder="例：通关炼武秘境获得" />
         <FormInput label="简介（生之花）" value={form.description_zh} onChange={v => setForm({ ...form, description_zh: v })} multiline />
         <FormInput label="介绍（死之羽）" value={form.plume_description_zh} onChange={v => setForm({ ...form, plume_description_zh: v })} multiline />
         <FormInput label="介绍（时之沙）" value={form.sands_description_zh} onChange={v => setForm({ ...form, sands_description_zh: v })} multiline />
@@ -397,7 +408,7 @@ export default function ArtifactsPage() {
 }
 
 function ArtThumb({ filename, rarity }) {
-  const { ref, src } = useLazyImage(filename)
+  const { ref, src } = useLazyImage(filename, 256)
   const bgStyle = RARITY_BG_STYLES[rarity || 5]
   return (
     <div ref={ref} className="w-10 h-10 rounded-lg overflow-hidden shrink-0 flex items-center justify-center" style={bgStyle}>
@@ -407,7 +418,7 @@ function ArtThumb({ filename, rarity }) {
 }
 
 function ArtThumbGallery({ filename }) {
-  const { ref, src } = useLazyImage(filename)
+  const { ref, src } = useLazyImage(filename, 256)
   return (
     <div ref={ref} className="w-full h-full flex items-center justify-center">
       {src ? <img src={src} alt="" className="max-w-[85%] max-h-[85%] object-contain drop-shadow-md" /> : null}

@@ -99,7 +99,7 @@ function formatPath(path) {
   p = p.replace(/\.constellations\[(\d+)\]/g, (_, idx) => ` > 命之座${parseInt(idx) + 1}`)
   p = p.replace(/\.talents\[(\d+)\]/g, (_, idx) => ` > 天赋${parseInt(idx) + 1}`)
   p = p.replace(/\.relatedEffects\[(\d+)\]/g, (_, idx) => ` > 额外效果${parseInt(idx) + 1}`)
-  p = p.replace(/\.outfits\[(\d+)\]/g, (_, idx) => ` > 时装${parseInt(idx) + 1}`)
+  p = p.replace(/\.outfits\[(\d+)\]/g, (_, idx) => ` > 衣装${parseInt(idx) + 1}`)
   p = p.replace(/\.(\w+)/g, (_, field) => {
     const label = FIELD_LABELS[field]
     return label ? ` > ${label}` : ` > ${field}`

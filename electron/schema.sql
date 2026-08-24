@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   goblet_image TEXT,                  -- 空之杯图片
   circlet_image TEXT,                 -- 理之冠图片
   sort_order INTEGER DEFAULT 0
-, flower_image TEXT);
+, flower_image TEXT, source TEXT);
 
 CREATE TABLE IF NOT EXISTS challenges (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -317,7 +317,7 @@ CREATE TABLE IF NOT EXISTS weapons (
   image TEXT,                         -- 武器图片文件名
   simple_art TEXT,                    -- 装备图文件名（用于头像）
   gallery_images TEXT,                -- JSON: [{label, filename}] 图库
-  category TEXT DEFAULT '武器',       -- 分类：武器/皮肤/TPS
+  category TEXT DEFAULT '武器',       -- 分类：武器/武器装扮/TPS
   sort_order INTEGER DEFAULT 0
 );
 

@@ -868,7 +868,7 @@ function BannerCard({ banner, items, charMap, weaponMap, showImages, compactMode
   const [imgDims, setImgDims] = useState(null)
 
   const currentImage = images[imgIdx] || null
-  const { ref: bannerRef, src: imgSrc } = useLazyImage(showImages ? currentImage : null, '400px')
+  const { ref: bannerRef, src: imgSrc } = useLazyImage(showImages ? currentImage : null, 400)
 
   // Measure dimensions once loaded
   useEffect(() => {

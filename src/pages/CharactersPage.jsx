@@ -253,15 +253,9 @@ export default function CharactersPage() {
         if (c._displayCardArt) cardArts.push(c._displayCardArt)
         else if (c.splash_art) cardArts.push(c.splash_art)
       }
-      // 预热首屏 30 张（去重），其余延时加载
+      // 预热首屏可见卡片（去重，按缩略尺寸加载），其余交给懒加载按需触发
       const warmBatch = [...new Set(cardArts)].slice(0, 30)
-      for (const fn of warmBatch) readImage(fn)
-      setTimeout(() => {
-        const rest = [...new Set(cardArts)]
-        for (const fn of rest) {
-          if (!warmBatch.includes(fn)) readImage(fn)
-        }
-      }, 3000)
+      for (const fn of warmBatch) readImage(fn, 400)
       try {
         const raw = settingsRes.data?.[0]?.value
         if (raw) {
@@ -394,7 +388,8 @@ export default function CharactersPage() {
     return !search || c.name_zh.includes(search) || (c.name_en || '').toLowerCase().includes(search.toLowerCase())
   })
 
-  const columns = [
+  // 表格列定义 — useMemo 固定引用（依赖 weaponTypes/regions/elemIcons），避免每次渲染全量重排
+  const columns = useMemo(() => [
     {
       key: 'image', label: '', width: '64px', minWidth: '64px',
       render: row => <CharThumb filename={row._displayCardArt || row.splash_art} />,
@@ -460,7 +455,7 @@ export default function CharactersPage() {
       render: row => <span className="text-surface-400 text-xs">{row.affiliation || '-'}</span>,
       filterType: 'text',
     },
-  ]
+  ], [weaponTypes, regions, elemIcons])
 
   // Shared sort/filter state for both views
   const {
@@ -721,7 +716,9 @@ function EditIcon() { return <svg xmlns="http://www.w3.org/2000/svg" width="12" 
 function TrashIcon() { return <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg> }
 
 function CardImage({ filename, className }) {
-  const { ref, src } = useLazyImage(filename)
+  // 512：card_art（256px）命中直读原图；splash_art fallback（2048px 立绘）缩到 512，
+  // 画廊卡显示 ~200px，2.5 倍富余不会糊
+  const { ref, src } = useLazyImage(filename, 512)
   const handleDrag = useImageDrag(filename)
   return (
     <div ref={ref} className={className || 'w-full h-full'}>
@@ -735,7 +732,7 @@ function CardImage({ filename, className }) {
 }
 
 function CharThumb({ filename }) {
-  const { ref, src } = useLazyImage(filename, '100px')
+  const { ref, src } = useLazyImage(filename, 256)
   const handleDrag = useImageDrag(filename)
   if (!src) return <div ref={ref} className="w-8 h-8 rounded bg-surface-700 flex items-center justify-center shrink-0"><UserIcon /></div>
   return <img ref={ref} src={src} alt="" className="w-8 h-8 rounded object-cover shrink-0" draggable onDragStart={handleDrag} />
@@ -755,8 +752,8 @@ const GalleryCard = memo(function GalleryCard({ char, weaponTypes, regions, elem
       className={`group relative rounded-xl overflow-hidden border cursor-pointer
         bg-gradient-to-b ${ELEMENT_BG[char.element_id] || 'from-surface-800 to-surface-900'}
         ${ELEMENT_BORDER[char.element_id] || 'border-surface-700'}
-        hover:border-primary-500/50 hover:scale-[1.03] transition-all duration-200
-        content-visibility-auto contain-layout contain-style contain-paint`}
+        hover:border-primary-500/50 hover:scale-[1.03] transition-all duration-200`}
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 250px' }}
     >
       {/* Card image */}
       <div className="aspect-[3/4] bg-surface-800 flex items-end justify-center overflow-hidden relative">

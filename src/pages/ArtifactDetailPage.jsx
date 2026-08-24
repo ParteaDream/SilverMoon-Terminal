@@ -9,6 +9,8 @@ import { ArrowLeft, Edit3, Gem, Info, Star, ChevronDown } from 'lucide-react'
 import EditModal, { FormInput, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
+import DomainSourceChips from '../components/DomainSourceChips'
+import { useDomainSources } from '../utils/domainSources'
 
 export default function ArtifactDetailPage() {
   const { id } = useParams()
@@ -30,6 +32,8 @@ function ArtifactDetailContent() {
   const [saving, setSaving] = useState(false)
   const [lightbox, setLightbox] = useState(null)
   const [selectedPiece, setSelectedPiece] = useState('flower')
+  // 炼武秘境关联标点（摹忆中枢变更时自动刷新）
+  const domainIndex = useDomainSources()
   useDetailScroll('artifact', id)
 
   useEffect(() => { consumeBackToList(); loadAll() }, [id])
@@ -130,6 +134,15 @@ function ArtifactDetailContent() {
                 <span className="text-amber-400 text-sm">{'★'.repeat(artifact.max_rarity || 5)}</span>
               </div>
               {artifact.name_en && <p className="text-sm text-surface-400">{artifact.name_en}</p>}
+              {/* 简要信息栏：获取来源（文字 + 关联炼武秘境标点，点击打开摹忆中枢定位） */}
+              {(artifact.source || domainIndex.artifacts.get(artifact.id)?.length > 0) && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  {artifact.source && (
+                    <span className="text-xs text-surface-400">获取来源：{artifact.source}</span>
+                  )}
+                  <DomainSourceChips domains={domainIndex.artifacts.get(artifact.id)} />
+                </div>
+              )}
             </div>
           </div>
           <button onClick={() => setEditOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-[rgb(var(--color-1))] text-[rgb(var(--btn-text-1)_/_0.8)] hover:bg-[rgb(var(--scrollbar-thumb))] hover:text-[rgb(var(--btn-text-4th))] hover:scale-105 transition-all">
@@ -228,6 +241,7 @@ function ArtifactDetailContent() {
           <FormInput label="英文名" value={form.name_en} onChange={v => setForm({ ...form, name_en: v })} />
           <FormInput label="最高稀有度" value={form.max_rarity} onChange={v => setForm({ ...form, max_rarity: Number(v) })} type="number" />
         </div>
+        <FormInput label="获取来源" value={form.source ?? ''} onChange={v => setForm({ ...form, source: v })} placeholder="例：通关炼武秘境获得" />
         <FormInput label="简介（生之花）" value={form.flower_description_zh} onChange={v => setForm({ ...form, flower_description_zh: v })} multiline />
         <FormInput label="介绍（死之羽）" value={form.plume_description_zh} onChange={v => setForm({ ...form, plume_description_zh: v })} multiline />
         <FormInput label="介绍（时之沙）" value={form.sands_description_zh} onChange={v => setForm({ ...form, sands_description_zh: v })} multiline />

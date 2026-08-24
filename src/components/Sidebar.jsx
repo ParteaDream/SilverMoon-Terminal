@@ -88,8 +88,12 @@ export default function Sidebar() {
     return () => window.removeEventListener('app-icon-changed', handler)
   }, [])
 
+  // 只过渡 width（transition-all 会在动画每帧对布局属性做全量样式重算，
+  // 图片较多的页面（材料/武器画廊等）展开/收缩时会非常卡）。
+  // 配合画廊卡片上的 content-visibility，动画期间离屏卡片跳过布局，
+  // 每帧只重排可视区内容，动画保持流畅。
   return (
-    <aside className={`${collapsed ? 'w-14' : 'w-56'} flex-shrink-0 border-r border-surface-800 bg-surface-900/80 backdrop-blur-xl flex flex-col transition-all duration-200 drag-region`}>
+    <aside className={`${collapsed ? 'w-14' : 'w-56'} flex-shrink-0 border-r border-surface-800 bg-surface-900/80 backdrop-blur-xl flex flex-col transition-[width] duration-200 ease-out will-change-[width] drag-region`}>
       {/* Header */}
       <div className={`h-12 flex items-center border-b border-surface-800 flex-shrink-0 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
         <div className="flex items-center gap-2 no-drag min-w-0">

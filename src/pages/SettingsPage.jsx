@@ -1145,7 +1145,7 @@ function AppearanceModule() {
   }
 
   async function handleBatchOutfit(mode) {
-    const label = mode === 'default' ? '默认时装' : '最右侧时装'
+    const label = mode === 'default' ? '默认衣装' : '最右侧衣装'
     if (!confirm(`该操作将改变所有角色的头像选择，是否确认？\n\n将统一设置为：${label}`)) return
     setBatchLoading(true)
     try {
@@ -1369,13 +1369,13 @@ function AppearanceModule() {
       {/* ── 应用图标 ── */}
       <AppIconSection />
 
-      {/* ── 时装批量设置 ── */}
+      {/* ── 衣装批量设置 ── */}
       <div className="bg-surface-900/60 border border-surface-800 rounded-xl p-5 space-y-3">
         <div className="flex items-center gap-3">
           <Shirt className="w-5 h-5 text-primary-400 flex-shrink-0" />
           <div className="flex-1">
-            <p className="text-sm font-medium">时装批量设置</p>
-            <p className="text-xs text-surface-400 mt-0.5">一键设置所有角色的头像使用的时装</p>
+            <p className="text-sm font-medium">衣装批量设置</p>
+            <p className="text-xs text-surface-400 mt-0.5">一键设置所有角色的头像使用的衣装</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -1385,7 +1385,7 @@ function AppearanceModule() {
           </button>
           <button onClick={() => handleBatchOutfit('last')} disabled={batchLoading}
             className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-surface-800/60 border border-surface-700 text-surface-300 hover:text-white hover:border-surface-500 transition-colors disabled:opacity-50">
-            时装
+            衣装
           </button>
         </div>
         {batchLoading && <p className="text-xs text-surface-400 text-center">处理中...</p>}

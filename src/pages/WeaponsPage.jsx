@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, memo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
@@ -33,7 +33,7 @@ const RARITY_GRADIENT = {
 }
 const CATEGORY_OPTIONS = [
   { value: '武器', label: '武器' },
-  { value: '皮肤', label: '皮肤' },
+  { value: '武器装扮', label: '武器装扮' },
   { value: 'TPS', label: 'TPS' },
 ]
 
@@ -274,7 +274,8 @@ export default function WeaponsPage() {
     !search || w.name_zh.includes(search) || (w.name_en || '').toLowerCase().includes(search.toLowerCase())
   )
 
-  const columns = [
+  // 表格列定义 — useMemo 固定引用（依赖 weaponTypes），避免每次渲染全量重排
+  const columns = useMemo(() => [
     { key: 'image', label: '', width: '60px', minWidth: '60px', render: row => <WeaponThumb filename={row.simple_art || row.image} rarity={row.rarity} /> },
     { key: 'id', label: 'ID', width: '50px',
       render: row => <span className="text-surface-500 font-mono text-xs">{row.id}</span> },
@@ -286,7 +287,7 @@ export default function WeaponsPage() {
       filterType: 'text' },
     { key: 'category', label: '分类', width: '80px',
       render: row => {
-        const catColors = { '武器': 'text-cyan-400', '皮肤': 'text-pink-400', 'TPS': 'text-amber-400' }
+        const catColors = { '武器': 'text-cyan-400', '武器装扮': 'text-pink-400', 'TPS': 'text-amber-400' }
         return <span className={`text-xs ${catColors[row.category] || 'text-surface-400'}`}>{row.category || '武器'}</span>
       },
       filterType: 'select', filterOptions: CATEGORY_OPTIONS,
@@ -307,7 +308,7 @@ export default function WeaponsPage() {
         <div className="min-w-0"><p className="text-xs text-primary-300 font-medium truncate">{row.passive_name_zh}</p>
           {row.passive_description_zh && <p className="text-xs text-surface-500 truncate mt-0.5"><ColoredText text={row.passive_description_zh} /></p>}</div>
       ) : <span className="text-surface-600">-</span> },
-  ]
+  ], [weaponTypes])
 
   // Shared sort/filter state for both table and gallery
   const {
@@ -481,7 +482,7 @@ export default function WeaponsPage() {
 }
 
 function WeaponThumb({ filename, rarity }) {
-  const { ref, src } = useLazyImage(filename)
+  const { ref, src } = useLazyImage(filename, 256)
   const bgStyle = RARITY_BG_STYLES[rarity || 5]
   return (
     <div ref={ref} className="w-10 h-10 rounded-lg overflow-hidden shrink-0 flex items-center justify-center" style={bgStyle}>
@@ -491,7 +492,7 @@ function WeaponThumb({ filename, rarity }) {
 }
 
 function WeaponThumbLarge({ filename, bgStyle }) {
-  const { ref, src } = useLazyImage(filename)
+  const { ref, src } = useLazyImage(filename, 300)
   return (
     <div ref={ref} className="w-full h-full flex items-center justify-center">
       {src ? <img src={src} alt="" className="max-w-[85%] max-h-[85%] object-contain drop-shadow-md" /> : null}
