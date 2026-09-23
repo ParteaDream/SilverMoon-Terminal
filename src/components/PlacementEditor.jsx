@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, X, Image as ImageIcon, Layers, Search } from 'lucide-react'
+import useOverlay from '../hooks/useOverlay'
 
 // ═══════════════════════════════════════
 // 关联词条下拉多选（圣遗物/材料共用）
@@ -10,6 +11,8 @@ import { Check, X, Image as ImageIcon, Layers, Search } from 'lucide-react'
 function EntryPickerDropdown({ label, hint, catalog, selectedIds, onToggle, getImage, placeholder, searchPlaceholder, open, onOpenChange, search, onSearchChange }) {
   const btnRef = useRef(null)
   const [panelPos, setPanelPos] = useState(null)
+  // M2：锚定下拉浮层（轻量模式：不圈闭，Esc 关闭并还原）
+  useOverlay({ open, onClose: () => onOpenChange(false), label: label || '选择', dialog: false, trap: false, initialFocus: 'none' })
 
   const handleToggle = () => {
     if (open) { onOpenChange(false); return }
@@ -31,7 +34,7 @@ function EntryPickerDropdown({ label, hint, catalog, selectedIds, onToggle, getI
   const panel = open && panelPos && createPortal(
     <>
       {/* 点击外部关闭 */}
-      <div className="fixed inset-0 z-[10000]" onMouseDown={(e) => { e.stopPropagation(); onOpenChange(false) }} />
+      <div className="fixed inset-0 z-[10000]" aria-hidden="true" onMouseDown={(e) => { e.stopPropagation(); onOpenChange(false) }} />
       <div className="fixed z-[10001] w-[336px] max-h-[70vh] flex flex-col rounded-xl bg-surface-800 border border-white/10 shadow-2xl overflow-hidden animate-scale-in"
         style={{ left: panelPos.left, top: panelPos.top }}
         onMouseDown={(e) => e.stopPropagation()}>

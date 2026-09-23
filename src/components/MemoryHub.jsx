@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, memo } from 'react'
 import { createPortal } from 'react-dom'
 import { useDb } from '../context/DbContext'
+import { useShortcut } from '../context/ShortcutContext'
 import MapCalibration from './MapCalibration'
 import MarkerCreatorModal from './MarkerCreatorModal'
 import TextboxCreatorModal from './TextboxCreatorModal'
@@ -698,6 +699,21 @@ const TextboxGrid = memo(({
 // ═══════════════════════════════════════
 export default function MemoryHub({ initialData }) {
   const { devMode } = useDb()
+  // M2：地图浮层 Esc 栈式关闭（优先级：右键菜单 > 重合菜单 > 标点菜单 > 文本框菜单 > 图层菜单；
+  // 全部为空时不消费（交由壳层 Esc 处理）；输入框内（如菜单搜索）也响应）
+  // 说明：setter 均来自下方 useState，闭包仅在按键事件时求值，无 TDZ 问题
+  useShortcut('memoryhub.menus-esc', {
+    keys: ['Escape'],
+    scope: 'system',
+    allowInInput: true,
+    handler: () => {
+      if (contextMenu) { setContextMenu(null); setContextMenuSearch(''); return }
+      if (overlapMenu) { setOverlapMenu(null); setOverlapHighlightedId?.(null); return }
+      if (placedMenu) { setPlacedMenu(null); return }
+      if (textboxMenu) { setTextboxMenu(null); return }
+      if (layerMenu) { setLayerMenu(null); return }
+    },
+  })
   // 从材料/圣遗物「获取来源」跳转进入时的定位目标：{ mapId, placementId?, worldX, worldY }
   const initialDataRef = useRef(initialData)
   const [maps, setMaps] = useState([])            // 所有地图列表

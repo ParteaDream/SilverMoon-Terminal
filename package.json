@@ -8,7 +8,16 @@
     "build": "vite build",
     "test:memoryhub": "node scripts/test-marker-overlap.mjs && node scripts/test-idle-loader.mjs && node scripts/test-map-viewport.mjs",
     "test:desktop": "node scripts/test-desktop-placement.mjs",
+    "test:keyboard": "node scripts/test-keyboard.mjs",
+    "audit:keyboard": "node scripts/audit-keyboard.mjs",
+    "audit:keyboard:baseline": "node scripts/audit-keyboard.mjs --write-baseline",
+    "audit:keyboard:strict": "node scripts/audit-keyboard.mjs --strict",
     "test:wish": "node scripts/test-wish-analysis.mjs",
+    "test:pity": "node scripts/test-pity-at-date.mjs",
+    "test:ai": "node scripts/test-ai-models.mjs",
+    "test:windowdrag": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-fullscreen-window-drag.cjs",
+    "perf:anim": "env -u ELECTRON_RUN_AS_NODE electron scripts/bench-anim-perf.cjs",
+    "shot:changelog": "env -u ELECTRON_RUN_AS_NODE electron scripts/shot-changelog.cjs",
     "perf:memoryhub": "env -u ELECTRON_RUN_AS_NODE electron scripts/benchmark-memoryhub-zoom.cjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder --mac --arm64 && bash scripts/fix-mac-quarantine.sh -y",
@@ -101,6 +110,9 @@
     "asarUnpack": [
       "electron/**"
     ],
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
     "directories": {
       "output": "release"
     },
@@ -111,6 +123,5 @@
       "releaseType": "release",
       "vPrefixedTagName": true
     }
-  },
-  "versionTag": "beta"
+  }
 }

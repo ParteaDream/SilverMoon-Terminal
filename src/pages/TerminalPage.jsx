@@ -21,13 +21,14 @@ import {
   Upload, PaintBucket, Settings,
   File, FileText, Image, Database, Code, Search, Images
 } from 'lucide-react'
+import { beginHeavyAnimation } from '../utils/animPerf'
 
 const GRID_CELL = 110
 
 // ═══════════════════════════════════════════════
 // 桌面图标组件（自由拖拽 + 松手对齐网格）
 // ═══════════════════════════════════════════════
-function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, gridCols, isSelected, onDragStart, onDragMove, groupDragOffset, onRemove }) {
+function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, gridCols, isSelected, onDragStart, onDragMove, groupDragOffset, onRemove, onArrowMove }) {
   const [dragging, setDragging] = useState(false)
   const [dragPos, setDragPos] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
@@ -73,6 +74,26 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, grid
     if (dx > 3 || dy > 3) return
     onClick(app)
   }, [app, onClick])
+
+  // 键盘：Enter/Space 启动；WASD/方向键交给父级按网格移动焦点
+  const handleIconKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault(); e.stopPropagation()
+      onClick(app)
+      return
+    }
+    const lk = String(e.key).toLowerCase()
+    const dir = e.key === 'ArrowUp' || lk === 'w' ? 'up'
+      : e.key === 'ArrowDown' || lk === 's' ? 'down'
+      : e.key === 'ArrowLeft' || lk === 'a' ? 'left'
+      : e.key === 'ArrowRight' || lk === 'd' ? 'right'
+      : null
+    if (dir) {
+      const moved = !!onArrowMove?.(dir, app.id)
+      if (moved) { e.preventDefault(); e.stopPropagation() }
+      // 无相邻图标时不消费 → 交给页面光标引擎跨出桌面区域
+    }
+  }, [app, onClick, onArrowMove])
 
   useEffect(() => {
     if (!dragging) return
@@ -133,8 +154,14 @@ function DesktopIcon({ app, onClick, position, onDragEnd, gridRef, settled, grid
       ref={iconRef}
       className="absolute flex flex-col items-center gap-1.5 cursor-pointer group select-none"
       style={style}
+      tabIndex={-1}
+      role="button"
+      aria-label={app.name}
+      data-cursor-item
+      data-desktop-icon={app.id}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
+      onKeyDown={handleIconKeyDown}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY }) }}
     >
       <div className={`w-16 h-16 rounded-2xl border flex items-center justify-center bg-gradient-to-br ${app.color || 'from-white/10 to-white/5'} backdrop-blur-sm
@@ -235,8 +262,11 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
   const [maximizing, setMaximizing] = useState(false)
   useLayoutEffect(() => {
     setMaximizing(true)
+    // 最大化/还原会让整个小程序窗口连续改宽高，期间暂停图片滤镜
+    // （祈愿捕捉站逐条记录展开后是 4000+ 行带图列表，见 utils/animPerf.js）
+    const endHeavy = beginHeavyAnimation(600)
     const timer = setTimeout(() => setMaximizing(false), 550)
-    return () => clearTimeout(timer)
+    return () => { endHeavy(); clearTimeout(timer) }
   }, [fullscreen])
 
   const fullscreenStyle = fullscreen ? {
@@ -267,44 +297,39 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
 
   // 全屏时拖拽标题栏 → 移动整个 Electron 窗口（IPC 手动拖拽，避免 drag-region 拦截双击）
   const fullscreenDragRef = useRef(null)
-  const windowPosRef = useRef({ x: 0, y: 0 })
-
-  // 全屏时预缓存窗口位置，避免拖拽时异步延迟导致事件穿透
-  // 依赖 fullscreen + hidden + pageVisible：确保隐藏/跨页面重新打开时刷新缓存
-  useEffect(() => {
-    if (!fullscreen || hidden) return
-    window.electronAPI?.getWindowPosition().then(([wx, wy]) => {
-      windowPosRef.current = { x: wx, y: wy }
-    })
-  }, [fullscreen, hidden, pageVisible])
 
   const handleFullscreenTitleMouseDown = useCallback((e) => {
     if (e.button !== 0) return
     onClearSelection?.()
     e.preventDefault()
     e.stopPropagation()
+    // 拖拽基准的窗口坐标必须与 startX/startY 取自同一时刻，且必须是同步的。
+    // window.screenX/screenY 就是窗口在屏幕上的坐标，与主进程 getPosition() 同源
+    // （实测完全一致），因此这里不需要任何 IPC 往返。
+    //
+    // 旧实现用 windowPosRef 缓存窗口坐标（异步 getWindowPosition 填充），有两个缺陷：
+    //   1) 拖拽结束时把「起始基准」而非「最终位置」写回缓存，于是每次拖拽后缓存都
+    //      比真实位置旧一个拖拽距离；
+    //   2) 按下时发起的异步校准要等一次 IPC 往返才落地，而首次 mousemove 早已用旧
+    //      基准算过一次绝对坐标。
+    // 两者叠加 → 窗口先按旧基准瞬移，再被迟到的校准拽回来（拖拽闪烁）。
+    // 页面越重（如祈愿捕捉站 4000+ 条记录）渲染越慢，校准越迟，闪烁越明显。
     const startX = e.screenX, startY = e.screenY
-    const { x: wx, y: wy } = windowPosRef.current
-    fullscreenDragRef.current = { startX, startY, wx, wy }
-    // 同时异步更新缓存（以防窗口在其他地方被移动过）
-    window.electronAPI?.getWindowPosition().then(([fx, fy]) => {
-      if (fullscreenDragRef.current) {
-        fullscreenDragRef.current.wx = fx
-        fullscreenDragRef.current.wy = fy
-      }
-    })
+    const dragBase = {
+      startX, startY,
+      wx: Math.round(window.screenX), wy: Math.round(window.screenY),
+    }
+    fullscreenDragRef.current = dragBase
     const onMove = (ev) => {
-      if (!fullscreenDragRef.current) return
-      const d = fullscreenDragRef.current
-      window.electronAPI?.setWindowPosition(d.wx + ev.screenX - d.startX, d.wy + ev.screenY - d.startY)
+      // 只认自己的基准：松手或被下一次拖拽取代后，残留监听器不再移动窗口
+      if (fullscreenDragRef.current !== dragBase) return
+      window.electronAPI?.setWindowPosition(
+        dragBase.wx + ev.screenX - dragBase.startX,
+        dragBase.wy + ev.screenY - dragBase.startY,
+      )
     }
     const onUp = () => {
-      // 拖拽结束后更新缓存
-      if (fullscreenDragRef.current) {
-        const d = fullscreenDragRef.current
-        windowPosRef.current = { x: d.wx, y: d.wy }
-      }
-      fullscreenDragRef.current = null
+      if (fullscreenDragRef.current === dragBase) fullscreenDragRef.current = null
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -1347,6 +1372,29 @@ export default function TerminalPage() {
     return occ
   }
 
+  // 键盘网格焦点移动：按当前图标 col/row 找相邻格占用者并聚焦；返回是否移动成功
+  function moveDesktopFocus(dir, id) {
+    const placed = APPS.filter(a => desktopIcons[a.id])
+    if (placed.length === 0) return false
+    if (!id || !desktopIcons[id]) {
+      const first = document.querySelector('[data-desktop-icon]')
+      if (first) { first.focus(); return true }
+      return false
+    }
+    const cur = desktopIcons[id]
+    const d = dir === 'up' ? { col: 0, row: -1 } : dir === 'down' ? { col: 0, row: 1 }
+      : dir === 'left' ? { col: -1, row: 0 } : { col: 1, row: 0 }
+    const col = cur.col + d.col
+    const row = cur.row + d.row
+    if (row < 0 || col < 0 || col >= gridCols) return false
+    const occ = getOccupiedCells()
+    const target = occ[`${col},${row}`]
+    if (!target) return false
+    const el = document.querySelector(`[data-desktop-icon="${CSS.escape(target)}"]`)
+    if (!el) return false
+    el.focus()
+    return true
+  }
   return (
     <div className="h-full flex flex-col overflow-hidden select-none relative">
       {wallpaper && (
@@ -1358,13 +1406,13 @@ export default function TerminalPage() {
       <div ref={desktopRef} className="flex-1 relative overflow-hidden" onMouseDown={handleDesktopMouseDown}
         onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
         onDrop={handleDesktopDrop}>
-        <div className="absolute inset-0 p-1 desktop-bg-area">
+        <div data-page-zone className="absolute inset-0 p-1 desktop-bg-area">
           {APPS.filter(app => desktopIcons[app.id]).map((app, i) => (
             <DesktopIcon key={app.id} app={app} position={getIconPosition(app, i)}
               onClick={launchApp} onDragEnd={handleIconDragEnd} onDragStart={handleIconDragStart} onDragMove={handleIconDragMove}
               gridRef={desktopRef} settled={settled} gridCols={gridCols}
               isSelected={selectedAppIds.includes(app.id)} groupDragOffset={groupDragOffset}
-              onRemove={handleIconRemove} />
+              onRemove={handleIconRemove} onArrowMove={moveDesktopFocus} />
           ))}
         </div>
         {/* 选择框 */}

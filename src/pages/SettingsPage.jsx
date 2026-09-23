@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
+import useOverlay from '../hooks/useOverlay'
 import { useTheme, THEMES } from '../context/ThemeContext'
 import { useDownloadProgress } from '../hooks/useDownloadProgress'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
@@ -2152,6 +2153,8 @@ function AdvancedModule() {
   const [seedVersionInput, setSeedVersionInput] = useState('')
   const [seedVersionTag, setSeedVersionTag] = useState('')            // '' | 'pre' | 'origin' | 'extra'
   const [isComposing, setIsComposing] = useState(false)
+  // M2：版本导出弹窗焦点管理
+  const seedOv = useOverlay({ open: seedVersionModal, onClose: () => setSeedVersionModal(false), label: '输入新的数据版本号' })
   const seedInputRef = useRef(null)
 
   // Focus input when modal opens (more reliable than autoFocus on Windows)
@@ -2410,7 +2413,7 @@ function AdvancedModule() {
 
       {/* 数据版本输入弹窗 — 通过 Portal 渲染到 body 避免 Windows 下 DOM 层级干扰 */}
       {seedVersionModal && createPortal(
-        <div className="fixed inset-0 bg-surface-950/60 flex items-center justify-center" style={{ zIndex: 9999 }} onClick={() => setSeedVersionModal(false)}>
+        <div data-overlay ref={seedOv.overlayRef} {...seedOv.overlayProps} className="fixed inset-0 bg-surface-950/60 flex items-center justify-center" style={{ zIndex: 9999 }} onClick={() => setSeedVersionModal(false)}>
           <div
             className="bg-surface-900 border border-surface-700 rounded-xl p-6 w-80 shadow-2xl"
             style={{ WebkitAppRegion: 'no-drag' }}

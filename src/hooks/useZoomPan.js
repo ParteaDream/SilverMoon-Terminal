@@ -13,7 +13,7 @@ export const HOLD_DELAY_MS = 300         // 长按阈值：按下超过 300ms �
 export const HOLD_STEP_MS = 160          // 长按速度：每 160ms 一档 5%（约每秒 ×1.34）
 export const WHEEL_DELTA_FACTOR = 0.0005 // 滚轮灵敏度：每 100 deltaY ≈ 5%
 
-export default function useZoomPan({ minScale = 0.5, maxScale = 3 } = {}) {
+export default function useZoomPan({ minScale = 0.5, maxScale = 8 } = {}) {
   const [scale, setScale] = useState(1)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [dragging, setDragging] = useState(false)     // 拖拽平移中

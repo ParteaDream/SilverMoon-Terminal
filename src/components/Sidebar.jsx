@@ -3,6 +3,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { notifySidebarToggled } from '../context/SidebarContext'
 import { useNav } from '../context/NavContext'
 import { useTerminal } from '../context/TerminalContext'
+import { getSidebarControls, focusPageZone } from '../utils/pageKeyboard'
+import { beginHeavyAnimation } from '../utils/animPerf'
 import {
   Users, Swords, Crown, Package, Sparkle, Skull, Database, Globe, Terminal, Settings, Info,
   PanelLeftClose, PanelLeftOpen, ScrollText
@@ -53,6 +55,8 @@ export default function Sidebar() {
 
   function toggleCollapsed() {
     setAnimating(true)
+    // 宽度过渡期间同时暂停图片滤镜（材料/武器画廊数百张图，见 utils/animPerf.js）
+    beginHeavyAnimation(260)
     if (blurTimerRef.current) clearTimeout(blurTimerRef.current)
     blurTimerRef.current = setTimeout(() => setAnimating(false), 260)
     setCollapsed(prev => {
@@ -103,8 +107,37 @@ export default function Sidebar() {
   // 图片较多的页面（材料/武器画廊等）展开/收缩时会非常卡）。
   // 配合画廊卡片上的 content-visibility，动画期间离屏卡片跳过布局，
   // 每帧只重排可视区内容，动画保持流畅。
+  // 侧栏键盘：W/S 或 ↑/↓ 在全部侧栏控制（板块+收起/展开+版本信息）间移动；
+  // Enter 打开板块；若 Enter 落在"已是当前板块"上则进入页面主区域（与全局 Tab 循环同集）
+  function handleSidebarKeys(e) {
+    const k = e.key
+    const isUp = k === 'ArrowUp' || k === 'w' || k === 'W'
+    const isDown = k === 'ArrowDown' || k === 's' || k === 'S'
+    if (isUp || isDown) {
+      const items = getSidebarControls()
+      const idx = items.indexOf(e.target)
+      if (idx < 0) return
+      const next = isDown ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0)
+      if (next === idx) return
+      e.preventDefault()
+      items[next].focus()
+      return
+    }
+    if (k === 'Enter') {
+      const t = e.target
+      const to = t && t.getAttribute ? t.getAttribute('data-nav-to') : null
+      if (to && (location.pathname === to || location.pathname.startsWith(to + '/'))) {
+        // 已是当前板块：Enter = 聚焦页面主区域首个条目（搜索仅由 '/' 触发）
+        e.preventDefault()
+        focusPageZone()
+      }
+    }
+  }
+
   return (
-    <aside className={`${collapsed ? 'w-14' : 'w-56'} flex-shrink-0 border-r border-surface-800 flex flex-col transition-[width] duration-200 ease-out will-change-[width] drag-region ${animating ? 'bg-surface-900' : 'bg-surface-900/80 backdrop-blur-xl'}`}>
+    <aside
+      onKeyDown={handleSidebarKeys}
+      className={`${collapsed ? 'w-14' : 'w-56'} flex-shrink-0 border-r border-surface-800 flex flex-col transition-[width] duration-200 ease-out will-change-[width] drag-region ${animating ? 'bg-surface-900' : 'bg-surface-900/80 backdrop-blur-xl'}`}>
       {/* Header */}
       <div className={`h-12 flex items-center border-b border-surface-800 flex-shrink-0 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
         <div className="flex items-center gap-2 no-drag min-w-0">
@@ -128,6 +161,7 @@ export default function Sidebar() {
           return (
           <button
             key={item.to}
+            data-nav-to={item.to}
             onClick={() => nav(item.to)}
             title={collapsed ? item.label : undefined}
             className={`flex items-center rounded-lg text-sm font-medium w-full
@@ -151,6 +185,7 @@ export default function Sidebar() {
       {/* Terminal */}
       <div className={`flex-shrink-0 ${collapsed ? 'px-2' : 'px-3'} pb-1`}>
         <button
+          data-nav-to="/terminal"
           onClick={() => nav('/terminal')}
           title={collapsed ? '终端' : undefined}
           className={`flex items-center rounded-lg w-full no-drag transition-all duration-200 min-w-0
@@ -172,6 +207,7 @@ export default function Sidebar() {
       {/* Changelog */}
       <div className={`flex-shrink-0 ${collapsed ? 'px-2' : 'px-3'} pb-1`}>
         <button
+          data-nav-to="/changelog"
           onClick={() => nav('/changelog')}
           title={collapsed ? 'Changelog' : undefined}
           className={`flex items-center rounded-lg w-full no-drag transition-all duration-200 min-w-0

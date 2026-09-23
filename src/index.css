@@ -309,6 +309,18 @@ body {
   background: rgb(var(--color-1) / 0.8);
 }
 
+/* 挂了版本导航条（VersionNavigator）的滚动容器：原生滚动条由导航条取代 */
+.page-rail-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* 该页面右侧要同时容纳「导航条 + 悬浮版本号 + 浮动按钮」，
+   正文让出这条车道，按钮才不会压在卡片上 */
+.page-rail-scroll {
+  padding-right: var(--page-rail-gutter-w, 0px);
+}
+
 /* Selection */
 ::selection {
   background: rgba(99, 102, 241, 0.3);
@@ -376,10 +388,54 @@ button:where(:not([class*="hover:"])):hover:not(:disabled) {
 }
 .category-tag { background: rgb(var(--surface-700)); color: rgb(var(--surface-300)); }
 
-/* Focus styles */
+/* ── 键盘焦点体系（全键盘适配基建 M0）── */
+/* 焦点环宽度可整体调优；颜色随主题 --color-primary 自动适配 */
+:root {
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--color-primary);
+}
 *:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+/* 键盘 roving 活动项视觉态（区别于键盘焦点，供网格/菜单活动项使用） */
+.roving-active {
+  box-shadow: inset 0 0 0 1.5px rgb(var(--color-1) / 0.9);
+}
+/* 键帽（快捷键展示） */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  height: 1.5em;
+  padding: 0 0.35em;
+  border-radius: 6px;
+  background: rgb(var(--surface-800));
+  border: 1px solid rgb(var(--surface-600) / 0.6);
+  border-bottom-width: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78em;
+  line-height: 1;
+  color: rgb(var(--surface-200));
+  white-space: nowrap;
+}
+
+/* ── 页面光标焦点框（PageCursor，2025-09）── */
+.page-cursor-ring {
+  position: fixed;
+  z-index: 55;
+  border: 2px solid var(--color-primary);
+  border-radius: 12px;
+  box-shadow: 0 0 0 3px rgb(var(--color-1) / 0.18), 0 0 18px rgb(var(--color-1) / 0.35);
+  pointer-events: none;
+  transition: transform 150ms ease, width 150ms ease, height 150ms ease;
+  will-change: transform, width, height;
+}
+/* ring 激活期间隐藏页面内原生焦点框（避免双框）；侧栏/弹层不受影响 */
+body.cursor-ring-on main :focus-visible {
+  outline: none;
 }
 
 /* Smooth drag region for Electron */
@@ -441,6 +497,15 @@ button:where(:not([class*="hover:"])):hover:not(:disabled) {
               top 0.5s cubic-bezier(0.4, 0, 0.2, 1),
               width 0.5s cubic-bezier(0.4, 0, 0.2, 1),
               height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 尺寸动画期间暂停图片滤镜（由 src/utils/animPerf.js 挂上 data-animating）。
+   filter: drop-shadow() 会给每个 <img> 建立独立的滤镜渲染表面；容器在动画里
+   连续改宽高时这些表面每帧都要重新求值并重栅格化。材料/武器等画廊有数百张
+   图片，实测侧栏展开/收缩单帧可达 83ms，暂停后回到 17ms 以内。
+   动画结束属性被摘除，装饰效果立即恢复。 */
+html[data-animating='1'] img {
+  filter: none !important;
 }
 
 

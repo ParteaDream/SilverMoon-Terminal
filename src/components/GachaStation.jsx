@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useDb } from '../context/DbContext'
 import { useTerminal } from '../context/TerminalContext'
 import {
   Globe, Loader2, Plus, Trash2, ArrowLeft, Star,
-  Sparkles, RefreshCw, ChevronRight, List,
+  Sparkles, RefreshCw, ChevronRight, List, LayoutGrid, Check, Search, X,
 } from 'lucide-react'
+import WishGallery from './WishGallery'
 
 const GACHA_TYPE_MAP = {
   100: { name: '新手祈愿', icon: '🌟', color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
@@ -21,6 +22,11 @@ const RANK_BGS = { 3: 'bg-blue-500/10', 4: 'bg-purple-500/10', 5: 'bg-amber-500/
 
 /** 各类型统计展示顺序 */
 const DISPLAY_ORDER = [301, 400, 302, 500, 200, 100]
+
+/** 祈愿捕捉站窗口 id（用于展开详情时调整窗口宽度） */
+const GACHA_APP_ID = 'gachastation'
+/** 逐条记录侧栏宽度 */
+const DETAIL_PANEL_W = 340
 
 export default function GachaStation() {
   const { query, readImage } = useDb()
@@ -364,11 +370,50 @@ function ArchiveView({ data, query, readImage, onBack, onRefresh }) {
 
 // ─── 卡池详情页：五星时间线 + 条形图 ───
 function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, onBack }) {
+  const { runningApps, updateAppState } = useTerminal()
   const [items, setItems] = useState([])
   const [stats, setStats] = useState([])
   const [loading, setLoading] = useState(true)
   const [showDetail, setShowDetail] = useState(false)
   const [imgMap, setImgMap] = useState({})
+  // 逐条记录筛选：星级勾选（默认全选）+ 物品名搜索
+  const [rankFilter, setRankFilter] = useState({ 5: true, 4: true, 3: true })
+  const [search, setSearch] = useState('')
+  const [viewMode, setViewMode] = useState('gallery') // list | gallery
+  // 展开详情前的窗口几何，用于收起时还原
+  const prevGeomRef = useRef(null)
+
+  // 展开 / 收起详情：同步加宽 / 还原小程序窗口，右侧腾出逐条记录区域
+  const toggleDetail = useCallback(() => {
+    const st = runningApps.find(a => a.id === GACHA_APP_ID)?.state || {}
+    const curW = st.width || 620
+    const curLeft = st.left ?? 100
+    const opening = !showDetail
+    if (opening) {
+      if (!prevGeomRef.current) prevGeomRef.current = { width: curW, left: curLeft }
+      const maxW = Math.max(360, window.innerWidth - 40)
+      const nextW = Math.max(curW, Math.min(curW + DETAIL_PANEL_W, maxW))
+      const nextLeft = Math.max(8, Math.min(curLeft, window.innerWidth - nextW - 8))
+      if (nextW !== curW || nextLeft !== curLeft) updateAppState(GACHA_APP_ID, { width: nextW, left: nextLeft })
+    } else {
+      const prev = prevGeomRef.current
+      prevGeomRef.current = null
+      if (prev) {
+        const nextLeft = Math.max(8, Math.min(prev.left, window.innerWidth - prev.width - 8))
+        updateAppState(GACHA_APP_ID, { width: prev.width, left: nextLeft })
+      }
+    }
+    setShowDetail(opening)
+  }, [showDetail, runningApps, updateAppState])
+
+  // 离开详情页（返回概览）时还原窗口宽度
+  useEffect(() => () => {
+    const prev = prevGeomRef.current
+    if (prev) {
+      prevGeomRef.current = null
+      updateAppState(GACHA_APP_ID, { width: prev.width, left: prev.left })
+    }
+  }, [updateAppState])
 
   // 加载该类型的所有祈愿记录
   useEffect(() => {
@@ -444,6 +489,17 @@ function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, 
     return () => { cancelled = true }
   }, [timeline, nameImageMap, readImage, showDetail, items])
 
+  // 逐条记录筛选：星级勾选 + 名称搜索（Hook 必须位于 loading 早退之前）
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return [...items].reverse().filter(item => {
+      const rank = Number(item.rank_type)
+      if ((rank === 3 || rank === 4 || rank === 5) && !rankFilter[rank]) return false
+      if (q && !String(item.name || '').toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [items, rankFilter, search])
+
   // 统计
   const statMap = {}
   for (const s of stats) statMap[s.rank_type] = s.cnt
@@ -482,9 +538,20 @@ function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, 
         <span className="text-[9px] text-surface-400">{meta?.icon}</span>
         <span className="text-[10px] font-semibold">{meta?.name}</span>
         <span className="text-[8px] text-surface-500 ml-1">UID {uid}</span>
+        {items.length > 0 && (
+          <button onClick={toggleDetail}
+            className={`ml-2 flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] border transition-colors ${
+              showDetail
+                ? 'bg-blue-600/20 text-blue-300 border-blue-500/30'
+                : 'bg-surface-700/40 text-surface-400 border-surface-600/40 hover:text-surface-200 hover:bg-surface-600/40'
+            }`}>
+            <List className="w-2.5 h-2.5" />{showDetail ? '隐藏详情' : '显示详情'}
+          </button>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-w-0 overflow-y-auto p-3 space-y-3">
         {/* 统计行 */}
         <div className="grid grid-cols-4 gap-2">
           {[
@@ -501,14 +568,6 @@ function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, 
         </div>
 
         {/* 五星时间线 */}
-        {items.length > 0 && (
-          <div className="flex justify-end">
-            <button onClick={() => setShowDetail(!showDetail)}
-              className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] bg-surface-700/50 text-surface-400 hover:text-surface-200 hover:bg-surface-600/50">
-              <List className="w-2.5 h-2.5" />{showDetail ? '隐藏详情' : '详情'}
-            </button>
-          </div>
-        )}
         {reversedTimeline.length > 0 && (
           <div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2.5">
             <div className="flex items-center justify-between mb-2">
@@ -569,13 +628,75 @@ function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, 
           </div>
         )}
 
-        {/* 详情列表（折叠） */}
+        {/* 更新时间 */}
+        <div className="text-[7px] text-surface-600 text-center">{total} 条记录</div>
+        </div>
+
+        {/* 逐条记录侧栏：点击「显示详情」时窗口加宽并在此展开 */}
         {showDetail && (
-          <div className="rounded-lg bg-surface-800/40 border border-surface-700/30 p-2.5">
-            <h4 className="text-[10px] font-semibold text-surface-400 mb-2">逐条记录</h4>
-            <div className="space-y-0.5 max-h-80 overflow-y-auto"
+          <aside
+            className="shrink-0 min-h-0 flex flex-col border-l border-surface-700/30 bg-surface-950/40 animate-slide-in-right"
+            style={{ width: DETAIL_PANEL_W }}>
+            <div className="flex items-center justify-between px-3 py-2 border-b border-surface-700/30 shrink-0">
+              <h4 className="text-[10px] font-semibold text-surface-300">逐条记录</h4>
+              <span className="text-[9px] text-surface-500">{filteredItems.length} / {total} 条</span>
+            </div>
+
+            {/* 筛选：星级勾选 + 名称搜索 */}
+            <div className="px-3 py-2 border-b border-surface-700/30 shrink-0 space-y-1.5">
+              <div className="flex items-center gap-1">
+                {[5, 4, 3].map(r => (
+                  <button key={r}
+                    onClick={() => setRankFilter(f => ({ ...f, [r]: !f[r] }))}
+                    title={`${RANK_NAMES[r]}记录`}
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] transition-colors ${
+                      rankFilter[r]
+                        ? `${RANK_COLORS[r]} ${RANK_BGS[r]} border-surface-600/60`
+                        : 'text-surface-600 border-surface-700/60 hover:text-surface-400'
+                    }`}>
+                    <span className={`w-2.5 h-2.5 rounded-[3px] border flex items-center justify-center ${rankFilter[r] ? 'border-current' : 'border-surface-600'}`}>
+                      {rankFilter[r] && <Check className="w-2 h-2 text-current" strokeWidth={3} />}
+                    </span>
+                    {RANK_NAMES[r]}
+                  </button>
+                ))}
+                {/* 列表 / 画廊 切换 */}
+                <div className="ml-auto flex items-center gap-0.5 p-0.5 rounded bg-surface-800/60 border border-surface-700/40">
+                  <button type="button" onClick={() => setViewMode('list')} title="列表" aria-label="列表视图"
+                    className={`p-0.5 rounded transition-colors ${viewMode === 'list' ? 'bg-blue-600/25 text-blue-300' : 'text-surface-500 hover:text-surface-300'}`}>
+                    <List className="w-3 h-3" aria-hidden="true" />
+                  </button>
+                  <button type="button" onClick={() => setViewMode('gallery')} title="画廊" aria-label="画廊视图"
+                    className={`p-0.5 rounded transition-colors ${viewMode === 'gallery' ? 'bg-blue-600/25 text-blue-300' : 'text-surface-500 hover:text-surface-300'}`}>
+                    <LayoutGrid className="w-3 h-3" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-surface-800/60 border border-surface-700/40">
+                <Search className="w-3 h-3 text-surface-500 shrink-0" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="搜索物品名称…"
+                  className="flex-1 min-w-0 bg-transparent text-[10px] text-surface-200 placeholder-surface-600 outline-none"
+                />
+                {search && (
+                  <button onClick={() => setSearch('')} className="text-surface-500 hover:text-surface-300 shrink-0" title="清空">
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 记录列表 */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-0.5"
               style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgb(var(--color-1)) rgb(var(--surface-800))' }}>
-              {[...items].reverse().map(item => {
+              {filteredItems.length === 0 ? (
+                <div className="text-center text-[10px] text-surface-500 py-8">没有符合条件的记录</div>
+              ) : viewMode === 'gallery' ? (
+                <WishGallery items={filteredItems} nameImageMap={nameImageMap} minCell={56} />
+              ) : filteredItems.map(item => {
                 const rankColor = RANK_COLORS[item.rank_type] || 'text-surface-300'
                 const rankBg = RANK_BGS[item.rank_type] || 'bg-surface-800/50'
                 const imgSrc = imgMap[item.name]
@@ -583,6 +704,12 @@ function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, 
 
                 return (
                   <div key={item.id}
+                    // 逐条记录可能有 4000+ 行：跳过离屏行的布局/绘制，否则最大化/还原
+                    // （500ms 内连续改窗口宽高）每帧都要重排整张列表。
+                    // contain-intrinsic-size 作用于**内容盒**：行高 41px 是边框盒，
+                    // 减去 p-1.5(12px) 与 border(2px) 后内容盒为 27px。
+                    // 写 41px 会让每一行被算成 55px，滚动条长度虚高 32%。
+                    style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 27px' }}
                     className={`flex items-center gap-2 p-1.5 rounded ${rankBg} border border-transparent hover:border-surface-600/50 transition-colors`}>
                     <div className="w-6 h-6 shrink-0 rounded-full bg-surface-700/50 overflow-hidden flex items-center justify-center border border-surface-600">
                       {imgSrc ? (
@@ -593,9 +720,9 @@ function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, 
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1">
-                        <span className={`text-[10px] font-semibold ${rankColor}`}>{item.name}</span>
-                        <span className={`text-[8px] ${rankColor}`}>{'★'.repeat(item.rank_type || 0)}</span>
-                        {item.item_type && <span className="text-[7px] text-surface-500">{item.item_type}</span>}
+                        <span className={`text-[10px] font-semibold truncate ${rankColor}`}>{item.name}</span>
+                        <span className={`text-[8px] shrink-0 ${rankColor}`}>{'★'.repeat(item.rank_type || 0)}</span>
+                        {item.item_type && <span className="text-[7px] text-surface-500 shrink-0">{item.item_type}</span>}
                       </div>
                       <div className="text-[8px] text-surface-500">{item.time?.slice(0, 16) || ''}</div>
                     </div>
@@ -603,11 +730,8 @@ function TypeDetailView({ uid, gachaType, meta, nameImageMap, readImage, query, 
                 )
               })}
             </div>
-          </div>
+          </aside>
         )}
-
-        {/* 更新时间 */}
-        <div className="text-[7px] text-surface-600 text-center">{total} 条记录</div>
       </div>
     </div>
   )

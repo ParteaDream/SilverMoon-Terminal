@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, Save, Loader2, ImagePlus } from 'lucide-react'
 import { useDb } from '../context/DbContext'
 import ColorTextInput from './ColorTextInput'
+import useOverlay from '../hooks/useOverlay'
 
 export default function EditModal({ isOpen, onClose, onSave, title, children, saving, wide, wider, closeOnBackdrop = true }) {
   // 通知外部（开发者工具栏等）弹窗打开状态，用于处理工具栏与侧边栏区域的视觉衔接
@@ -10,12 +11,15 @@ export default function EditModal({ isOpen, onClose, onSave, title, children, sa
     window.dispatchEvent(new CustomEvent('app-modal-open', { detail: { open: isOpen } }))
   }, [isOpen])
 
+  // M2：弹层焦点管理（圈闭/Esc/还原/语义）
+  const ov = useOverlay({ open: isOpen, onClose, label: title || '编辑', initialFocus: 'auto' })
+
   if (!isOpen) return null
 
   const maxW = wider ? 'max-w-7xl' : wide ? 'max-w-6xl' : 'max-w-2xl'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Visual backdrop: full-viewport, pointer-events-none so titlebar drag works */}
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm pointer-events-none" />
       {/* Interactive backdrop: handles click-to-close, only covers modal area */}
@@ -26,7 +30,7 @@ export default function EditModal({ isOpen, onClose, onSave, title, children, sa
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-surface-700">
           <h2 className="text-base font-semibold">{title}</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-surface-700 transition-colors">
+          <button onClick={onClose} aria-label="关闭" className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-surface-700 transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>

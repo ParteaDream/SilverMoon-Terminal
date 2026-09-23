@@ -1,0 +1,851 @@
+{
+  "generatedAt": "2026-09-06T16:57:03.545Z",
+  "totals": {
+    "nonsemanticClickables": 127,
+    "iconButtonsNoLabel": 60,
+    "rawKeydown": 13,
+    "overlayNoDialog": 23,
+    "tabIndexUses": 10,
+    "ctxMenuNonInteractive": 5,
+    "outlineNoneNoFocus": 0
+  },
+  "perFile": {
+    "src/App.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/AIMarkdown.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/AITool.jsx": {
+      "nonsemanticClickables": 1,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 1,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/Album.jsx": {
+      "nonsemanticClickables": 7,
+      "iconButtonsNoLabel": 7,
+      "rawKeydown": 1,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 1,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/AppLibrary.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/AppShortcuts.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/BetaMemo.jsx": {
+      "nonsemanticClickables": 1,
+      "iconButtonsNoLabel": 4,
+      "rawKeydown": 1,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 2,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/ColorPicker.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 2,
+      "rawKeydown": 0,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/ColorTextInput.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/ColoredText.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/DataTable.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/DevToolbar.jsx": {
+      "nonsemanticClickables": 10,
+      "iconButtonsNoLabel": 9,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/DomainSourceChips.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/DragonSnake.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 1,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/EditModal.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/GachaStation.jsx": {
+      "nonsemanticClickables": 1,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/GalleryDropConfirm.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/HelpOverlay.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/Hourglass.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 2,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/ItemThumb.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/LayerMapModal.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 1,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/Lightbox.jsx": {
+      "nonsemanticClickables": 3,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 1,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/MapCalibration.jsx": {
+      "nonsemanticClickables": 4,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 1,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/MarkdownText.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/MarkerCreatorModal.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/MemoryHub.jsx": {
+      "nonsemanticClickables": 10,
+      "iconButtonsNoLabel": 4,
+      "rawKeydown": 1,
+      "overlayNoDialog": 7,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 1,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/Menu.jsx": {
+      "nonsemanticClickables": 1,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/NorthlandBank.jsx": {
+      "nonsemanticClickables": 1,
+      "iconButtonsNoLabel": 4,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/NoteSpan.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/PageCursor.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 1,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/PlacementEditor.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/RateFetcher.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/SearchBar.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/SetupWizard.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/Sidebar.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/TableEditor.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/TerminalDock.jsx": {
+      "nonsemanticClickables": 1,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/TextboxCreatorModal.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/TrainCalc.jsx": {
+      "nonsemanticClickables": 3,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/UpdateToast.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/WishAnalysis.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 3,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/WorldTree.jsx": {
+      "nonsemanticClickables": 8,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/components/appRegistry.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/context/DbContext.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/context/NavContext.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/context/PageMemoryContext.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/context/ShortcutContext.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/context/SidebarContext.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/context/TerminalContext.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/context/ThemeContext.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/hooks/useDetailState.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/hooks/useDownloadProgress.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/hooks/useImageDrag.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/hooks/useLazyImage.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/hooks/useOverlay.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 1,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/hooks/useRovingFocus.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 1,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/hooks/useTypeColor.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/hooks/useZoomPan.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 1,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/main.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/ArtifactDetailPage.jsx": {
+      "nonsemanticClickables": 3,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/ArtifactsPage.jsx": {
+      "nonsemanticClickables": 4,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/ChallengesPage.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/ChangelogPage.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 1,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 2,
+      "ctxMenuNonInteractive": 1,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/CharacterDetailPage.jsx": {
+      "nonsemanticClickables": 15,
+      "iconButtonsNoLabel": 5,
+      "rawKeydown": 2,
+      "overlayNoDialog": 4,
+      "tabIndexUses": 1,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/CharactersPage.jsx": {
+      "nonsemanticClickables": 3,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 1,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/GameDataPage.jsx": {
+      "nonsemanticClickables": 4,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/MaterialDetailPage.jsx": {
+      "nonsemanticClickables": 3,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/MaterialsPage.jsx": {
+      "nonsemanticClickables": 4,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/SettingsPage.jsx": {
+      "nonsemanticClickables": 9,
+      "iconButtonsNoLabel": 1,
+      "rawKeydown": 0,
+      "overlayNoDialog": 3,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/TerminalPage.jsx": {
+      "nonsemanticClickables": 2,
+      "iconButtonsNoLabel": 4,
+      "rawKeydown": 1,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 1,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/WeaponDetailPage.jsx": {
+      "nonsemanticClickables": 3,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/WeaponsPage.jsx": {
+      "nonsemanticClickables": 5,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 1,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/WebsitesPage.jsx": {
+      "nonsemanticClickables": 1,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 1,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/pages/WishesPage.jsx": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 1,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/aiMessages.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/aiProviders.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/annotationViewport.mjs": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/challengeCrawl.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/colorMarkup.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/desktopPlacement.mjs": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/domainSources.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/focusTrap.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/idleLoader.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/keymap.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/mapViewport.mjs": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/markdown.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/markerOverlap.mjs": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/pageKeyboard.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/pageStateStore.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/roving.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/spatialNav.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/tileResolution.mjs": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    },
+    "src/utils/wishAnalysis.js": {
+      "nonsemanticClickables": 0,
+      "iconButtonsNoLabel": 0,
+      "rawKeydown": 0,
+      "overlayNoDialog": 0,
+      "tabIndexUses": 0,
+      "ctxMenuNonInteractive": 0,
+      "outlineNoneNoFocus": 0
+    }
+  }
+}

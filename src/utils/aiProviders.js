@@ -8,11 +8,11 @@ export const AI_PROVIDERS = [
     tagline: '深度求索 · 高性价比推理',
     baseUrl: 'https://api.deepseek.com',
     apiKeyUrl: 'https://platform.deepseek.com/api_keys',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-    defaultModel: 'deepseek-v4-flash',
+    models: ['deepseek-flash', 'deepseek-v4-pro'],
+    defaultModel: 'deepseek-flash',
     gradient: 'from-indigo-500 via-blue-500 to-cyan-400',
     chip: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-    desc: 'DeepSeek 官方 API：deepseek-v4-flash 轻量快速（默认），deepseek-v4-pro 旗舰深度推理，均支持函数调用。',
+    desc: 'DeepSeek 官方 API：deepseek-flash（V4.1-Flash，默认；支持图片输入、1M 上下文、默认开启思考）与 deepseek-v4-pro（旗舰，纯文本）。旧的 deepseek-chat / deepseek-reasoner / deepseek-v4-flash 已下线，请求会被服务端别名到 deepseek-flash。',
   },
   {
     id: 'chatgpt',
@@ -20,11 +20,11 @@ export const AI_PROVIDERS = [
     tagline: 'OpenAI 官方接口',
     baseUrl: 'https://api.openai.com/v1',
     apiKeyUrl: 'https://platform.openai.com/api-keys',
-    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
     defaultModel: 'gpt-5.6-luna',
     gradient: 'from-emerald-500 via-teal-500 to-green-400',
     chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-    desc: 'OpenAI 官方接口：GPT-5.6 系列（Sol 旗舰 / Terra 均衡 / Luna 轻量），支持函数调用。',
+    desc: 'OpenAI 官方接口：gpt-6-astra（新旗舰，擅长 agent / computer use，价格约为 5.6 Sol 的 2.5 倍）、gpt-5.6-sol / terra / luna（旗舰 / 均衡 / 轻量）。注：GPT-5.6 起「推理 + tools」在 /chat/completions 上互斥，本程序会自动改用 reasoning_effort=none。',
   },
   {
     id: 'custom',
@@ -67,6 +67,44 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「银月终端」的数据库 AI �
 `
 
 /**
+ * 已下线 / 已改名的模型 → 现用名（按供应商分桶）。
+ * 供应商仍保留这些旧名的别名（请求会被路由到新模型），这里把老配置里的名字换成
+ * 当前名称，避免设置界面显示成「自定义」，也避免哪天别名被摘掉后请求失败。
+ *
+ * 注意：旧名只做迁移与界面提示，不放进 models 预设 —— 否则用户选了旧名，
+ * 下次启动又会被迁移回现用名。
+ */
+const MODEL_ALIASES = {
+  // DeepSeek：2026-04-24 起 deepseek-chat / deepseek-reasoner 指向 V4 系列，
+  // 2026-09-10 V4.1-Flash 上线后统一用 deepseek-flash，
+  // deepseek-v4-flash / deepseek-v4-flash-vision-exp 已下线（官方脚注：请求由 V4.1-Flash 提供服务）
+  deepseek: {
+    'deepseek-chat': 'deepseek-flash',
+    'deepseek-reasoner': 'deepseek-flash',
+    'deepseek-v4-flash': 'deepseek-flash',
+    'deepseek-v4-flash-vision-exp': 'deepseek-flash',
+  },
+  // OpenAI：裸 gpt-5.6 实际路由到 Sol，显式写清以免误以为在用轻量档
+  chatgpt: {
+    'gpt-5.6': 'gpt-5.6-sol',
+  },
+}
+
+/** 把历史配置里的旧模型名迁移到当前名称；自定义供应商允许任意模型名，原样保留 */
+function migrateModelName(model, providerId) {
+  if (!model || providerId === 'custom') return model
+  return MODEL_ALIASES[providerId]?.[model.trim().toLowerCase()] || model
+}
+
+/**
+ * 界面提示用：该供应商「仍被服务端接受、但已下线」的旧名列表（[旧名, 现用名]）。
+ * 让用户看得到文档里出现过的旧名归到哪里去了，而不必把它们混进可选预设。
+ */
+export function retiredModelNames(providerId) {
+  return Object.entries(MODEL_ALIASES[providerId] || {})
+}
+
+/**
  * 默认设置：各供应商配置（API Key / 地址 / 模型）相互独立，存于 providers 分桶；
  * temperature / systemPrompt 为全局行为偏好。
  */
@@ -76,7 +114,7 @@ export function defaultAiSettings() {
     temperature: 0.7,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     providers: {
-      deepseek: { apiKey: '', baseUrl: '', model: 'deepseek-v4-flash' },
+      deepseek: { apiKey: '', baseUrl: '', model: 'deepseek-flash' },
       chatgpt: { apiKey: '', baseUrl: '', model: 'gpt-5.6-luna' },
       custom: { apiKey: '', baseUrl: '', model: '' },
     },
@@ -108,7 +146,9 @@ export function migrateAiSettings(raw) {
     out.providers[p.id] = {
       apiKey: typeof stored.apiKey === 'string' ? stored.apiKey : '',
       baseUrl: typeof stored.baseUrl === 'string' ? stored.baseUrl : '',
-      model: typeof stored.model === 'string' && stored.model ? stored.model : def.model,
+      model: typeof stored.model === 'string' && stored.model
+        ? migrateModelName(stored.model, p.id)
+        : def.model,
     }
   }
   if (!isNew) {
@@ -116,7 +156,9 @@ export function migrateAiSettings(raw) {
     out.providers[providerId] = {
       apiKey: typeof raw.apiKey === 'string' ? raw.apiKey : '',
       baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : '',
-      model: typeof raw.model === 'string' && raw.model ? raw.model : out.providers[providerId].model,
+      model: typeof raw.model === 'string' && raw.model
+        ? migrateModelName(raw.model, providerId)
+        : out.providers[providerId].model,
     }
   }
   return out

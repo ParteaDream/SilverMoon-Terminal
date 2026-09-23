@@ -3,14 +3,15 @@ import { useLocation } from 'react-router-dom'
 import { useTerminal } from '../context/TerminalContext'
 import { useDb } from '../context/DbContext'
 import AppLibrary from './AppLibrary'
-import { APPS, SYS_TOOLS, matchShortcut } from './appRegistry'
+import { APPS, SYS_TOOLS } from './appRegistry'
+import { useShortcut } from '../context/ShortcutContext'
 import { Play, X } from 'lucide-react'
 
 /**
  * 底部 Dock 菜单栏
  */
 export default function TerminalDock({ visible }) {
-  const { runningApps, toggleApp, closeApp, hasRunningNonSystem, summonApp, updateAppState } = useTerminal()
+  const { runningApps, toggleApp, closeApp, hasRunningNonSystem, summonApp, updateAppState, dockSuppressed } = useTerminal()
   const { devMode } = useDb()
   const location = useLocation()
   const [hovered, setHovered] = useState(null)
@@ -56,17 +57,18 @@ export default function TerminalDock({ visible }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 全局快捷键唤起资源库
-  useEffect(() => {
-    const handler = (e) => {
-      if (matchShortcut(e, libraryShortcut)) {
-        e.preventDefault()
-        setLibraryOpen(prev => !prev)
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [libraryShortcut])
+  // 全局快捷键唤起资源库（经注册中心 ShortcutContext，行为与原 window 监听一致：
+  // scope:'system' 弹层中仍生效；allowInInput 保持输入框内可触发；键位可自定义）
+  useShortcut('dock.toggle-library', libraryShortcut ? {
+    keys: [libraryShortcut],
+    scope: 'system',
+    allowInInput: true,
+    allowDuringComposition: true,
+    handler: (e) => {
+      e.preventDefault()
+      setLibraryOpen(prev => !prev)
+    },
+  } : null)
 
   // 快捷键配置变化时同步（自定义面板修改后，事件直接携带新值，避免防抖写入未完成读到旧值）
   useEffect(() => {
@@ -99,6 +101,8 @@ export default function TerminalDock({ visible }) {
     const page = a.state?.showOnPage || '/terminal'
     return page === '*' || page === location.pathname
   })
+  // 图片查看器打开时临时隐藏 Dock，关闭后自动恢复
+  if (dockSuppressed) return null
   if (!libraryOpen && !visible && !isOnTerminal && !hasRunningNonSystem && runningApps.length === 0) return null
   if (!libraryOpen && anyFullscreenVisible) return null
 
@@ -176,7 +180,7 @@ export default function TerminalDock({ visible }) {
           marginBottom: 'env(safe-area-inset-bottom, 0px)',
         }}
       >
-        <div ref={dockRef} className="pointer-events-auto flex items-end gap-1.5 px-4 py-2 rounded-2xl mx-auto w-fit
+        <div ref={dockRef} data-dock-root className="pointer-events-auto flex items-end gap-1.5 px-4 py-2 rounded-2xl mx-auto w-fit
           bg-surface-800/60 backdrop-blur-xl border border-white/10 shadow-2xl
           animate-fade-in"
           style={{ marginBottom: devMode ? 'calc(40px + 12px)' : '12px' }}

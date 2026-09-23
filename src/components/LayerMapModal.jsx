@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import useOverlay from '../hooks/useOverlay'
 import { X, Check, Image, Layers } from 'lucide-react'
 import { getTileRequestWidth, getVisibleTileLimit } from '../utils/tileResolution.mjs'
 
@@ -12,6 +13,8 @@ export default function LayerMapModal({
   onConfirm,
   onCancel,
 }) {
+  // M2：弹层焦点管理（方向键/+- 调整保留；Tab 交还圈闭）
+  const ov = useOverlay({ open: true, onClose: onCancel, label: '分层地图' })
   const existingLayers = mapConfig?.layers || []
   const TILE_SIZE = 512   // 切片尺寸兜底（旧地图无 config.tileSize 时使用）
 
@@ -321,10 +324,6 @@ export default function LayerMapModal({
         case 'ArrowRight': if (!isInput) { e.preventDefault(); setWorldX(x => x + step) } break
         case '+': case '=': e.preventDefault(); setMapSize(s => s + 10); break
         case '-': case '_': e.preventDefault(); setMapSize(s => Math.max(50, s - 10)); break
-        case 'Tab':
-          e.preventDefault()
-          setPreviewFlip(v => !v)
-          break
         case ' ':
           if (!isInput && existingLayers.length > (editData?.editIndex != null ? 1 : 0)) {
             e.preventDefault()
@@ -505,7 +504,7 @@ export default function LayerMapModal({
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
       <div ref={modalRef} className="w-[960px] max-w-[92vw] max-h-[92vh] flex flex-col rounded-xl bg-surface-900 border border-white/10 shadow-2xl p-5" onClick={e => e.stopPropagation()}>
         {/* ── 标题 ── */}
         <div className="flex items-center justify-between mb-4 shrink-0">

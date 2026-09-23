@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import useOverlay from '../hooks/useOverlay'
 import { Crosshair, Check, X, ZoomIn } from 'lucide-react'
 
 // ═══════════════════════════════════════
@@ -18,6 +19,8 @@ export default function MapCalibration({
   onCancel,      // () => {} 取消回调
 }) {
   // 定点 A（世界原点）和定点 B（方向+距离参考）— 像素坐标在预览图上
+  // M2：标定界面焦点管理（方向键微调保留自有点位移动逻辑）
+  const ov = useOverlay({ open: true, onClose: onCancel, label: '地图标定' })
   const [pointA, setPointA] = useState({ x: previewW * 0.3, y: previewH * 0.6 })
   const [pointB, setPointB] = useState({ x: previewW * 0.7, y: previewH * 0.4 })
   const [activePoint, setActivePoint] = useState('A') // 'A' | 'B'
@@ -352,7 +355,7 @@ export default function MapCalibration({
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onCancel} onMouseDown={e => e.stopPropagation()}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onCancel} onMouseDown={e => e.stopPropagation()}>
       <div
         className="w-full h-full rounded-2xl bg-surface-900 border border-white/10 shadow-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}

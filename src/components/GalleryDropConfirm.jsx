@@ -1,4 +1,5 @@
 import { Check, X, Image as ImageIcon, Loader2 } from 'lucide-react'
+import useOverlay from '../hooks/useOverlay'
 
 /**
  * 图库拖拽导入确认浮条
@@ -13,14 +14,16 @@ import { Check, X, Image as ImageIcon, Loader2 } from 'lucide-react'
  * @param {() => void} onCancel 点击取消
  */
 export default function GalleryDropConfirm({ items, importing, onConfirm, onCancel }) {
+  // M2：确认浮条焦点管理（有内容时圈闭 Tab/Esc；无内容静默）
+  const ov = useOverlay({ open: !!(items && items.length > 0), onClose: onCancel, label: '确认导入图片', initialFocus: 'auto' })
   if (!items || items.length === 0) return null
   return (
-    <div className="fixed left-1/2 bottom-6 -translate-x-1/2 z-40 w-[min(560px,92vw)] rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in">
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="fixed left-1/2 bottom-6 -translate-x-1/2 z-40 w-[min(560px,92vw)] rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in">
       <div className="px-4 py-3">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-medium text-surface-200">将导入 {items.length} 张图片到图库</p>
           {!importing && (
-            <button onClick={onCancel} className="p-1 rounded-lg text-surface-500 hover:text-white hover:bg-surface-800 transition-colors" title="取消">
+            <button onClick={onCancel} aria-label="取消" className="p-1 rounded-lg text-surface-500 hover:text-white hover:bg-surface-800 transition-colors" title="取消">
               <X className="w-3.5 h-3.5" />
             </button>
           )}

@@ -2638,7 +2638,6 @@ function RelatedEffectsSection({ effects, effectMap, onAdd, onEdit, onDelete, on
               return (
                 <div
                   key={ef.id}
-                  draggable
                   onDragStart={(e) => handleDragStart(e, index)}
                   onDragOver={(e) => handleDragOver(e, index)}
                   onDragLeave={handleDragLeave}
@@ -2652,9 +2651,13 @@ function RelatedEffectsSection({ effects, effectMap, onAdd, onEdit, onDelete, on
                 >
                   <div className="flex items-start justify-between mb-1">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
-                      {/* 拖拽手柄 */}
+                      {/* 拖拽手柄（仅手柄可拖拽，避免正文区域拖动干扰文字选取） */}
                       <span
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDragEnd={handleDragEnd}
                         className="cursor-grab active:cursor-grabbing text-surface-500 hover:text-surface-300 transition-colors flex-shrink-0"
+                        title="拖拽排序"
                       >
                         <GripVertical className="w-3.5 h-3.5" />
                       </span>

@@ -5,6 +5,7 @@ import App from './App'
 import { DbProvider } from './context/DbContext'
 import { NavProvider } from './context/NavContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { ShortcutProvider } from './context/ShortcutContext'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -13,7 +14,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <DbProvider>
         <NavProvider>
           <ThemeProvider>
-            <App />
+            <ShortcutProvider>
+              <App />
+            </ShortcutProvider>
           </ThemeProvider>
         </NavProvider>
       </DbProvider>

@@ -5,6 +5,7 @@ import { useNav } from './context/NavContext'
 import { ChevronLeft, ChevronRight, ArrowUp, Minus, Square, X } from 'lucide-react'
 import SetupWizard from './components/SetupWizard'
 import Sidebar from './components/Sidebar'
+import AppShortcuts from './components/AppShortcuts'
 import DevToolbar from './components/DevToolbar'
 import UpdateToast from './components/UpdateToast'
 import CharactersPage from './pages/CharactersPage'
@@ -105,22 +106,27 @@ export default function App() {
         </Routes>
         </div>
 
-        {/* 返回顶部浮动按钮 */}
+        {/* 返回顶部浮动按钮 — 开发者工具栏(bottom-0 h-10 z-60)会盖住它，开启时整体抬高 */}
         {showBackToTop && (
           <button
             onClick={scrollToTop}
-            className="fixed right-2 bottom-6 z-40 p-2 rounded-lg border
+            className={`fixed ${devMode ? 'bottom-16' : 'bottom-6'} z-40 p-2 rounded-lg border
                        bg-surface-800/90 border-surface-600 text-surface-300
                        hover:text-white hover:bg-surface-700 hover:border-surface-500
-                       shadow-lg transition-all animate-fade-in"
+                       shadow-lg transition-all animate-fade-in`}
+            // 有版本导航条的页面把完整偏移写进变量；其它页面回退到原来的 right-2
+            style={{ right: 'var(--page-rail-reserve-w, 0.5rem)' }}
             title="返回顶部"
+            aria-label="返回顶部"
+            data-cursor-exempt
           >
             <ArrowUp className="w-5 h-5" />
           </button>
         )}
 
         {/* 右侧上一步/下一步浮动按钮 */}
-        <div className="fixed right-2 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-1">
+        <div className="fixed top-1/2 -translate-y-1/2 z-40 flex flex-col gap-1" data-cursor-exempt
+          style={{ right: 'var(--page-rail-reserve-w, 0.5rem)' }}>
           <button
             onClick={goBack}
             disabled={!canGoBack}
@@ -130,6 +136,7 @@ export default function App() {
                 : 'bg-surface-800/40 border-surface-700/30 text-surface-600 cursor-not-allowed'
             }`}
             title="上一步"
+            aria-label="上一步"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
@@ -142,6 +149,7 @@ export default function App() {
                 : 'bg-surface-800/40 border-surface-700/30 text-surface-600 cursor-not-allowed'
             }`}
             title="下一步"
+            aria-label="下一步"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
@@ -157,6 +165,7 @@ export default function App() {
   return (
     <TerminalProvider>
       <div className="bg-surface-950" style={wrapperStyle}>
+        <AppShortcuts />
         {/* 顶部拖拽条 */}
       <div
         className="drag-region"

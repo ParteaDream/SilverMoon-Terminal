@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo, useCallback } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
@@ -80,6 +80,10 @@ export default function MaterialsPage() {
   // 用 ref 保持最新状态
   const stateRef = useRef({ viewMode, search, sortKeys: [], filters: {} })
   stateRef.current = { viewMode, search }
+  // push 的引用会随 location 变化，若作为 useCallback 依赖会让卡片 memo 失效；
+  // 用 ref 保存最新实现，保证 navigateToDetail 引用长期稳定。
+  const pushRef = useRef(push)
+  pushRef.current = push
 
   // 挂载时加载数据，恢复视图模式
   useEffect(() => {
@@ -198,10 +202,20 @@ export default function MaterialsPage() {
     setMaterials(data)
   }
 
-  function navigateToDetail(id) {
+  const navigateToDetail = useCallback((id) => {
     savePage('materials', stateRef.current)
-    push(`/materials/${id}`)
-  }
+    pushRef.current(`/materials/${id}`)
+  }, [savePage])
+  // 稳定引用：卡片是 memo 的，若每次渲染新建箭头函数会让 memo 完全失效，
+  // 于是任意状态变化（搜索输入、右键菜单开合、勾选）都会重渲染全部卡片。
+  const handleCardContextMenu = useCallback((e, mat) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, mat })
+  }, [])
+  const handleRowContextMenu = useCallback((e, row) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, mat: row })
+  }, [])
 
   function openAdd() { setEditing(null); setForm({ id: 0, type: 'common', rarity: 1, sort_order: 0 }); setModalOpen(true) }
   function openEdit(row) { setEditing(row); setForm({ ...row, type: normalizeType(row.type) }); setModalOpen(true) }
@@ -269,9 +283,11 @@ export default function MaterialsPage() {
     _invalidateMaterialsCache(); loadData()
   }
 
-  const filtered = materials.filter(m =>
+  // 记忆化搜索过滤：此前每次渲染都会生成新数组，导致 useSortFilter 的
+  // processed 每次都重算并换新引用，所有卡片随之重渲染。
+  const filtered = useMemo(() => materials.filter(m =>
     !search || m.name_zh.includes(search) || (m.name_en || '').toLowerCase().includes(search.toLowerCase())
-  )
+  ), [materials, search])
 
   // 同步选中材料到 DevToolbar
   useEffect(() => {
@@ -315,8 +331,12 @@ export default function MaterialsPage() {
     processed, activeFilterCount,
   } = useSortFilter(filtered, columns)
 
-  // 排序/筛选变化时通知懒加载图片重新检查视口
-  useEffect(() => { bumpLazyRevision() }, [sortKeys, filters])
+  // 排序/筛选变化时通知懒加载图片重新检查视口（挂载时跳过，见 useLazyImage 注释）
+  const lazySyncDone = useRef(false)
+  useEffect(() => {
+    if (!lazySyncDone.current) { lazySyncDone.current = true; return }
+    bumpLazyRevision()
+  }, [sortKeys, filters])
 
   // 用 ref 保持最新状态
   stateRef.current = { viewMode, search, sortKeys, filters }
@@ -383,19 +403,19 @@ export default function MaterialsPage() {
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
           onBulkDelete={handleBulkDelete}
-          onRowClick={row => navigateToDetail(row.id)} onRowContextMenu={(e, row) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, mat: row }) }} itemIdKey="id"
+          onRowClick={row => navigateToDetail(row.id)} onRowContextMenu={handleRowContextMenu} itemIdKey="id"
         />
       ) : (
         <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 xl:grid-cols-14 2xl:grid-cols-16 gap-1">
           {processed.map(m => (
             <MatGalleryCard
-              key={m.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
+              key={m.id}
               mat={m}
               rarityStars={RARITY_STARS}
               rarityColor={RARITY_COLOR}
               bgStyle={RARITY_BG_STYLES[m.rarity || 1]}
               onNavigate={navigateToDetail}
-              onContextMenu={(e, mat) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, mat }) }}
+              onContextMenu={handleCardContextMenu}
             />
           ))}
           {processed.length === 0 && (

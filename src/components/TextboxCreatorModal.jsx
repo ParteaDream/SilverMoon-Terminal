@@ -1,16 +1,19 @@
 import { useState } from 'react'
 import { Type, X, Check } from 'lucide-react'
+import useOverlay from '../hooks/useOverlay'
 
 export default function TextboxCreatorModal({ onConfirm, onCancel, editData, mapConfig, presetLayerId }) {
   const [text, setText] = useState(editData?.text || '')
   const [level, setLevel] = useState(editData?.level || 1)
   const [layerId, setLayerId] = useState(editData?.layer_id || presetLayerId || '')
   const isEdit = !!editData
+  // M2：弹层焦点管理
+  const ov = useOverlay({ open: true, onClose: onCancel, label: isEdit ? '编辑文本框' : '添加文本框', initialFocus: 'auto' })
 
   const layers = mapConfig?.layers || []
 
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
       <div className="w-80 rounded-xl bg-surface-900 border border-white/10 shadow-2xl p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">

@@ -269,6 +269,7 @@ export default function WebsitesPage() {
           title="站点"
           columns={tableColumns}
           data={filtered}
+          itemIdKey="id"
           onEdit={openEdit}
           onDelete={handleDelete}
           onAdd={openAdd}
@@ -429,6 +430,10 @@ function GalleryCard({ website, onRowClick, onEdit, multiSelect, activeDetailId 
   return (
     <div
       className={`rounded-xl border transition-colors overflow-hidden group cursor-pointer ${isActive ? 'bg-primary-500/10 border-primary-500/40 ring-2 ring-primary-500/30' : 'bg-surface-800/50 border-surface-700 hover:border-surface-600'}`}
+      data-item-id={website.id}
+      tabIndex={-1}
+      role="button"
+      aria-label={website.title_zh}
       onClick={() => onRowClick(website)}
       onDoubleClick={() => { if (!multiSelect) onEdit(website) }}
     >

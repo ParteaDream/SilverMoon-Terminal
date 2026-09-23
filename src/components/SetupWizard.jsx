@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useDb } from '../context/DbContext'
+import { useShortcut } from '../context/ShortcutContext'
 import { Database, FolderOpen, Download, Loader2, AlertTriangle } from 'lucide-react'
 
 function AppWizardIcon() {
@@ -21,6 +22,14 @@ export default function SetupWizard() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [seedStats, setSeedStats] = useState(null)
+
+  // 键盘：init 步 Esc 返回选择位置（加载中不响应）
+  useShortcut('setup.back', {
+    keys: ['Escape'],
+    scope: 'system',
+    when: () => step === 'init' && !loading,
+    handler: (e) => { e.preventDefault(); setStep('welcome'); setError(null) },
+  })
 
   // 加载种子数据统计
   useEffect(() => {
@@ -100,6 +109,7 @@ export default function SetupWizard() {
             </p>
           </div>
           <button
+            autoFocus
             onClick={handleSelectFolder}
             disabled={loading}
             className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-500 disabled:opacity-50
@@ -133,6 +143,7 @@ export default function SetupWizard() {
             )}
           </div>
           <button
+            autoFocus
             onClick={handleInitDb}
             disabled={loading}
             className="w-full py-3 px-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-50
@@ -172,6 +183,7 @@ export default function SetupWizard() {
             银月终端数据库已初始化完成。现在可以开始浏览和编辑了。
           </p>
           <button
+            autoFocus
             onClick={() => window.location.reload()}
             className="py-3 px-6 bg-primary-600 hover:bg-primary-500 rounded-lg font-medium text-white transition-colors"
           >
@@ -215,7 +227,8 @@ export default function SetupWizard() {
           </div>
         )}
         <button
-          onClick={() => setStep('select')}
+          autoFocus
+            onClick={() => setStep('select')}
           className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-500 rounded-lg font-medium text-white transition-colors"
         >
           开始设置

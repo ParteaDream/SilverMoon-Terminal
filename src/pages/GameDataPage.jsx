@@ -12,6 +12,7 @@ import TableEditor from '../components/TableEditor'
 import ColoredText from '../components/ColoredText'
 import { X, ImagePlus } from 'lucide-react'
 import Lightbox from '../components/Lightbox'
+import useOverlay from '../hooks/useOverlay'
 import { stripFormatting } from '../utils/colorMarkup'
 import { stripMarkdown } from '../utils/markdown'
 import { useTypeColor } from '../hooks/useTypeColor'
@@ -144,6 +145,8 @@ function MultiImagePicker({ label, images, onChange }) {
 function CategoryInput({ label, value, onChange, existingCategories }) {
   const [open, setOpen] = useState(false)
   const [dropdownStyle, setDropdownStyle] = useState({})
+  // M2：下拉轻量浮层（Esc 关闭并还原到输入框；不圈闭）
+  useOverlay({ open, onClose: () => setOpen(false), label: '选择分类', dialog: false, trap: false, initialFocus: 'none' })
   const inputRef = useRef(null)
 
   function recalcPosition() {
@@ -251,6 +254,8 @@ const LINK_TYPES = [
 
 // ── 关联条目搜索/选择模态框 ──
 function LinkSearchModal({ onClose, onConfirm, existingLinks }) {
+  // M2：弹层焦点管理
+  const ov = useOverlay({ open: true, onClose, label: '关联条目', initialFocus: 'auto' })
   const { query, readImage } = useDb()
   const [tab, setTab] = useState('game_data')
   const [searchText, setSearchText] = useState('')
@@ -333,7 +338,7 @@ function LinkSearchModal({ onClose, onConfirm, existingLinks }) {
   const lt = LINK_TYPES.find(t => t.key === tab)
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-surface-900 border border-surface-700 rounded-2xl w-[680px] max-h-[85vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
         {/* 标题 */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-surface-700 shrink-0">
@@ -862,6 +867,7 @@ export default function GameDataPage() {
               <SearchBar value={search} onChange={setSearch} placeholder="搜索数据..." />
             </div>
           }
+          itemIdKey="id"
         />
       </div>
 

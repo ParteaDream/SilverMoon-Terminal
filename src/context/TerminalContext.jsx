@@ -47,6 +47,8 @@ export function TerminalProvider({ children }) {
   const [runningApps, setRunningApps] = useState([])
   const [nextZ, setNextZ] = useState(100)
   const [selectedAppIds, setSelectedAppIds] = useState([])
+  // 图片查看器打开期间临时隐藏 Dock（计数式，支持多个查看器叠层）
+  const [dockSuppressCount, setDockSuppressCount] = useState(0)
 
   // 启动时清除上次遗留的状态
   useEffect(() => {
@@ -60,6 +62,9 @@ export function TerminalProvider({ children }) {
   }, [])
 
   const clearSelection = useCallback(() => setSelectedAppIds([]), [])
+
+  const suppressDock = useCallback(() => setDockSuppressCount(c => c + 1), [])
+  const releaseDock = useCallback(() => setDockSuppressCount(c => Math.max(0, c - 1)), [])
 
   const bringToFront = useCallback((appId) => {
     setNextZ(z => {
@@ -233,6 +238,8 @@ export function TerminalProvider({ children }) {
       launchApp, closeApp, updateAppState,
       toggleApp, summonApp, bringToFront, launchTrainCalc, launchMemoryHub,
       hasRunningNonSystem,
+      dockSuppressed: dockSuppressCount > 0,
+      suppressDock, releaseDock,
     }}>
       {children}
     </TerminalContext.Provider>
@@ -243,4 +250,9 @@ export function useTerminal() {
   const ctx = useContext(TerminalContext)
   if (!ctx) throw new Error('useTerminal must be used within TerminalProvider')
   return ctx
+}
+
+/** 可选读取（无 Provider 时返回 null），供可脱离终端使用的通用组件调用 */
+export function useTerminalOptional() {
+  return useContext(TerminalContext)
 }

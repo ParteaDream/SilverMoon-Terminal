@@ -6,7 +6,8 @@ import {
   Copy, Brain, Zap, Server, RefreshCw
 } from 'lucide-react'
 import AIMarkdown from './AIMarkdown'
-import { AI_PROVIDERS, getProvider, DEFAULT_SYSTEM_PROMPT, defaultAiSettings, migrateAiSettings, newConversationId } from '../utils/aiProviders'
+import Menu from './Menu'
+import { AI_PROVIDERS, getProvider, DEFAULT_SYSTEM_PROMPT, defaultAiSettings, migrateAiSettings, newConversationId, retiredModelNames } from '../utils/aiProviders'
 import { DB_TOOL, buildApiMessages } from '../utils/aiMessages'
 
 const MAX_TOOL_ROUNDS = 8
@@ -385,11 +386,17 @@ export default function AITool() {
     setTesting(true)
     setTestResult(null)
     try {
-      const res = await window.electronAPI?.aiTestConnection({ provider: settings.provider, ...providerCfg, temperature: settings.temperature })
+      const api = window.electronAPI
+      if (!api?.aiTestConnection) {
+        setTestResult({ ok: false, text: '连接失败：主进程接口未就绪，请完全退出应用后重新启动' })
+        return
+      }
+      const res = await api.aiTestConnection({ provider: settings.provider, ...providerCfg, temperature: settings.temperature })
       if (res?.success) setTestResult({ ok: true, text: '连接成功 · ' + res.model + (res.reply ? ' · ' + res.reply : '') })
-      else setTestResult({ ok: false, text: res?.error || '连接失败' })
+      // 未拿到结果时给一句可操作的提示：主进程代码改动需重启应用才生效
+      else setTestResult({ ok: false, text: res?.error || '连接失败：主进程未返回结果（若刚更新过程序，请完全退出应用后重试）' })
     } catch (e) {
-      setTestResult({ ok: false, text: e.message })
+      setTestResult({ ok: false, text: e.message || '连接失败（未知错误）' })
     } finally {
       setTesting(false)
     }
@@ -571,7 +578,6 @@ const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegenerate, b
   const isUser = msg.role === 'user'
   const [copied, setCopied] = useState(false)
   const [ctxMenu, setCtxMenu] = useState(null)
-  const menuJustOpened = useRef(false)
   const hasTool = msg.toolCalls && msg.toolCalls.length > 0
 
   async function handleCopy() {
@@ -580,23 +586,7 @@ const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegenerate, b
     setTimeout(() => setCopied(false), 1500)
   }
 
-  // 右键菜单：点击空白处/再次右键关闭
-  useEffect(() => {
-    if (!ctxMenu) return
-    menuJustOpened.current = true
-    const timer = setTimeout(() => { menuJustOpened.current = false }, 0)
-    const close = () => {
-      if (menuJustOpened.current) return
-      setCtxMenu(null)
-    }
-    window.addEventListener('mousedown', close)
-    window.addEventListener('contextmenu', close)
-    return () => {
-      clearTimeout(timer)
-      window.removeEventListener('mousedown', close)
-      window.removeEventListener('contextmenu', close)
-    }
-  }, [ctxMenu])
+  // 右键菜单关闭/键盘导航由 Menu 组件统一处理（M2）
 
   function handleContextMenu(e) {
     e.preventDefault()
@@ -643,23 +633,15 @@ const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegenerate, b
         </div>
       </div>
 
-      {/* 右键菜单：拷贝对话框文本（portal 到 body，避免窗口 backdrop-blur 包含块导致定位偏移） */}
-      {ctxMenu && createPortal(
-        <div
-          className="fixed z-[10000] w-40 py-1 rounded-xl bg-surface-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-scale-in"
-          style={{ left: Math.min(ctxMenu.x, window.innerWidth - 170), top: Math.min(ctxMenu.y, window.innerHeight - 60) }}
-          onMouseDown={e => e.stopPropagation()}
-          onClick={e => e.stopPropagation()}
-        >
-          <button
-            onClick={async () => { await handleCopy(); setCtxMenu(null) }}
-            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-surface-200 hover:bg-white/10 transition-colors"
-          >
-            <Copy className="w-3.5 h-3.5 text-surface-400" />
-            拷贝文本
-          </button>
-        </div>,
-        document.body
+      {/* 右键菜单：统一 Menu 组件（方向键/Esc/焦点还原） */}
+      {ctxMenu && (
+        <Menu
+          open={!!ctxMenu}
+          anchor={ctxMenu}
+          onClose={() => setCtxMenu(null)}
+          items={[{ id: 'copy', label: '拷贝文本', icon: Copy }]}
+          onSelect={async (id) => { if (id === 'copy') await handleCopy() }}
+        />
       )}
     </div>
   )
@@ -840,6 +822,8 @@ function SettingsView({ settings, updateSettings, onBack, testing, testResult, t
   const provider = getProvider(settings.provider)
   const isCustom = settings.provider === 'custom'
   const providerCfg = settings.providers?.[settings.provider] || { apiKey: '', baseUrl: '', model: '' }
+  // 文档里出现过、但已下线的旧模型名（服务端仍做别名）：展示出来，但不混进可选预设
+  const retiredNames = retiredModelNames(settings.provider)
 
   function selectProvider(id) {
     const p = getProvider(id)
@@ -941,7 +925,11 @@ function SettingsView({ settings, updateSettings, onBack, testing, testResult, t
                 placeholder="或直接输入模型名"
                 className="w-44 px-3 py-2 rounded-xl bg-surface-800 border border-surface-700 focus:border-primary-500/50 text-xs text-surface-100 placeholder-surface-500 outline-none transition-colors" />
             </div>
-            <p className="text-[10px] text-surface-600 mt-1.5">支持函数调用（数据库查询工具）的模型体验最佳。</p>
+            <p className="text-[10px] text-surface-600 mt-1.5">
+              {retiredNames.length > 0
+                ? <>旧名仍可调用、但对应模型已下线，请求会被服务端转到现用模型：{retiredNames.map(([old, now]) => `${old} → ${now}`).join('、')}（填旧名会在下次启动时自动迁移）。</>
+                : <>支持函数调用（数据库查询工具）的模型体验最佳。</>}
+            </p>
           </section>
 
           {/* 温度 */}

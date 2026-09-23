@@ -23,29 +23,6 @@ export const SYS_TOOLS = [
   { id: 'library', name: '资源库', icon: LayoutGrid, system: true, color: 'from-slate-500 to-slate-300', iconClass: 'text-white drop-shadow-md' },
 ]
 
-// 解析快捷键字符串 'ctrl+tab' / 'shift+alt+l' 等
-export function parseShortcut(shortcut) {
-  if (!shortcut) return null
-  const parts = String(shortcut).toLowerCase().split('+').filter(Boolean)
-  if (parts.length === 0) return null
-  const key = parts[parts.length - 1]
-  return {
-    ctrl: parts.includes('ctrl'),
-    alt: parts.includes('alt'),
-    shift: parts.includes('shift'),
-    meta: parts.includes('meta'),
-    key,
-  }
-}
-
-// 判断键盘事件是否匹配快捷键
-export function matchShortcut(e, shortcut) {
-  const spec = parseShortcut(shortcut)
-  if (!spec) return false
-  if (e.ctrlKey !== spec.ctrl || e.altKey !== spec.alt || e.shiftKey !== spec.shift || e.metaKey !== spec.meta) return false
-  const k = e.key.toLowerCase()
-  if (spec.key === 'tab') return k === 'tab'
-  if (spec.key === 'space') return k === ' ' || k === 'spacebar'
-  if (spec.key.length === 1) return k === spec.key
-  return k === spec.key
-}
+// 快捷键解析/匹配已迁移至 src/utils/keymap.mjs（全键盘适配基建 M0）。
+// 此处保留重导出以兼容历史导入点；语义与实现完全一致。
+export { parseShortcut, matchShortcut } from '../utils/keymap'

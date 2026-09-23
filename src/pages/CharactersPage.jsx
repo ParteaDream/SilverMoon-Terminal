@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, memo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, memo, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
@@ -253,9 +253,11 @@ export default function CharactersPage() {
         if (c._displayCardArt) cardArts.push(c._displayCardArt)
         else if (c.splash_art) cardArts.push(c.splash_art)
       }
-      // 预热首屏可见卡片（去重，按缩略尺寸加载），其余交给懒加载按需触发
+      // 预热首屏可见卡片（去重，按缩略尺寸加载），其余交给懒加载按需触发。
+      // 尺寸必须与 CardImage 的 useLazyImage(fn, 512) 一致，否则缓存键不同
+      // （w400 vs w512），预热的 30 次 IPC 全部作废、还会排在正式请求前面。
       const warmBatch = [...new Set(cardArts)].slice(0, 30)
-      for (const fn of warmBatch) readImage(fn, 400)
+      for (const fn of warmBatch) readImage(fn, 512)
       try {
         const raw = settingsRes.data?.[0]?.value
         if (raw) {
@@ -279,10 +281,20 @@ export default function CharactersPage() {
     }
   }
 
-  function navigateToDetail(id) {
+  // push 的引用会随 location 变化，作为 useCallback 依赖会让卡片 memo 失效；
+  // 用 ref 保存最新实现，保证 navigateToDetail 引用长期稳定。
+  const pushRef = useRef(push)
+  pushRef.current = push
+
+  const navigateToDetail = useCallback((id) => {
     savePage('characters', stateRef.current)
-    push(`/characters/${id}`)
-  }
+    pushRef.current(`/characters/${id}`)
+  }, [savePage])
+  // 稳定引用：GalleryCard 带 memo，每次渲染新建箭头函数会让 memo 完全失效，
+  // 于是任意状态变化（搜索输入、右键菜单开合）都会重渲染全部 ~124 张卡片。
+  const handleCardContextMenu = useCallback((e, c) => {
+    setContextMenu({ x: e.clientX, y: e.clientY, char: c })
+  }, [])
 
   function openAdd() {
     setEditing(null)
@@ -381,12 +393,13 @@ export default function CharactersPage() {
   }, [selected, characters])
 
   // 元素筛选和搜索
-  const filtered = characters.filter(c => {
+  // 记忆化：避免每次渲染生成新数组导致 processed 重算 + 全量卡片重渲染
+  const filtered = useMemo(() => characters.filter(c => {
     // 元素多选筛选
     if (selectedElements.size > 0 && !selectedElements.has(c.element_id)) return false
     // 搜索
     return !search || c.name_zh.includes(search) || (c.name_en || '').toLowerCase().includes(search.toLowerCase())
-  })
+  }), [characters, search, selectedElements])
 
   // 表格列定义 — useMemo 固定引用（依赖 weaponTypes/regions/elemIcons），避免每次渲染全量重排
   const columns = useMemo(() => [
@@ -466,7 +479,12 @@ export default function CharactersPage() {
   } = useSortFilter(filtered, columns)
 
   // 排序/筛选变化时通知懒加载图片重新检查视口
-  useEffect(() => { bumpLazyRevision() }, [sortKeys, filters])
+  // 排序/筛选变化时通知懒加载图片重新检查视口（挂载时跳过，见 useLazyImage 注释）
+  const lazySyncDone = useRef(false)
+  useEffect(() => {
+    if (!lazySyncDone.current) { lazySyncDone.current = true; return }
+    bumpLazyRevision()
+  }, [sortKeys, filters])
 
   // 用 ref 保持最新状态，避免 useLayoutEffect 频繁重建
   const stateRef = useRef({ viewMode, search, sortKeys, filters, selectedElements: [] })
@@ -628,7 +646,7 @@ export default function CharactersPage() {
 
       {/* Gallery view */}
       {viewMode === 'gallery' && (
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-10 gap-2 animate-fade-in will-change-transform">
+        <div data-page-zone className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-10 gap-2 animate-fade-in will-change-transform">
           {processed.length === 0 ? (
             <div className="col-span-full py-16 text-center text-surface-500 text-sm">
               {characters.length === 0 ? '暂无角色' : '没有匹配筛选条件的结果'}
@@ -642,7 +660,7 @@ export default function CharactersPage() {
                 regions={regions}
                 elemIcons={elemIcons}
                 onNavigate={navigateToDetail}
-                onContextMenu={(e, c) => { setContextMenu({ x: e.clientX, y: e.clientY, char: c }) }}
+                onContextMenu={handleCardContextMenu}
               />
             ))
           )}
@@ -746,6 +764,10 @@ const GalleryCard = memo(function GalleryCard({ char, weaponTypes, regions, elem
   const reg = regions.find(r => r.id === char.region_id)
   return (
     <div
+      tabIndex={-1}
+      role="button"
+      data-cursor-item
+      aria-label={char.name_zh}
       data-item-id={char.id}
       onClick={() => onNavigate(char.id)}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, char) }}
@@ -782,7 +804,11 @@ const GalleryCard = memo(function GalleryCard({ char, weaponTypes, regions, elem
         </div>
         {/* Element badge */}
         <div className="absolute top-2 right-2">
-          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface-950/60 backdrop-blur-sm">
+          {/* 这里原先是 bg-surface-950/60 + backdrop-blur-sm。backdrop-filter 会
+              让浏览器在每个滚动帧重新采样并模糊卡片立绘，成本随同屏卡片数线性
+              增长（实测 4400px 宽 p95 掉帧 91ms → 50ms，1900px 16.6ms → 9ms）。
+              改为略加深的纯色填充，20px 尺寸下观感几乎一致。 */}
+          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-surface-950/75">
             <ElementIcon elId={char.element_id} className="w-3.5 h-3.5" elemIcons={elemIcons} />
           </span>
         </div>

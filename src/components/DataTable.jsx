@@ -2,7 +2,10 @@ import { useState, useMemo } from 'react'
 import { Edit3, Trash2, Plus, ArrowUpDown, ArrowUp, ArrowDown, Filter, X, Square, CheckSquare } from 'lucide-react'
 
 // ── Shared sort + filter logic, usable outside DataTable ──
-export function useSortFilter(data, columns, initialSortKeys = [], initialFilters = {}, initialShowFilters = false) {
+// derive=false：调用方已把 processed/filterOptions 等全部传入时，跳过内部
+// 的排序与筛选计算。DataTable 在外部状态下会调用本 hook 仅为占位，
+// 若不跳过就会对同一份数据重复做一次 O(n log n) 排序。
+export function useSortFilter(data, columns, initialSortKeys = [], initialFilters = {}, initialShowFilters = false, derive = true) {
   const [sortKeys, setSortKeys] = useState(initialSortKeys)
   const [filters, setFilters] = useState(initialFilters)
   const [showFilters, setShowFilters] = useState(initialShowFilters)
@@ -50,6 +53,7 @@ export function useSortFilter(data, columns, initialSortKeys = [], initialFilter
   function clearFilters() { setFilters({}) }
 
   const processed = useMemo(() => {
+    if (!derive) return []
     let result = [...data]
 
     for (const [colKey, val] of Object.entries(filters)) {
@@ -94,8 +98,9 @@ export function useSortFilter(data, columns, initialSortKeys = [], initialFilter
     columns.filter(c => c.filterType && c.key !== 'expand'),
   [columns])
 
-  // Auto-derived select options from data
+  // Auto-derived select options from data（derive=false 时无人使用，跳过 O(n) 扫描）
   const filterOptions = useMemo(() => {
+    if (!derive) return {}
     const opts = {}
     for (const col of filterableCols) {
       if (col.filterType === 'select' && !col.filterOptions) {
@@ -105,7 +110,7 @@ export function useSortFilter(data, columns, initialSortKeys = [], initialFilter
       }
     }
     return opts
-  }, [filterableCols, data])
+  }, [filterableCols, data, derive])
 
   return {
     sortKeys, setSortKeys, handleSort, removeSort, clearSorts, reorderSorts,
@@ -240,9 +245,12 @@ export default function DataTable({ columns, data, onEdit, onDelete, onAdd, titl
   selectable, selectedIds, onToggleSelect, onToggleSelectAll, onBulkDelete,
   onRowClick, onRowContextMenu, onRowReorder, itemIdKey, activeId,
 }) {
-  // Use external state if provided (for sync with gallery view), else internal
-  const internal = useSortFilter(data, columns)
+  // Use external state if provided (for sync with gallery view), else internal.
+  // derive 必须按需开启：WebsitesPage / GameDataPage 走内部状态（自带排序+
+  // 筛选栏），而 Materials/Weapons/Artifacts/Characters 把全部状态都传了进来，
+  // 此时内部那份 processed 会被丢弃，再算一遍就是纯浪费。
   const hasExternalSort = extSortKeys !== undefined
+  const internal = useSortFilter(data, columns, [], {}, false, !hasExternalSort)
   const sortKeys = extSortKeys ?? internal.sortKeys
   const handleSort = extHandleSort ?? internal.handleSort
   const removeSort = extRemoveSort ?? internal.removeSort

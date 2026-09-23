@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Eraser, Bold, Italic, GripHorizontal, Eye, EyeOff, StickyNote, X, Zap } from 'lucide-react'
 import ColorPicker from './ColorPicker'
+import useOverlay from '../hooks/useOverlay'
 import { expandEffectRefs } from './ColoredText'
 import {
   PRESET_COLORS, getColorPresets, loadColorPresets, COLOR_PRESETS_CHANGED,
@@ -47,6 +48,8 @@ export default function ColorTextInput({
   const [colors, setColors] = useState(() => [...PRESET_COLORS.slice(0, 7), ...getColorPresets()])
   const [elementIcons, setElementIcons] = useState({})
   const [effectsOpen, setEffectsOpen] = useState(false)
+  // M2：附注编辑弹窗焦点管理
+  const noteOv = useOverlay({ open: noteModalOpen, onClose: () => setNoteModalOpen(false), label: '附注编辑' })
   const effectsRef = useRef(null)
 
   // 加载自定义元素颜色和图标
@@ -1006,7 +1009,7 @@ export default function ColorTextInput({
 
       {/* 附注编辑弹窗（轻量版） */}
       {noteModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div data-overlay ref={noteOv.overlayRef} {...noteOv.overlayProps} className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setNoteModalOpen(false)} />
           <div className="relative bg-surface-800 border border-surface-600 rounded-xl w-full max-w-xl shadow-2xl">
             {/* 标题栏 */}

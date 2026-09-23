@@ -823,6 +823,7 @@ export default function ChallengesPage() {
         {Object.entries(CHALLENGE_TYPES).map(([key, label]) => (
           <button
             key={key}
+            data-cursor-default={key === 'perilous_trail' ? '' : undefined}
             onClick={() => { setActiveType(key); setSelectMode(false); setSelected(new Set()) }}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors
               ${activeType === key ? '!bg-[rgb(var(--color-1))] !text-[rgb(var(--btn-text-1))] shadow-sm' : 'text-surface-400 hover:text-surface-200'}`}

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Pin, X, Check, Image } from 'lucide-react'
+import useOverlay from '../hooks/useOverlay'
 import { getColorPresets, loadColorPresets, COLOR_PRESETS_CHANGED } from '../utils/colorMarkup'
 
 // ═══════════════════════════════════════
@@ -15,6 +16,8 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
     return defaults[editData?.marker_type] || [3]
   })
   const isEdit = !!editData
+  // M2：弹层焦点管理
+  const ov = useOverlay({ open: true, onClose: onCancel, label: isEdit ? '编辑标点' : '创建标点', initialFocus: 'auto' })
 
   // ── 从 special_function 解析 isLocalLegend ──
   const parseSF = (raw) => {
@@ -79,7 +82,7 @@ export default function MarkerCreatorModal({ editData, presetCategory, onConfirm
   }
 
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
       <div className="w-[600px] max-w-[94vw] rounded-xl bg-surface-900 border border-white/10 shadow-2xl p-5 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">

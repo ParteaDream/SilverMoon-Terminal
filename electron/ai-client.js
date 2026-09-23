@@ -19,25 +19,47 @@ function buildChatUrl(provider, baseUrl) {
   return resolveBaseUrl(provider, baseUrl) + '/chat/completions'
 }
 
-// OpenAI 推理模型（o1/o3 系列）与 deepseek-reasoner 不接受 temperature 参数
+// ── 模型能力判定（2026-09 现状，新增模型名时同步这里）──
+// · o 系列 / GPT-5 / GPT-6 推理模型：只认 max_completion_tokens，不接受自定义 temperature
+// · GPT-6 Astra：推理无法关闭（不支持 reasoning_effort=none），因此也不能自定义 temperature
+// · GPT-5.6 起：/chat/completions 上「推理 + tools」互斥，官方给的绕法是 reasoning_effort='none'
+const RE_NO_TEMPERATURE = /^o[1-9]|^gpt-[6-9]/
+const RE_COMPLETION_TOKENS = /^o[1-9]|^gpt-[5-9]/
+const RE_TOOLS_NEED_NO_REASONING = /^gpt-5\.[6-9]/
+// OpenAI 拒绝「推理 + 工具」时的报错特征（见错误码文档与 Azure reasoning 文档）
+const RE_TOOL_REASONING_ERROR = /function tools with reasoning_effort are not supported/i
+// 运行中学会的模型（如 gpt-6-astra 报同类错误时），后续请求直接按绕法发
+const _needsNoReasoningForTools = new Set()
+
+// OpenAI 推理模型（o 系列 / GPT-5 / GPT-6）与 deepseek-reasoner 不接受 temperature 参数
 function supportsTemperature(model) {
   const m = String(model || '').toLowerCase()
-  if (/^(o1|o3)-/.test(m)) return false
   if (m === 'deepseek-reasoner') return false
+  if (RE_NO_TEMPERATURE.test(m)) return false
   return true
 }
 
-// OpenAI 新一代模型（o 系列 / GPT-5 系列）使用 max_completion_tokens 而非 max_tokens
+// OpenAI 新一代模型（o 系列 / GPT-5 / GPT-6 系列）使用 max_completion_tokens 而非 max_tokens
 function usesCompletionTokens(model) {
+  return RE_COMPLETION_TOKENS.test(String(model || '').toLowerCase())
+}
+
+// 带 tools 时是否需要把推理关掉（/chat/completions 不支持「推理 + 函数工具」）
+function needsNoReasoningForTools(model) {
   const m = String(model || '').toLowerCase()
-  return /^(o1|o3)-|^gpt-5/.test(m)
+  return RE_TOOLS_NEED_NO_REASONING.test(m) || _needsNoReasoningForTools.has(m)
 }
 
 /** 组装请求体（去掉不支持的字段） */
 function buildBody({ model, messages, temperature, stream, tools }) {
   const body = { model, messages, stream: !!stream }
   if (supportsTemperature(model) && temperature != null) body.temperature = temperature
-  if (Array.isArray(tools) && tools.length > 0) body.tools = tools
+  if (Array.isArray(tools) && tools.length > 0) {
+    body.tools = tools
+    // 本程序始终带数据库查询工具，推理模型在 /chat/completions 上会直接 400，
+    // 按官方绕法显式关闭推理（gpt-5.6 系列文档明确，gpt-6 系列按报错学习）
+    if (needsNoReasoningForTools(model)) body.reasoning_effort = 'none'
+  }
   // 限制单轮输出长度，防止模型无限输出拖垮渲染进程与上下文
   if (usesCompletionTokens(model)) {
     body.max_completion_tokens = 8192
@@ -48,24 +70,44 @@ function buildBody({ model, messages, temperature, stream, tools }) {
 }
 
 /**
+ * 发送 /chat/completions。若模型以「Function tools with reasoning_effort are not
+ * supported」拒绝请求，则按官方文档关掉推理重试一次，并记住该模型。
+ * @returns {{ resp: Response, text?: string }} text 存在时响应体已被读出，调用方不要再读
+ */
+async function postChat(url, apiKey, body, signal) {
+  const send = (b) => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+    body: JSON.stringify(b),
+    signal,
+  })
+  let resp = await send(body)
+  if (resp.ok) return { resp }
+  const text = await resp.text().catch(() => '')
+  if (body.tools && body.reasoning_effort === undefined && RE_TOOL_REASONING_ERROR.test(text)) {
+    _needsNoReasoningForTools.add(String(body.model || '').toLowerCase())
+    resp = await send({ ...body, reasoning_effort: 'none' })
+    return { resp }
+  }
+  return { resp, text }
+}
+
+/**
  * 非流式单次对话（用于"测试连接"等场景）
  * @returns {{ ok: true, content: string, raw: object } | { ok: false, error: string, status?: number }}
  */
 async function chatOnce({ provider, baseUrl, apiKey, model, messages, temperature, signal, tools }) {
   if (!apiKey) return { ok: false, error: '未配置 API Key' }
   const url = buildChatUrl(provider, baseUrl)
-  let resp
+  let resp, preText
   try {
-    resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
-      body: JSON.stringify(buildBody({ model, messages, temperature, stream: false, tools })),
-      signal,
-    })
+    const r = await postChat(url, apiKey, buildBody({ model, messages, temperature, stream: false, tools }), signal)
+    resp = r.resp
+    preText = r.text
   } catch (e) {
     return { ok: false, error: e.name === 'AbortError' ? '请求已取消' : '网络请求失败: ' + e.message }
   }
-  const rawText = await resp.text().catch(() => '')
+  const rawText = preText !== undefined ? preText : await resp.text().catch(() => '')
   if (!resp.ok) return { ok: false, error: describeHttpError(resp.status, rawText), status: resp.status }
   try {
     const json = JSON.parse(rawText)
@@ -96,21 +138,18 @@ async function streamChat({ provider, baseUrl, apiKey, model, messages, temperat
   if (!apiKey) return { ...result, error: '未配置 API Key' }
   const url = buildChatUrl(provider, baseUrl)
 
-  let resp
+  let resp, preText
   try {
-    resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
-      body: JSON.stringify(buildBody({ model, messages, temperature, stream: true, tools })),
-      signal,
-    })
+    const r = await postChat(url, apiKey, buildBody({ model, messages, temperature, stream: true, tools }), signal)
+    resp = r.resp
+    preText = r.text
   } catch (e) {
     if (e.name === 'AbortError') { result.aborted = true; return result }
     return { ...result, error: '网络请求失败: ' + e.message }
   }
 
   if (!resp.ok) {
-    const rawText = await resp.text().catch(() => '')
+    const rawText = preText !== undefined ? preText : await resp.text().catch(() => '')
     return { ...result, error: describeHttpError(resp.status, rawText) }
   }
   if (!resp.body) return { ...result, error: '响应流不可用' }
@@ -213,4 +252,4 @@ function describeHttpError(status, rawText) {
   return status + ' ' + statusText + (detail ? '：' + detail : '')
 }
 
-module.exports = { streamChat, chatOnce, buildChatUrl, resolveBaseUrl, PROVIDER_DEFAULTS, supportsTemperature, usesCompletionTokens, describeHttpError }
+module.exports = { streamChat, chatOnce, buildChatUrl, resolveBaseUrl, PROVIDER_DEFAULTS, supportsTemperature, usesCompletionTokens, needsNoReasoningForTools, buildBody, describeHttpError }

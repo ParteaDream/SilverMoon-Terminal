@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo, useCallback } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
@@ -204,10 +204,24 @@ export default function WeaponsPage() {
     window.dispatchEvent(new CustomEvent('devtoolbar-weapon-selection', { detail: selectedData }))
   }, [selected, weapons])
 
-  function navigateToDetail(id) {
+  // push 的引用会随 location 变化，作为 useCallback 依赖会让卡片 memo 失效；
+  // 用 ref 保存最新实现，保证 navigateToDetail 引用长期稳定。
+  const pushRef = useRef(push)
+  pushRef.current = push
+
+  const navigateToDetail = useCallback((id) => {
     savePage('weapons', stateRef.current)
-    push(`/weapons/${id}`)
-  }
+    pushRef.current(`/weapons/${id}`)
+  }, [savePage])
+  // 稳定引用：卡片带 memo，每次渲染新建箭头函数会让 memo 完全失效
+  const handleCardContextMenu = useCallback((e, weapon) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, weapon })
+  }, [])
+  const handleRowContextMenu = useCallback((e, row) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, weapon: row })
+  }, [])
 
   function openAdd() { setEditing(null); setForm({ id: 0, rarity: 4, base_atk: 42, category: '武器', sort_order: 0 }); setModalOpen(true) }
   function openEdit(row) { setEditing(row); setForm({ ...row }); setModalOpen(true) }
@@ -270,9 +284,10 @@ export default function WeaponsPage() {
   }
 
   // Search bar filter (applied before column filters)
-  const searched = weapons.filter(w =>
+  // 记忆化：避免每次渲染生成新数组导致 processed 重算 + 全量卡片重渲染
+  const searched = useMemo(() => weapons.filter(w =>
     !search || w.name_zh.includes(search) || (w.name_en || '').toLowerCase().includes(search.toLowerCase())
-  )
+  ), [weapons, search])
 
   // 表格列定义 — useMemo 固定引用（依赖 weaponTypes），避免每次渲染全量重排
   const columns = useMemo(() => [
@@ -319,7 +334,12 @@ export default function WeaponsPage() {
   } = useSortFilter(searched, columns)
 
   // 排序/筛选变化时通知懒加载图片重新检查视口
-  useEffect(() => { bumpLazyRevision() }, [sortKeys, filters])
+  // 排序/筛选变化时通知懒加载图片重新检查视口（挂载时跳过，见 useLazyImage 注释）
+  const lazySyncDone = useRef(false)
+  useEffect(() => {
+    if (!lazySyncDone.current) { lazySyncDone.current = true; return }
+    bumpLazyRevision()
+  }, [sortKeys, filters])
 
   // 用 ref 保持最新状态，避免 useLayoutEffect 频繁重建
   const stateRef = useRef({ viewMode, search, sortKeys, filters })
@@ -390,19 +410,19 @@ export default function WeaponsPage() {
           processed={processed} activeFilterCount={activeFilterCount}
           onEdit={null} onDelete={null} onAdd={null} searchBar={null}
           selectable selectedIds={selected} onToggleSelect={toggleSelect} onToggleSelectAll={toggleSelectAll}
-          onRowClick={row => navigateToDetail(row.id)} onRowContextMenu={(e, row) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, weapon: row }) }} itemIdKey="id" />
+          onRowClick={row => navigateToDetail(row.id)} onRowContextMenu={handleRowContextMenu} itemIdKey="id" />
       ) : viewMode === 'equipment' ? (
         <div className="grid grid-cols-5 sm:grid-cols-7 md:grid-cols-9 lg:grid-cols-11 xl:grid-cols-13 2xl:grid-cols-16 gap-1">
           {processed.map(w => (
             <WeaponEquipCard
-              key={w.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
+              key={w.id}
               weapon={w}
               weaponTypes={weaponTypes}
               rarityStars={RARITY_STARS}
               rarityColor={RARITY_COLOR}
               bgStyle={RARITY_BG_STYLES[w.rarity || 5]}
               onNavigate={navigateToDetail}
-              onContextMenu={(e, weapon) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, weapon }) }}
+              onContextMenu={handleCardContextMenu}
             />
           ))}
           {processed.length === 0 && (
@@ -415,7 +435,7 @@ export default function WeaponsPage() {
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-10 gap-2">
           {processed.map(w => (
             <WeaponGalleryCard
-              key={w.id + '|s' + sortKeys.map(s => s.key + s.dir).join(',') + '|f' + Object.entries(filters).flat().join(',')}
+              key={w.id}
               weapon={w}
               weaponTypes={weaponTypes}
               gradient={RARITY_GRADIENT[w.rarity] || ''}
@@ -424,7 +444,7 @@ export default function WeaponsPage() {
               rarityColor={RARITY_COLOR}
               bgStyle={RARITY_BG_STYLES[w.rarity || 5]}
               onNavigate={navigateToDetail}
-              onContextMenu={(e, weapon) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, weapon }) }}
+              onContextMenu={handleCardContextMenu}
             />
           ))}
           {processed.length === 0 && (

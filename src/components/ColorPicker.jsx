@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import useOverlay from '../hooks/useOverlay'
 
 // ── HSV ↔ 颜色转换工具 ──
 function hsvToRgb(h, s, v) {
@@ -85,6 +86,8 @@ export default function ColorPicker({ value, onChange, disabled, className, titl
   const [open, setOpen] = useState(false)
   const [hexInput, setHexInput] = useState('')
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 })
+  // M2：颜色面板浮层（锚定，不圈闭）
+  const ov = useOverlay({ open, onClose: () => setOpen(false), label: '颜色选择', dialog: false, initialFocus: 'none' })
   const containerRef = useRef(null)
   const fieldCanvasRef = useRef(null)
   const hueCanvasRef = useRef(null)
@@ -210,13 +213,7 @@ export default function ColorPicker({ value, onChange, disabled, className, titl
       }
     }
 
-    // Escape 键关闭
-    function handleKeyDown(e) {
-      if (e.key === 'Escape') setOpen(false)
-    }
-
     document.addEventListener('mousedown', handleOutsideClick)
-    document.addEventListener('keydown', handleKeyDown)
     window.addEventListener('resize', reposition)
     window.addEventListener('scroll', reposition, true)
 
@@ -379,7 +376,8 @@ export default function ColorPicker({ value, onChange, disabled, className, titl
   // ── 弹出层内容 ──
   const popover = open && (
     <div
-      ref={popoverRef}
+      data-overlay
+      ref={(n) => { popoverRef.current = n; ov.overlayRef(n) }}
       className="fixed z-[100] p-3 bg-surface-800 border border-surface-600 rounded-lg shadow-2xl"
       style={{ top: popoverPos.top, left: popoverPos.left, minWidth: FIELD_W + 24 }}
       onMouseDown={e => e.stopPropagation()}

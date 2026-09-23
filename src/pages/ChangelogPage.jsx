@@ -4,11 +4,14 @@ import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import useZoomPan from '../hooks/useZoomPan'
+import useHideDock from '../hooks/useHideDock'
+import useOverlay from '../hooks/useOverlay'
 import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import { Plus, Minus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight, ChevronLeft, ImagePlus, Download, User, Crosshair, Sparkles, Shirt, Package, BarChart3, Star } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormField } from '../components/EditModal'
 import ItemThumb from '../components/ItemThumb'
+import VersionNavigator from '../components/VersionNavigator'
 
 const PRESET_COLORS = [
   '#ef4444', '#f97316', '#FFD780', '#22c55e',
@@ -47,7 +50,7 @@ function compareVersion(a, b) {
 }
 
 export default function ChangelogPage() {
-  const { query, readImage } = useDb()
+  const { query, readImage, devMode } = useDb()
   const navigate = useNavigate()
   const { restorePage, savePage, consumeBackToList } = useNav()
   const restoringScroll = useRef(false)
@@ -119,7 +122,16 @@ export default function ChangelogPage() {
     }
   }, [])
 
-  useEffect(() => { if (loaded) bumpLazyRevision() }, [search, sortAsc])
+  // 排序/筛选变化时通知懒加载图片重新检查视口。
+  // 挂载时跳过：此刻元素尚未布局，全量 revision 只会让所有实例白跑一次
+  // effect + getBoundingClientRect。排序/筛选改变的只是可见顺序，被滚入
+  // 视口的元素由共享 IntersectionObserver 补齐，无需全量唤醒。
+  const lazySyncDone = useRef(false)
+  useEffect(() => {
+    if (!loaded) return
+    if (!lazySyncDone.current) { lazySyncDone.current = true; return }
+    bumpLazyRevision()
+  }, [search, sortAsc, loaded])
 
   // ── 状态持久化：数据加载完成后恢复滚轮位置 ──
   useEffect(() => {
@@ -516,6 +528,9 @@ export default function ChangelogPage() {
   }
 
 
+  // 导航条只需要稳定引用的版本号序列（变化时重算刻度）
+  const versionKeys = useMemo(() => filteredVersions.map(([v]) => v), [filteredVersions])
+
   // ── Render ──
   if (!loaded) {
     return (
@@ -529,7 +544,7 @@ export default function ChangelogPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-6 space-y-6">
+    <div data-changelog-root="" className="max-w-6xl mx-auto px-6 py-6 space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
         <h1 className="text-xl font-bold">版本新增数据速览</h1>
@@ -633,6 +648,9 @@ export default function ChangelogPage() {
           setFormVersionImages={setFormVersionImages}
         />
       </EditModal>
+
+      {/* 版本导航条：长页面上快速定位到某个版本 */}
+      <VersionNavigator versions={versionKeys} bottomInset={devMode ? 40 : 0} />
     </div>
   )
 }
@@ -672,9 +690,11 @@ const ItemCard = memo(function ItemCard({ imageFile, name, rarity, navTo }) {
 //    图片从不以全亮状态出现，避免了忽亮忽暗的闪烁
 //    永久 maskImage inline style 保持右端微露/左端全显梯度
 function VersionImageBg({ imageFile }) {
-  // 1024 缩略：卡片展开时背景图有效显示宽度可达 ~890px，480 会糊；
-  // 1MB+ 的壁纸源图缩到 1024 后载荷约降 5 倍，且不会糊
-  const { ref: containerRef, src } = useLazyImage(imageFile, 1024)
+  // 2048 缩略：展开后版本内容区约 1054×919（DPR 2 下 2108×1838 设备像素）。
+  // 背景要铺满这个区域的高度，object-cover 的缩放由「高度」决定：
+  //   16:9 源图在 919px 高下会被放大到 1634×919，因此源图宽度需接近该量级才不糊。
+  //   2048 时可见切片约 1321px 宽（> 显示宽 1054），设备像素比约 1.03，等于不放大。
+  const { ref: containerRef, src } = useLazyImage(imageFile, 2048)
   const imgRef = useRef(null)
   const prevSrcRef = useRef(null)
 
@@ -717,10 +737,13 @@ function VersionImageBg({ imageFile }) {
 
   return (
     <div ref={containerRef} className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl" style={{ zIndex: 0 }}>
+      {/* 铺满内容区：`w-full h-full object-cover` 让图片按比例放大到完全覆盖容器
+          （含高度），超出部分由容器的 overflow-hidden 裁切，因此既填满高度也不会
+          上下溢出。`object-right` 保证裁切从左侧开始，右边缘恒贴容器右边。 */}
       <img
         ref={imgRef}
         alt=""
-        className="absolute top-0 right-0 h-full w-auto object-cover opacity-0"
+        className="absolute inset-0 w-full h-full object-cover object-right opacity-0"
         style={{
           maskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)',
           WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)',
@@ -731,11 +754,17 @@ function VersionImageBg({ imageFile }) {
 }
 
 // ── Version image lightbox (multi-image with prev/next, zoom + pan) ──
+// M2：接入 useOverlay —— 灯箱打开即登记 overlay 栈，屏蔽底层 app 级按键
+// （PageCursor 的 WASD/方向键 cursor.move 不再作用于灯箱后面的板块页）；
+// Esc 关闭、Tab 圈闭、初始焦点与关闭还原一并由 useOverlay 提供。
 function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
   const { readImage } = useDb()
   const [src, setSrc] = useState(null)
   const containerRef = useRef(null)
   const { scale, position, startHold, stopHold, onWheel, reset, dragProps } = useZoomPan()
+  useHideDock()
+  const ov = useOverlay({ open: true, onClose, label: `版本图 ${index + 1}/${images.length}` })
+  const isTop = ov.isTop
 
   // Reset zoom/pan on image change
   useEffect(() => { reset() }, [index, reset])
@@ -746,7 +775,7 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
     return () => { cancelled = true }
   }, [images, index, readImage])
 
-  // Wheel zoom (0.5x ~ 3x) — 以可视窗口中心为缩放中心，灵敏度约 5%/格
+  // Wheel zoom (0.5x ~ 8x) — 以可视窗口中心为缩放中心，灵敏度约 5%/格
   useEffect(() => {
     const el = containerRef.current
     if (!el || !src) return
@@ -754,8 +783,24 @@ function VersionImageLightbox({ images, index, onClose, onPrev, onNext }) {
     return () => el.removeEventListener('wheel', onWheel)
   }, [src, onWheel])
 
+  // 键盘翻图：a/d/←/→（仅当本灯箱为栈顶弹层时响应；Esc 由 useOverlay 处理）
+  useEffect(() => {
+    if (!isTop) return
+    const onKey = (e) => {
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+        e.preventDefault(); onPrev()
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+        e.preventDefault(); onNext()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isTop, onPrev, onNext])
+
   return (
-    <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex items-center justify-center no-drag" onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose() }}>
+    <div ref={ov.overlayRef} data-overlay {...ov.overlayProps}
+      className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex items-center justify-center no-drag"
+      onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose() }}>
       {/* Left arrow */}
       <button
         onClick={e => { e.stopPropagation(); onPrev() }}
@@ -938,30 +983,16 @@ const VersionEntry = memo(function VersionEntry({ version, data, charMap, weapon
   const compactTypes = ['character', 'weapon', 'artifact', 'outfit', 'game_data']
   const compactCounts = compactTypes.filter(t => additions[t]?.length > 0).length > 0
 
-  // Lightbox keyboard nav
-  useEffect(() => {
-    if (lightboxIndex < 0 || versionImages.length === 0) return
-    const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); setLightboxIndex(-1); return }
-      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
-        e.preventDefault()
-        setLightboxIndex(prev => prev > 0 ? prev - 1 : versionImages.length - 1)
-      }
-      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
-        e.preventDefault()
-        setLightboxIndex(prev => prev < versionImages.length - 1 ? prev + 1 : 0)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [lightboxIndex, versionImages])
-
   return (
-    <div className="rounded-xl border border-surface-700 bg-surface-900/60 overflow-hidden relative">
+    <div data-version={version} className="rounded-xl border border-surface-700 bg-surface-900/60 overflow-hidden relative">
       {/* Version image background (right-to-left opacity gradient) */}
       {randomVersionImage && <VersionImageBg imageFile={randomVersionImage} />}
       {/* Version header */}
       <div
+        data-cursor-item
+        role="button"
+        tabIndex={-1}
+        aria-expanded={!collapsed}
         onClick={() => onToggleExpand(version, collapsed)}
         className="px-5 py-4 border-b border-surface-700 flex items-center gap-3 flex-wrap cursor-pointer hover:bg-surface-800/30 transition-colors relative"
         style={{ zIndex: 1 }}
@@ -970,6 +1001,9 @@ const VersionEntry = memo(function VersionEntry({ version, data, charMap, weapon
           {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </span>
         <span
+          data-cursor-item
+          role="button"
+          tabIndex={versionImages.length > 0 ? -1 : undefined}
           className={`text-2xl font-bold text-white ${versionImages.length > 0 ? 'cursor-pointer hover:text-primary-400 transition-colors' : ''}`}
           onClick={e => {
             if (versionImages.length > 0) {
@@ -977,6 +1011,7 @@ const VersionEntry = memo(function VersionEntry({ version, data, charMap, weapon
               setLightboxIndex(0)
             }
           }}
+          aria-label={versionImages.length > 0 ? `查看 ${versionImages.length} 张版本图` : undefined}
           title={versionImages.length > 0 ? `查看 ${versionImages.length} 张版本图` : ''}
         >
           {version}

@@ -9,6 +9,7 @@ const { getDownloadManager, PACK_DOWNLOAD_URLS, GITHUB_ARCHIVE_URLS, loadState, 
 const { validateAiQuery, capQueryRows } = require('./ai-sql');
 const { streamChat, chatOnce } = require('./ai-client');
 const { trimContext } = require('./ai-context');
+const { rendererThumbnail, destroyRendererThumbnailWorker } = require('./image-thumb-worker');
 
 // ── 数据库引擎: sql.js (纯 JS, 无原生模块) ──
 const initSqlJs = require('sql.js');
@@ -1372,6 +1373,13 @@ function createWindow() {
     },
   });
 
+  // 隐藏的缩略图工作窗口会让 window-all-closed 延迟到它也被关闭之后。
+  // 主窗口关闭即视为退出意图：先销毁工作窗口，再走正常退出流程。
+  mainWindow.on('closed', () => {
+    destroyRendererThumbnailWorker();
+    app.quit();
+  });
+
   if (isDev) {
     mainWindow.loadURL(process.env.SILVERMOON_DEV_SERVER_URL || 'http://localhost:5173');
     if (process.env.SILVERMOON_DISABLE_DEVTOOLS !== '1') {
@@ -1433,7 +1441,12 @@ app.whenReady().then(async () => {
   }
 });
 
+// 退出前先销毁隐藏的缩略图工作窗口，避免它阻止窗口全部关闭
+app.on('before-quit', () => { destroyRendererThumbnailWorker(); });
+
 app.on('window-all-closed', () => {
+  // 隐藏的缩略图工作窗口必须先销毁，否则它会让 window-all-closed 永不触发
+  destroyRendererThumbnailWorker();
   closeDatabase();
   app.quit();
 });
@@ -3610,7 +3623,17 @@ async function readImageFile(fp, maxWidth, saveAsPath) {
         setCachedImage(rawCacheKey, r);
         return { success: true, data: r };
       }
-      const buf = await generateThumbnailBuffer(fp, maxWidth);
+      let buf = await generateThumbnailBuffer(fp, maxWidth);
+      // 部分图包的 WebP（VP8/VP8L，4K 壁纸）主进程 nativeImage 解不了码，
+      // generateThumbnailBuffer 会返回 null。此时改用隐藏渲染窗口做缩放，
+      // 否则会回落到「直读原文件」，把整张 4K 原图 base64 送进渲染进程。
+      if (!buf) {
+        const dataUrl = await rendererThumbnail(fp, maxWidth);
+        if (dataUrl) {
+          setCachedImage(cacheKey, dataUrl);
+          return { success: true, data: dataUrl };
+        }
+      }
       if (buf) {
         // [Thumbnail] 缓存：保存到磁盘
         if (saveAsPath) {
@@ -4291,6 +4314,24 @@ async function getAnnotationData() {
   return _cachedAnnotationData;
 }
 
+// ── 规则术语参数数据缓存（PARAM 占位符取值，全局共用）──
+let _cachedHyperlinkParamData = null;
+
+async function getHyperlinkParamData() {
+  if (_cachedHyperlinkParamData) return _cachedHyperlinkParamData;
+  try {
+    // 附注 desc 中的 {PARAM#P<id>|<index>S<scale>} 占位符从这里取值：
+    // 键为术语对应的天赋/技能 id（如 1402201），值为该天赋的 param_list
+    const version = await getDataVersion();
+    _cachedHyperlinkParamData = await fetchJson(`https://static.nanoka.cc/gi/${version}/zh/hyperlinkparam.json`);
+    console.log('[getHyperlinkParamData] loaded, entries:', Object.keys(_cachedHyperlinkParamData).length);
+  } catch (e) {
+    console.error('[getHyperlinkParamData] failed:', e.message);
+    _cachedHyperlinkParamData = {};
+  }
+  return _cachedHyperlinkParamData;
+}
+
 // 附注数据 → N 代号映射表（'N11430001' → 规则术语名称），供附注转换使用
 function buildNoteNameMap(annotations) {
   const map = {};
@@ -4308,6 +4349,24 @@ function substituteParams(desc, params = []) {
   return desc.replace(/\{(\d+)\}/g, (m, i) => {
     const v = params[parseInt(i, 10)];
     return (v !== undefined && v !== null && v !== '') ? String(v) : m;
+  });
+}
+
+// 替换附注 desc 中的 {PARAM#P<id>|<index>S<scale>} 占位符（与网站渲染逻辑一致）：
+// 从 paramMap（hyperlinkparam.json）取 id 对应的参数数组，取第 index 项（1-based），
+// 乘以 scale 后直接输出（S1=×1，S100=×100，网站即 String(f * u)）
+function substituteParamRefs(desc, paramMap = {}) {
+  if (!desc) return '';
+  // 参数表整体加载失败时保留占位符，避免全部错误替换为 0
+  const loaded = Object.keys(paramMap).length > 0;
+  return desc.replace(/\{PARAM#P(\d+)\|(\d+)S(\d+)\}/g, (m, id, index, scale) => {
+    if (!loaded) return m;
+    const arr = paramMap[String(id)];
+    if (!Array.isArray(arr)) return '0';
+    const i = Number(index) - 1;
+    const s = Number(scale);
+    const v = Number(arr[i] ?? 0);
+    return String(v * (Number.isFinite(s) ? s : 1));
   });
 }
 
@@ -4628,7 +4687,6 @@ async function scrapeCharacterStatsFromPage(characterId, existingWin = null) {
 }
 
 ipcMain.handle('crawl-character', async (_event, characterName, options = {}) => {
-  const { fastMode = false } = options;
   try {
     // 1. 查找角色ID
     const found = await findCharacterId(characterName);
@@ -4895,6 +4953,7 @@ ipcMain.handle('crawl-character', async (_event, characterName, options = {}) =>
     // 这里将其转换为数据库采用的效果引用 [note="[effect:名称]"]，并收集相关效果列表
     try {
       const annotations = await getAnnotationData();
+      const paramMap = await getHyperlinkParamData();
       const noteNameMap = buildNoteNameMap(annotations);
 
       // 收集角色文本中引用的附注 id（按出现顺序去重）
@@ -4921,7 +4980,7 @@ ipcMain.handle('crawl-character', async (_event, characterName, options = {}) =>
           seenNames.add(ann.name);
           return {
             name: `[color=#ffd780][b]${ann.name}[/b][/color]`,
-            content: convertColorMarkup(substituteParams(ann.desc || '', ann.param || [])),
+            content: convertColorMarkup(substituteParamRefs(substituteParams(ann.desc || '', ann.param || []), paramMap)),
           };
         })
         .filter(Boolean)
@@ -4997,34 +5056,11 @@ ipcMain.handle('crawl-character', async (_event, characterName, options = {}) =>
       });
     });
 
-    // 9.5 获取各级基础属性（非快速模式优先页面抓取，失败或快速模式用公式计算）
+    // 9.5 计算各级基础属性（用数据公式，与网站显示一致：
+    // round(base × 曲线系数 + 最高突破加成)，已用胡桃/甘雨/钟离等公开数值验证完全一致。
+    // 不再从页面抓取 —— 隐藏窗口加载整页（约 7MB HTML + 数十个子资源）每个角色要 1~2 分钟）
     const sm = detail.stats_modifier || {};
-    let statsScraped = false;
-
-    if (!fastMode) {
-      try {
-        const sharedWin = await getScrapeWindow();
-        const scrapedStats = await scrapeCharacterStatsFromPage(id, sharedWin);
-        if (scrapedStats && !scrapedStats.error && typeof scrapedStats.hp_90 === 'number') {
-          for (const [k, v] of Object.entries(scrapedStats)) {
-            if (k.startsWith('hp_') || k.startsWith('atk_') || k.startsWith('def_')) {
-              result.stats[k] = v;
-            }
-          }
-          statsScraped = true;
-        } else if (scrapedStats && scrapedStats._debugText) {
-          console.warn('[crawl-character] scraping returned no stats. Debug text:', scrapedStats._debugText.substring(0, 500));
-        }
-      } catch (scrapeErr) {
-        console.error('[crawl-character] stats scraping failed:', scrapeErr.message);
-      }
-    }
-
-    // 公式回退（快速模式 或 抓取失败时）
-    if (!statsScraped) {
-      console.log(fastMode
-        ? '[crawl-character] fast mode: using formula for stats'
-        : '[crawl-character] using fallback formula for stats');
+    {
       const baseHp = detail.base_hp || 0;
       const baseAtk = detail.base_atk || 0;
       const baseDef = detail.base_def || 0;

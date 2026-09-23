@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react'
 import { createPortal } from 'react-dom'
 import useZoomPan from '../hooks/useZoomPan'
+import useOverlay from '../hooks/useOverlay'
+import useHideDock from '../hooks/useHideDock'
 import {
   Images, FolderOpen, Image, ChevronLeft, ChevronRight,
   X, LayoutGrid, LayoutList,
@@ -305,6 +307,10 @@ function Lightbox({ items, currentIndex, onClose, onPrev, onNext, rootPath, prev
   const preloadCache = useRef(new Map())  // _fullPath → base64 data
   const justSwitchedRef = useRef(false)
   const { scale, position, dragging, interacting, startHold, stopHold, onWheel, reset, dragProps } = useZoomPan({ minScale: 0.2, maxScale: 10 })
+  // 全览期间临时隐藏 Dock
+  useHideDock()
+  // M2：全览灯箱焦点管理（Esc 关闭/还原；←/→ 翻页键保留原逻辑）
+  const ov = useOverlay({ open: true, onClose, label: '图片全览' })
 
   const currentItem = items[currentIndex]
   const currentTags = albumTags?.[currentItem?._fullPath || currentItem?.name || ''] || []
@@ -523,7 +529,7 @@ function Lightbox({ items, currentIndex, onClose, onPrev, onNext, rootPath, prev
   if (!currentItem) return null
 
   return (
-    <div className="fixed inset-0 z-[10000] bg-black/90 backdrop-blur-2xl flex flex-col animate-fade-in" onClick={handleBgClick} ref={containerRef}>
+    <div data-overlay className="fixed inset-0 z-[10000] bg-black/90 backdrop-blur-2xl flex flex-col animate-fade-in" onClick={handleBgClick} {...ov.overlayProps} ref={(n) => { containerRef.current = n; ov.overlayRef(n) }}>
       {/* 顶栏 */}
       <div className={`flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/60 to-transparent z-10 transition-opacity duration-300 ${uiVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="flex items-center gap-3">

@@ -1,27 +1,32 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+// ═════════════════════════════════════════════════════════════════
+// Lightbox.jsx — 图片灯箱（M2：接入 useOverlay 焦点管理）
+// 点击放大，滚轮缩放（0.5x~8x），任意缩放级别下均可拖拽平移
+// 缩放始终以可视窗口中心为缩放中心；键盘 +/- 与界面 +/- 按钮：单击 5%，长按平滑连续缩放
+// read：可选的自定义图片读取函数（默认数据库图片）
+// portalTo：可选，小程序窗口根元素。传入时灯箱挂载到该窗口内（absolute 相对窗口）
+// topOffset 为标题栏高度；不传则全屏遮罩
+// 键盘：Esc 关闭（栈式，仅顶层）；Tab 圈闭在灯箱内；+/- 缩放
+// ═════════════════════════════════════════════════════════════════
+import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Plus, Minus, Focus } from 'lucide-react'
 import { useDb } from '../context/DbContext'
 import { stripFormatting } from '../utils/colorMarkup'
 import useZoomPan from '../hooks/useZoomPan'
+import useOverlay from '../hooks/useOverlay'
+import useHideDock from '../hooks/useHideDock'
 
-/**
- * 图片灯箱：点击放大，滚轮缩放（0.5x ~ 3x），任意缩放级别下均可拖拽平移
- * 缩放始终以可视窗口中心为缩放中心；滚轮灵敏度约 5%/格；
- * 键盘 +/- 与界面 +/- 按钮：单击一步 5%，长按平滑连续缩放。
- * read：可选的自定义图片读取函数（返回 data URL 或 null），默认读取数据库图片
- * portalTo：可选，小程序窗口根元素。传入时灯箱挂载到该窗口内并用 absolute 定位
- *          （相对窗口自动跟随移动/缩放，丝滑无轮询，且不遮挡窗口标题栏）；
- *          topOffset 为标题栏高度，遮罩从标题栏下方开始。不传则全屏遮罩
- */
 export default function Lightbox({ filename, label, onClose, read, portalTo, topOffset = 0 }) {
   const cleanLabel = stripFormatting(label)
   const [src, setSrc] = useState(null)
-  const containerRef = useRef(null)
   const { readImage: dbReadImage } = useDb()
   const readImage = read || dbReadImage
   const inWindow = !!portalTo
   const { scale, position, startHold, stopHold, onWheel, reset, dragProps } = useZoomPan()
+  // 查看期间临时隐藏 Dock
+  useHideDock()
+  // M2：焦点管理（Esc 关闭 + Tab 圈闭 + 初始焦点 + 还原）
+  const ov = useOverlay({ open: true, onClose, label: cleanLabel || '图片查看' })
 
   useEffect(() => {
     let cancelled = false
@@ -38,41 +43,40 @@ export default function Lightbox({ filename, label, onClose, read, portalTo, top
   // 切换图片时重置缩放和位置
   useEffect(() => { reset() }, [filename, reset])
 
-  // Esc 关闭
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const containerRef = useRef(null)
 
-  // 滚轮缩放 — 用原生 addEventListener({ passive: false }) 避免 React 18 passive 警告
+  // 窗口模式：挂载到窗口根元素内（absolute 相对窗口自动跟随）；全屏：fixed 相对视口
+  // 滚轮缩放 — 原生 addEventListener({ passive: false }) 避免 React 18 passive 警告
   useEffect(() => {
     const el = containerRef.current
     if (!el || !src) return
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [src, onWheel])
-
-  // 窗口模式：挂载到窗口根元素内（absolute 相对窗口自动跟随，无需轮询）。
-  // 注意不可挂到窗口内层（backdrop-filter 会劫持 fixed 的包含块），挂到窗口根即可。
-  // 全屏模式：fixed 相对视口。
   const wrap = (node) => (inWindow ? createPortal(node, portalTo) : node)
   const overlayCls = inWindow ? 'absolute inset-0 z-[200] rounded-b-xl' : 'fixed inset-0 z-[200]'
   const overlayStyle = inWindow ? { top: topOffset } : undefined
   const closeCls = inWindow ? 'absolute z-[220]' : 'fixed z-[220]'
   const closeStyle = inWindow ? { top: topOffset + 16, right: 16 } : undefined
 
+  // 圈闭根：包一层无样式容器，覆盖遮罩与关闭钮（fixed/absolute 子元素不受影响）
+  const rootWrap = (node) => (
+    <div ref={ov.overlayRef} data-overlay {...ov.overlayProps}>
+      {node}
+    </div>
+  )
+
   if (!src) {
-    return wrap(
-      <div className={`${overlayCls} bg-black/80 backdrop-blur-sm flex items-center justify-center`} style={overlayStyle} onClick={onClose}>
+    return wrap(rootWrap(
+      <div data-overlay className={overlayCls} style={overlayStyle} onClick={onClose}>
         <div className="w-10 h-10 rounded-full border-2 border-primary-500 border-t-transparent animate-spin" />
       </div>
-    )
+    ))
   }
 
-  return wrap(
+  return wrap(rootWrap(
     <>
-      <div className={`${overlayCls} bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 overflow-hidden no-drag`}
+      <div data-overlay className={overlayCls + ' bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 overflow-hidden no-drag'}
         style={overlayStyle}
         onClick={onClose}
         onContextMenu={(e) => { e.preventDefault(); onClose() }}
@@ -142,12 +146,12 @@ export default function Lightbox({ filename, label, onClose, read, portalTo, top
       {/* 关闭按钮 —— 独立于背景层，避免点击区域被遮挡 */}
       <button
         onClick={onClose}
-        className={`${closeCls} top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors no-drag`}
+        className={closeCls + ' top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors no-drag'}
         style={closeStyle}
         aria-label="关闭"
       >
         <X className="w-5 h-5" />
       </button>
     </>
-  )
+  ))
 }

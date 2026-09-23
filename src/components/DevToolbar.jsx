@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useTerminal } from '../context/TerminalContext'
+import useOverlay from '../hooks/useOverlay'
 import { parseTowerDetail, parseTheaterDetail, parseLeylineDetail } from '../utils/challengeCrawl'
 import {
   Database, Download, Upload, Trash2, X, Bug, History, Wrench,
@@ -31,6 +32,8 @@ function extractImageFile(iconName) {
 
 // ─── 备份列表弹窗 ───
 function BackupListModal({ isOpen, onClose }) {
+  // M2：弹层焦点管理
+  const ov = useOverlay({ open: isOpen, onClose, label: '备份管理' })
   const { listBackups, restoreBackup, deleteBackup } = useDb()
   const [backups, setBackups] = useState([])
   const [loading, setLoading] = useState(false)
@@ -119,7 +122,7 @@ function BackupListModal({ isOpen, onClose }) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-lg max-h-[70vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -208,6 +211,8 @@ function BackupListModal({ isOpen, onClose }) {
 
 // ─── 备份数据库弹窗 ───
 function BackupCreateModal({ isOpen, onClose }) {
+  // M2：弹层焦点管理
+  const ov = useOverlay({ open: isOpen, onClose, label: '创建备份' })
   const { createBackup } = useDb()
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
@@ -246,7 +251,7 @@ function BackupCreateModal({ isOpen, onClose }) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-sm bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -307,6 +312,8 @@ function BackupCreateModal({ isOpen, onClose }) {
 
 // ─── 爬虫进度面板（纯展示 + 控制）───
 function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, onStart, onPause, onResume, onStop, fastMode, onToggleFastMode, crawlMode, onToggleCrawlMode, categories, onToggleCategory, onToggleAllCategories }) {
+  // M2：弹层焦点管理
+  const ov = useOverlay({ open: isOpen, onClose, label: '信息爬虫' })
   const doneCount = tasks.filter(t => t.status === 'done').length
   const errorCount = tasks.filter(t => t.status === 'error').length
   const totalCount = tasks.length
@@ -315,7 +322,7 @@ function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, on
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-lg max-h-[70vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -465,26 +472,28 @@ function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, on
               </div>
             </div>
           )}
-          {/* Fast mode toggle */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-surface-400">快速模式</span>
-              <button
-                onClick={onToggleFastMode}
-                disabled={running}
-                className={`relative w-9 h-5 rounded-full transition-colors disabled:opacity-50 ${
-                  fastMode ? 'bg-primary-500' : 'bg-surface-600'
-                }`}
-              >
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-                  fastMode ? 'left-[18px]' : 'left-0.5'
-                }`} />
-              </button>
+          {/* Fast mode toggle（角色爬虫不再需要：属性一律用公式计算，与页面完全一致） */}
+          {typeof fastMode === 'boolean' && (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-surface-400">快速模式</span>
+                <button
+                  onClick={onToggleFastMode}
+                  disabled={running}
+                  className={`relative w-9 h-5 rounded-full transition-colors disabled:opacity-50 ${
+                    fastMode ? 'bg-primary-500' : 'bg-surface-600'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                    fastMode ? 'left-[18px]' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
+              <span className="text-xs text-surface-500">
+                {fastMode ? '跳过故事抓取（快）' : '含故事抓取（完整）'}
+              </span>
             </div>
-            <span className="text-xs text-surface-500">
-              {fastMode ? '公式计算（快）' : '页面抓取（慢但精确）'}
-            </span>
-          </div>
+          )}
           <div className="flex items-center justify-between">
             <div className="text-xs text-surface-500">
               {running
@@ -512,6 +521,8 @@ function CrawlerPanel({ isOpen, onClose, tasks, running, paused, currentTask, on
 
 // ─── 武器查漏选择弹窗：列出缺失武器（名称 + ID），供用户勾选后爬取 ───
 function WeaponLeakCheckModal({ isOpen, onClose, items, loading, onStart, warning }) {
+  // M2：弹层焦点管理
+  const ov = useOverlay({ open: isOpen, onClose, label: '武器信息检查' })
   const [selectedIds, setSelectedIds] = useState([])
 
   // 打开或列表刷新时默认全选
@@ -534,7 +545,7 @@ function WeaponLeakCheckModal({ isOpen, onClose, items, loading, onStart, warnin
   const allChecked = items.length > 0 && selectedIds.length === items.length
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-lg max-h-[75vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -639,6 +650,8 @@ function WeaponLeakCheckModal({ isOpen, onClose, items, loading, onStart, warnin
 
 // ─── 挑战爬虫面板：读取 nanoka 目录 → 选择期数 → 填充当前编辑表单 ───
 function ChallengeCrawlerPanel({ isOpen, onClose, type, editing, onFill }) {
+  // M2：弹层焦点管理
+  const ov = useOverlay({ open: isOpen, onClose, label: '挑战数据爬取' })
   const { challengeCatalog, challengeDetail } = useDb()
   const [catalog, setCatalog] = useState(null)  // null=加载中
   const [error, setError] = useState(null)
@@ -712,7 +725,7 @@ function ChallengeCrawlerPanel({ isOpen, onClose, type, editing, onFill }) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div data-overlay ref={ov.overlayRef} {...ov.overlayProps} className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-full max-w-lg max-h-[70vh] bg-surface-900 border border-surface-700 rounded-t-2xl shadow-2xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -885,7 +898,6 @@ export default function DevToolbar() {
   const pausedRef = useRef(false)
   const runningRef = useRef(false)
   const [currentTask, setCurrentTask] = useState(null)
-  const [fastMode, setFastMode] = useState(false)  // 默认关闭快速模式（页面抓取，精确）
   // 勾选要爬取并覆盖的内容分类（默认全选）
   const [crawlCategories, setCrawlCategories] = useState(() => CHARACTER_CRAWL_CATEGORIES.map(c => c.key))
 
@@ -1165,47 +1177,46 @@ export default function DevToolbar() {
     setPaused(false)
     pausedRef.current = false
 
-    for (let i = 0; i < list.length; i++) {
-      if (pausedRef.current) {
-        await new Promise(resolve => {
-          const check = () => {
-            if (!pausedRef.current || !runningRef.current) resolve()
-            else setTimeout(check, 200)
+    // 小并发批量爬取（3 个并行）：角色数据都是独立 JSON 请求，
+    // 串行时总耗时 = 每角色耗时 × 数量，并发可显著提速。
+    // 暂停/停止语义保持：任务执行期间不可中断，但取下一个任务前检查暂停/停止
+    const CONCURRENCY = 3
+    let nextIdx = 0
+    const workers = Array.from({ length: Math.min(CONCURRENCY, list.length) }, async () => {
+      while (runningRef.current) {
+        if (pausedRef.current) {
+          await new Promise(r => setTimeout(r, 200))
+          continue
+        }
+        const i = nextIdx++
+        if (i >= list.length) break
+
+        const task = list[i]
+        setCurrentTask(task)
+        setTasks(prev => prev.map((t, idx) =>
+          idx === i ? { ...t, status: 'running', message: '正在爬取...' } : t
+        ))
+
+        try {
+          const res = await crawlCharacter(task.name)
+          if (res.success) {
+            await saveCharacterData(task.id, res.data, crawlCategories)
+            setTasks(prev => prev.map((t, idx) =>
+              idx === i ? { ...t, status: 'done', message: '完成' } : t
+            ))
+          } else {
+            setTasks(prev => prev.map((t, idx) =>
+              idx === i ? { ...t, status: 'error', message: res.error || '爬取失败' } : t
+            ))
           }
-          check()
-        })
-        if (!runningRef.current) break
-      }
-
-      const task = list[i]
-      setCurrentTask(task)
-      setTasks(prev => prev.map((t, idx) =>
-        idx === i ? { ...t, status: 'running', message: '正在爬取...' } : t
-      ))
-
-      try {
-        const res = await crawlCharacter(task.name, { fastMode })
-        if (res.success) {
-          await saveCharacterData(task.id, res.data, crawlCategories)
+        } catch (e) {
           setTasks(prev => prev.map((t, idx) =>
-            idx === i ? { ...t, status: 'done', message: '完成' } : t
-          ))
-        } else {
-          setTasks(prev => prev.map((t, idx) =>
-            idx === i ? { ...t, status: 'error', message: res.error || '爬取失败' } : t
+            idx === i ? { ...t, status: 'error', message: e.message } : t
           ))
         }
-      } catch (e) {
-        setTasks(prev => prev.map((t, idx) =>
-          idx === i ? { ...t, status: 'error', message: e.message } : t
-        ))
       }
-    }
-
-    // 批量爬取结束后清理 BrowserWindow
-    if (!fastMode) {
-      try { await cleanupScrapeWindow() } catch (_) {}
-    }
+    })
+    await Promise.all(workers)
 
     setRunning(false)
     runningRef.current = false
@@ -2636,8 +2647,6 @@ export default function DevToolbar() {
         onPause={pauseCrawl}
         onResume={resumeCrawl}
         onStop={stopCrawl}
-        fastMode={fastMode}
-        onToggleFastMode={() => setFastMode(prev => !prev)}
         categories={crawlCategories}
         onToggleCategory={(key) => setCrawlCategories(prev =>
           prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
@@ -2699,8 +2708,6 @@ export default function DevToolbar() {
         onPause={pauseWishCrawl}
         onResume={resumeWishCrawl}
         onStop={stopWishCrawl}
-        fastMode={false}
-        onToggleFastMode={() => {}}
         crawlMode={'full'}
         onToggleCrawlMode={() => {}}
       />
