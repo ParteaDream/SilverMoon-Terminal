@@ -7,6 +7,7 @@ import { APPS } from '../components/appRegistry'
 import TrainCalc from '../components/TrainCalc'
 import BetaMemo from '../components/BetaMemo'
 import DragonSnake from '../components/DragonSnake'
+import NightsoulRace from '../components/NightsoulRace'
 import WorldTree from '../components/WorldTree'
 import Album from '../components/Album'
 import RateFetcher from '../components/RateFetcher'
@@ -14,6 +15,7 @@ import NorthlandBank from '../components/NorthlandBank'
 import GachaStation from '../components/GachaStation'
 import MemoryHub from '../components/MemoryHub'
 import Hourglass from '../components/Hourglass'
+import Simulanka from '../components/Simulanka'
 import AITool from '../components/AITool'
 import {
   X, Minus, Square, Copy, Monitor, ChevronLeft,
@@ -578,7 +580,7 @@ export function TerminalWindow({ app, onClose, onHide, state, onUpdateState, onF
           <div className="w-16" />
         </div>
         <div className="flex-1 overflow-auto">
-          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.id === 'worldtree' ? <WorldTree /> : app.id === 'album' ? <Album /> : app.id === 'ratefetcher' ? <RateFetcher /> : app.id === 'northlandbank' ? <NorthlandBank /> : app.id === 'gachastation' ? <GachaStation /> : app.id === 'memoryhub' ? <MemoryHub initialData={app.data} /> : app.id === 'hourglass' ? <Hourglass /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
+          {app.id === 'traincalc' ? <TrainCalc initialData={app.data} /> : app.id === 'betamemo' ? <BetaMemo /> : app.id === 'dragonsnake' ? <DragonSnake /> : app.id === 'nightsoulrace' ? <NightsoulRace /> : app.id === 'worldtree' ? <WorldTree /> : app.id === 'album' ? <Album /> : app.id === 'ratefetcher' ? <RateFetcher /> : app.id === 'northlandbank' ? <NorthlandBank /> : app.id === 'gachastation' ? <GachaStation /> : app.id === 'memoryhub' ? <MemoryHub initialData={app.data} /> : app.id === 'hourglass' ? <Hourglass /> : app.id === 'simulanka' ? <Simulanka /> : app.placeholder ? <PlaceholderApp app={app} /> : app.system ? <SystemToolContent tool={app} /> : null}
         </div>
         {!fullscreen && (
           <>

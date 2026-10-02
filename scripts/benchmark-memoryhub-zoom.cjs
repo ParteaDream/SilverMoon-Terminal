@@ -7,6 +7,9 @@ const http = require('http')
 const net = require('net')
 const os = require('os')
 const path = require('path')
+// 磁盘安全：见 scripts/lib/sandbox.cjs 顶部的事故说明
+const { installCleanupHook, sweepLeftovers } = require('./lib/sandbox.cjs')
+sweepLeftovers(['silvermoon-memoryhub-perf-'])   // 异常信号（SIGTRAP/SIGKILL）会绕过退出钩子，只能靠下次启动自愈
 
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 const imagePackSourceArg = process.argv.find(arg => arg.startsWith('--image-pack-source='))
@@ -40,7 +43,7 @@ function cleanup() {
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }) } catch (_) {}
 }
 
-process.once('exit', cleanup)
+installCleanupHook(cleanup)   // ⚠️ app.exit() 不触发 'exit'，清理必须靠劫持（见 lib/sandbox.cjs）
 process.once('SIGINT', () => finish({ error: 'benchmark interrupted' }, 130))
 process.once('SIGTERM', () => finish({ error: 'benchmark terminated' }, 143))
 

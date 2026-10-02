@@ -68,6 +68,9 @@ export function useSortFilter(data, columns, initialSortKeys = [], initialFilter
       } else if (col.filterType === 'select') {
         result = result.filter(row => {
           const raw = row[col.key]
+          // 列可以自定义匹配方式（例如「提升防御、提升治疗效果」这种多值串，
+          // 需要按下拉里选中的单项做包含匹配，而不是整串相等）
+          if (typeof col.filterMatch === 'function') return col.filterMatch(raw, val, row)
           // Compare raw values directly (select options already use raw IDs)
           return raw == val
         })

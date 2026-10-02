@@ -16,6 +16,10 @@ import ArtifactsPage from './pages/ArtifactsPage'
 import ArtifactDetailPage from './pages/ArtifactDetailPage'
 import MaterialsPage from './pages/MaterialsPage'
 import MaterialDetailPage from './pages/MaterialDetailPage'
+import FoodsPage from './pages/FoodsPage'
+import FoodDetailPage from './pages/FoodDetailPage'
+import BooksPage from './pages/BooksPage'
+import BookDetailPage from './pages/BookDetailPage'
 import WishesPage from './pages/WishesPage'
 import ChallengesPage from './pages/ChallengesPage'
 import GameDataPage from './pages/GameDataPage'
@@ -24,6 +28,8 @@ import TerminalPage from './pages/TerminalPage'
 import SettingsPage from './pages/SettingsPage'
 import ChangelogPage from './pages/ChangelogPage'
 import { setIgnoredColors } from './utils/colorMarkup'
+import { notifyUserScrollIntent } from './utils/scrollMemory.mjs'
+import useDevToolbarReserve from './hooks/useDevToolbarReserve'
 import { TerminalProvider, useTerminal } from './context/TerminalContext'
 import { TerminalWindow } from './pages/TerminalPage'
 import TerminalDock from './components/TerminalDock'
@@ -36,8 +42,12 @@ export default function App() {
   const { canGoBack, canGoForward, goBack, goForward } = useNav()
   const location = useLocation()
   const [showBackToTop, setShowBackToTop] = useState(false)
+  const [mainEl, setMainEl] = useState(null)
   // 每次渲染直接从 localStorage 读取默认启动页，确保冷启动和即时更新都正确
   const defaultPage = localStorage.getItem('default_page') || '/characters'
+
+  // 开发者模式下底部工具栏不占布局，由 useDevToolbarReserve 在滚动内容末尾补出预留空间
+  useDevToolbarReserve(mainEl, devMode)
 
   // 禁用浏览器默认的滚动恢复，使用自定义恢复逻辑
   useEffect(() => {
@@ -65,7 +75,10 @@ export default function App() {
 
   function scrollToTop() {
     const main = document.querySelector('main')
-    if (main) main.scrollTo({ top: 0, behavior: 'smooth' })
+    if (!main) return
+    // 用户主动回到顶部：正在进行的滚动恢复让位
+    notifyUserScrollIntent()
+    main.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const isWin = !/Mac/i.test(navigator.platform || '')
@@ -84,8 +97,11 @@ export default function App() {
   ) : (
     <div className="h-full flex overflow-hidden">
       <Sidebar />
-      <main className={`flex-1 overflow-y-auto overflow-x-hidden relative ${devMode ? 'pb-10' : ''}`} onScroll={handleScroll}>
-        <div key={location.key} className="animate-slide-up h-full">
+      {/* pb-10：开发者工具栏(h-10)盖住的是 main 的 padding 区，满高页面（终端/数据/…）
+          因此停在工具栏上方。会滚动的页面 padding 会被溢出内容吃掉，
+          改由 dev-reserve-bottom 在内容流末尾补空间（见 index.css） */}
+      <main ref={setMainEl} className={`flex-1 overflow-y-auto overflow-x-hidden relative ${devMode ? 'pb-10 dev-reserve-bottom' : ''}`} onScroll={handleScroll}>
+        <div key={location.key} data-page-host="" className="animate-slide-up h-full">
         <Routes>
           <Route path="/" element={<Navigate to={defaultPage} replace />} />
           <Route path="/characters" element={<CharactersPage />} />
@@ -96,6 +112,10 @@ export default function App() {
           <Route path="/artifacts/:id" element={<ArtifactDetailPage />} />
           <Route path="/materials" element={<MaterialsPage />} />
           <Route path="/materials/:id" element={<MaterialDetailPage />} />
+          <Route path="/foods" element={<FoodsPage />} />
+          <Route path="/foods/:id" element={<FoodDetailPage />} />
+          <Route path="/books" element={<BooksPage />} />
+          <Route path="/books/:id" element={<BookDetailPage />} />
           <Route path="/wishes" element={<WishesPage />} />
           <Route path="/challenges" element={<ChallengesPage />} />
           <Route path="/data" element={<GameDataPage />} />

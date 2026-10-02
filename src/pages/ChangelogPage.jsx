@@ -1,12 +1,12 @@
-import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback, memo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
-import { useNav } from '../context/NavContext'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import useZoomPan from '../hooks/useZoomPan'
 import useHideDock from '../hooks/useHideDock'
 import useOverlay from '../hooks/useOverlay'
-import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { getScroller } from '../utils/scrollMemory.mjs'
 import { Plus, Minus, GripVertical, ArrowUpDown, X, Search, ChevronDown, ChevronRight, ChevronLeft, ImagePlus, Download, User, Crosshair, Sparkles, Shirt, Package, BarChart3, Star } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput, FormField } from '../components/EditModal'
@@ -52,8 +52,15 @@ function compareVersion(a, b) {
 export default function ChangelogPage() {
   const { query, readImage, devMode } = useDb()
   const navigate = useNavigate()
-  const { restorePage, savePage, consumeBackToList } = useNav()
-  const restoringScroll = useRef(false)
+  // ── 滚动位置记忆 ──
+  // 版本块带 data-version，用它做内容锚点；图片是懒加载的，高度会变，
+  // 锚点式恢复（utils/scrollMemory.mjs）能把这种变化吸收掉。
+  const scrollStateRef = useRef({ search: '', sortAsc: false, expandedVersions: [] })
+  const { restoring, readSaved, restore, persistState, shouldRestore } = useScrollMemory('changelog', {
+    getState: () => scrollStateRef.current,
+    itemSelector: '[data-version]',
+    anchorAttribute: 'data-version',
+  })
   const initialLoadDone = useRef(false)
   const hasRestored = useRef(false)
 
@@ -76,6 +83,7 @@ export default function ChangelogPage() {
   const [search, setSearch] = useState('')
   const [sortAsc, setSortAsc] = useState(false)
   const [expandedVersions, setExpandedVersions] = useState(new Set())
+  scrollStateRef.current = { search, sortAsc, expandedVersions: [...expandedVersions] }
 
   // Modal
   const [modalOpen, setModalOpen] = useState(false)
@@ -95,31 +103,32 @@ export default function ChangelogPage() {
   const [outfitOptions, setOutfitOptions] = useState([])
   const [gameDataOptions, setGameDataOptions] = useState([])
 
-  // ── Load all data ──
+  // ── 挂载：返回则恢复（筛选/折叠状态 + 滚动位置），从侧栏进入则置顶 ──
   useEffect(() => {
-    const isBack = consumeBackToList()
-    if (isBack) {
-      restorePage('changelog').then(saved => {
-        if (saved) {
-          hasRestored.current = true
-          if (saved.search != null) setSearch(saved.search)
-          if (saved.sortAsc != null) setSortAsc(saved.sortAsc)
-          if (saved.expandedVersions?.length > 0) {
-            setExpandedVersions(new Set(saved.expandedVersions))
-          }
-          if (saved.scrollY != null && saved.scrollY > 0) {
-            sessionStorage.setItem('_changelog_restore_y', String(saved.scrollY))
-          }
-        }
-        initialLoadDone.current = true
-        loadAll()
-      })
-    } else {
-      const main = document.querySelector('main')
-      if (main) main.scrollTo(0, 0)
+    if (!shouldRestore()) {
+      const main = getScroller()
+      if (main) main.scrollTop = 0
       initialLoadDone.current = true
       loadAll()
+      return undefined
     }
+    let cancelled = false
+    ;(async () => {
+      const saved = readSaved()
+      const st = saved && saved.state
+      if (st) {
+        hasRestored.current = true
+        if (st.search != null) setSearch(st.search)
+        if (st.sortAsc != null) setSortAsc(st.sortAsc)
+        if (st.expandedVersions?.length > 0) setExpandedVersions(new Set(st.expandedVersions))
+      }
+      initialLoadDone.current = true
+      await loadAll()
+      if (cancelled) return
+      // 版本块是懒渲染的，等它们进 DOM 后再校正（restore 内部会逐帧重试）
+      await restore(saved && saved.snapshot)
+    })()
+    return () => { cancelled = true }
   }, [])
 
   // 排序/筛选变化时通知懒加载图片重新检查视口。
@@ -133,57 +142,11 @@ export default function ChangelogPage() {
     bumpLazyRevision()
   }, [search, sortAsc, loaded])
 
-  // ── 状态持久化：数据加载完成后恢复滚轮位置 ──
-  useEffect(() => {
-    if (!loaded) return
-    const restoreY = sessionStorage.getItem('_changelog_restore_y')
-    if (!restoreY) return
-    const targetY = Number(restoreY)
-    if (targetY <= 0) { sessionStorage.removeItem('_changelog_restore_y'); return }
-    sessionStorage.removeItem('_changelog_restore_y')
-    const main = document.querySelector('main')
-    if (main) {
-      restoringScroll.current = true
-      const tryScroll = (n) => {
-        if (main.scrollHeight > targetY) {
-          main.scrollTo(0, targetY)
-          setTimeout(() => { restoringScroll.current = false }, 300)
-        } else if (n > 0) {
-          setTimeout(() => tryScroll(n - 1), 200)
-        } else {
-          restoringScroll.current = false
-        }
-      }
-      tryScroll(20)
-    }
-  }, [loaded])
-
-  // ── 状态持久化：滚动时保存 ──
-  useLayoutEffect(() => {
-    const main = document.querySelector('main')
-    if (!main) return
-    let timer = null
-    const expandedArr = [...expandedVersions]
-    const save = () => {
-      if (restoringScroll.current) return
-      savePage('changelog', { search, sortAsc, expandedVersions: expandedArr })
-    }
-    const onScroll = () => {
-      clearTimeout(timer)
-      if (restoringScroll.current) return
-      timer = setTimeout(save, 150)
-    }
-    main.addEventListener('scroll', onScroll, { passive: true })
-    return () => { main.removeEventListener('scroll', onScroll); clearTimeout(timer); save() }
-  }, [search, sortAsc, expandedVersions, savePage])
-
-  // ── 状态持久化：筛选/排序/折叠变化时立即保存到 user.json ──
+  // 筛选/排序/折叠变化时立即写回状态（保留已有滚动快照，不重新采集）
   useEffect(() => {
     if (!initialLoadDone.current) return
-    const current = loadPageStateSync('changelog')
-    const scrollY = current?.scrollY || 0
-    savePageStateSync('changelog', scrollY, { search, sortAsc, expandedVersions: [...expandedVersions] })
-  }, [search, sortAsc, expandedVersions])
+    persistState()
+  }, [search, sortAsc, expandedVersions, persistState])
 
   async function loadAll() {
     // Load lookup data（version_tags/version_additions 一并查询，供按需加载 wish 数据与构建版本数据，避免重复查询）

@@ -16,7 +16,7 @@ const ARGS = new Set(process.argv.slice(2))
 const WRITE = ARGS.has('--write-baseline')
 const STRICT = ARGS.has('--strict')
 
-const RULES = ['nonsemanticClickables', 'iconButtonsNoLabel', 'rawKeydown', 'overlayNoDialog', 'tabIndexUses', 'ctxMenuNonInteractive', 'outlineNoneNoFocus']
+const RULES = ['nonsemanticClickables', 'iconButtonsNoLabel', 'rawKeydown', 'overlayNoDialog', 'tabIndexUses', 'ctxMenuNonInteractive', 'outlineNoneNoFocus', 'overlayButtonNoHover', 'invalidOpacityClass']
 
 function walk(dir, out = []) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -65,6 +65,25 @@ function scan(src, rel) {
       if (/^(button|input|textarea|select|a)$/.test(name) && /focus:outline-none/.test(attrs) && !/focus:ring/.test(attrs) && !/focus:border/.test(attrs)) {
         hits.outlineNoneNoFocus++; rows.push(['outlineNoneNoFocus', rel, line()])
       }
+      // 整屏透明按钮必须显式写 hover: 类。
+      // index.css 有一条全局规则 button:where(:not([class*="hover:"])):hover 会刷上 surface-800 底色，
+      // 整屏按钮漏了就变成一整块深灰盖住底下的内容 —— 祈愿动画的 Canvas 就是这样被盖没过，
+      // 而测试脚本用 element.click() 不触发 :hover，端到端测试永远发现不了。
+      // 只看 className 的值：注释里出现的 "hover:" 字样不算数（写注释说明这个坑时极易误判）
+      const clsAttr = /className\s*=\s*"([^"]*)"/.exec(attrs)
+      if (name === 'button' && clsAttr && /inset-0/.test(clsAttr[1]) && !/hover:/.test(clsAttr[1])) {
+        hits.overlayButtonNoHover++; rows.push(['overlayButtonNoHover', rel, line()])
+      }
+    }
+  }
+  // 行级规则：颜色透明度修饰符必须是 5 的倍数（tailwind.config 只生成这些档位）。
+  // 写成 /8 /12 /6 之类不会产出任何 CSS：border-* 回落成 preflight 默认的亮灰 #e5e7eb
+  // （看起来像"白框"），bg-* 则完全丢失。属于静态可查、运行时不报错的隐形坑。
+  for (const m of src.matchAll(/\b(?:bg|border|text|ring|divide|from|via|to|outline|decoration|placeholder|accent|caret|fill|stroke)-(?:white|black|[a-z]+-\d{2,3})\/(\d{1,3})\b/g)) {
+    const v = Number(m[1])
+    if (v % 5 !== 0 && v !== 0 && v !== 100) {
+      hits.invalidOpacityClass++
+      rows.push(['invalidOpacityClass', rel, src.slice(0, m.index).split('\n').length])
     }
   }
   // 行级规则（不依赖 tag 扫描）
@@ -132,6 +151,8 @@ function printSummary(t, n) {
     tabIndexUses: 'tabIndex 使用处',
     ctxMenuNonInteractive: '非交互元素上的右键菜单',
     outlineNoneNoFocus: 'focus:outline-none 且无替代焦点样式',
+    overlayButtonNoHover: '整屏按钮缺 hover: 类（会被全局规则涂灰盖住内容）',
+    invalidOpacityClass: '颜色透明度不是 5 的倍数（该类不会生成，样式静默失效）',
   }
   console.log('文件数: ' + n)
   for (const r of RULES) console.log('  ' + r.padEnd(22) + ' ' + String(t[r]).padStart(5) + '  ' + (label[r] || ''))

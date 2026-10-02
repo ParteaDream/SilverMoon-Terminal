@@ -1,7 +1,8 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
-import { useNav } from '../context/NavContext'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { getScroller } from '../utils/scrollMemory.mjs'
 import { clearDetailScroll } from '../hooks/useDetailState'
 import { Plus, Trash2, Search, CheckSquare, Square, ArrowUpDown, GripVertical, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
@@ -10,7 +11,6 @@ import ColorTextInput from '../components/ColorTextInput'
 import ColoredText from '../components/ColoredText'
 import Lightbox from '../components/Lightbox'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
-import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
 import { SETTINGS_ELEM_ORDER, ELEM_NAME_TO_ID } from '../utils/colorMarkup'
 
 // ── 挑战类型 ──
@@ -194,8 +194,13 @@ async function ensureSchemaColumns() {
 
 export default function ChallengesPage() {
   const { query, readImage } = useDb()
-  const { restorePage, savePage, consumeBackToList } = useNav()
-  const restoringScroll = useRef(false)
+  // ── 滚动位置记忆 ──
+  // 挑战页没有 data-item-id 锚点，退化用像素位置 + 收敛循环（见 utils/scrollMemory.mjs）：
+  // 内容是一段段异步加载出来的，旧实现"高度够大就滚一次"会把位置留在半路。
+  const scrollStateRef = useRef({ activeType: null })
+  const { restoring, readSaved, restore, saveNow, persistState, shouldRestore } = useScrollMemory('challenges', {
+    getState: () => scrollStateRef.current,
+  })
 
   // ── 基础数据 ──
   const [challenges, setChallenges] = useState([])
@@ -206,6 +211,7 @@ export default function ChallengesPage() {
 
   // ── UI 状态 ──
   const [activeType, setActiveType] = useState('perilous_trail')
+  scrollStateRef.current = { activeType }
   const [search, setSearch] = useState('')
   const [sortAsc, setSortAsc] = useState(false)
   const [selectMode, setSelectMode] = useState(false)
@@ -232,26 +238,27 @@ export default function ChallengesPage() {
   // 搜索/排序变化时通知懒加载图片重新检查视口
   useEffect(() => { bumpLazyRevision() }, [search, sortAsc])
 
-  // ── 状态持久化 ──
-  // 先恢复 activeType（触发数据加载），数据加载完成后恢复滚轮位置
+  // ── 挂载：返回则恢复（类型 + 滚动位置），从侧栏进入则置顶 ──
+  // 先恢复 activeType（触发对应数据加载），内容到位后再校正滚动位置
   useEffect(() => {
-    const isBack = consumeBackToList()
-    if (isBack) {
-      restorePage('challenges').then(saved => {
-        const restoreType = saved?.activeType || activeType
-        if (saved?.activeType) setActiveType(restoreType)
-        if (saved?.scrollY != null && saved.scrollY > 0) {
-          sessionStorage.setItem('_challenges_restore_y', String(saved.scrollY))
-        }
-        initialLoadDone.current = true
-        loadChallenges(restoreType)  // 显式传入类型，不依赖闭包中的 activeType
-      })
-    } else {
-      const main = document.querySelector('main')
-      if (main) main.scrollTo(0, 0)
+    if (!shouldRestore()) {
+      const main = getScroller()
+      if (main) main.scrollTop = 0
       initialLoadDone.current = true
       loadChallenges()
+      return undefined
     }
+    let cancelled = false
+    ;(async () => {
+      const saved = readSaved()
+      const restoreType = saved?.state?.activeType || activeType
+      if (saved?.state?.activeType) setActiveType(restoreType)
+      initialLoadDone.current = true
+      await loadChallenges(restoreType)   // 显式传入类型，不依赖闭包中的 activeType
+      if (cancelled) return
+      await restore(saved?.snapshot)
+    })()
+    return () => { cancelled = true }
   }, [])
 
   // ── 上报挑战类型与编辑弹窗状态给开发者工具栏（挑战爬虫使用）──
@@ -339,54 +346,11 @@ export default function ChallengesPage() {
     return `[note="${m[1]}"]${crawled}[/note]`
   }
 
-  // 滚动时保存 + activeType 变化时保存
-  useLayoutEffect(() => {
-    const main = document.querySelector('main')
-    if (!main) return
-    let timer = null
-    const save = () => {
-      if (restoringScroll.current) return
-      savePage('challenges', { activeType })
-    }
-    const onScroll = () => {
-      clearTimeout(timer)
-      if (restoringScroll.current) return
-      timer = setTimeout(save, 150)
-    }
-    main.addEventListener('scroll', onScroll, { passive: true })
-    return () => { main.removeEventListener('scroll', onScroll); clearTimeout(timer); save() }
-  }, [activeType, savePage])
-  // activeType 变化时立即保存状态到 user.json（保留已有的滚轮数据）
+  // activeType 变化时立即把状态写回（保留已有的滚轮快照，不重新采集）
   useEffect(() => {
     if (!initialLoadDone.current) return
-    const current = loadPageStateSync('challenges')
-    const scrollY = current?.scrollY || 0
-    savePageStateSync('challenges', scrollY, { activeType })
-  }, [activeType])
-  // 数据加载完成后恢复滚轮位置（等 activeType 加载完数据后才执行）
-  useEffect(() => {
-    if (challenges.length === 0) return
-    const restoreY = sessionStorage.getItem('_challenges_restore_y')
-    if (!restoreY) return
-    const targetY = Number(restoreY)
-    if (targetY <= 0) { sessionStorage.removeItem('_challenges_restore_y'); return }
-    sessionStorage.removeItem('_challenges_restore_y')
-    const main = document.querySelector('main')
-    if (main) {
-      restoringScroll.current = true
-      const tryScroll = (n) => {
-        if (main.scrollHeight > targetY) {
-          main.scrollTo(0, targetY)
-          setTimeout(() => { restoringScroll.current = false }, 300)
-        } else if (n > 0) {
-          setTimeout(() => tryScroll(n - 1), 200)
-        } else {
-          restoringScroll.current = false
-        }
-      }
-      tryScroll(10)
-    }
-  }, [challenges])
+    persistState()
+  }, [activeType, persistState])
 
   async function loadMaps() {
     const [chars, elems, settingsRes] = await Promise.all([
@@ -783,7 +747,7 @@ export default function ChallengesPage() {
 
   // ── 渲染 ──
   return (
-    <div className="p-6">
+    <div className={`p-6 transition-opacity duration-100 ${restoring ? 'opacity-0' : 'opacity-100'}`}>
       {/* 头部 */}
       <div className="flex items-center justify-between mb-3">
         <div>

@@ -1,9 +1,11 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, memo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, memo, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { useTerminal } from '../context/TerminalContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { getScroller } from '../utils/scrollMemory.mjs'
 import { useImageDrag } from '../hooks/useImageDrag'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import DataTable, { useSortFilter, SortBar, FilterBar } from '../components/DataTable'
@@ -59,7 +61,7 @@ function _invalidateCharsCache() { _cachedCharsRaw = null }
 
 export default function CharactersPage() {
   const { query, readImage } = useDb()
-  const { savePage, restorePage, push, consumeBackToList } = useNav()
+  const { push } = useNav()
   const { launchTrainCalc } = useTerminal()
   const location = useLocation()
   const [characters, setCharacters] = useState([])
@@ -86,111 +88,47 @@ export default function CharactersPage() {
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState(new Set())
   const [selectedElements, setSelectedElements] = useState(new Set())
-  const restoringScroll = useRef(false)
-  // 返回列表时短暂透明，掩盖滚动跳转闪烁；侧边栏进入不受影响
-  const [entering, setEntering] = useState(() => {
-    if (sessionStorage.getItem('_nav_backToList')) return true
-    return false
+
+  // ── 滚动位置记忆 ──
+  // 状态字段随滚动一起落盘；返回列表时按「内容锚点」精确还原（见 utils/scrollMemory.mjs）。
+  // 恢复期间 restoring 为 true，页面保持透明，避免看到从顶部跳下来的过程。
+  // stateRef 的实际内容在 useSortFilter 之后填充。
+  const stateRef = useRef({})
+  const { restoring, readSaved, restore, saveNow, shouldRestore } = useScrollMemory('characters', {
+    getState: () => stateRef.current,
   })
 
-  // 挂载时加载数据，恢复视图模式和滚动位置
+  // ── 挂载：返回则恢复（状态 + 滚动位置），从侧栏进入则置顶 ──
   useEffect(() => {
-    const isBack = consumeBackToList()
-    if (isBack) {
-      (async () => {
-        // 从详情页返回，模块缓存可能已过期，强制刷新
-        _invalidateCharsCache()
-        restoringScroll.current = true
-        setEntering(true)
-        // 数据加载 + DOM 提交后再恢复状态和滚轮
-        await loadData()
-        await new Promise(r => requestAnimationFrame(r))
-        const saved = await restorePage('characters')
-        if (saved) {
-          if (saved.viewMode) setViewMode(saved.viewMode)
-          if (saved.search) setSearch(saved.search)
-          if (saved.sortKeys?.length) setSortKeys(saved.sortKeys)
-          if (saved.filters) {
-            Object.entries(saved.filters).forEach(([k, v]) => setFilter(k, v))
-          }
-          if (saved.selectedElements?.length) setSelectedElements(new Set(saved.selectedElements))
-          // 等一帧让筛选/排序 DOM 稳定，然后执行滚轮恢复并立即显示页面
-          await new Promise(r => requestAnimationFrame(r))
-          const main = document.querySelector('main')
-          const scrollToId = sessionStorage.getItem('_nav_scroll_to_id')
-          if (scrollToId) {
-            sessionStorage.removeItem('_nav_scroll_to_id')
-            const el = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
-            if (el && main) {
-              const elRect = el.getBoundingClientRect()
-              const mRect = main.getBoundingClientRect()
-              const elTopInMain = elRect.top - mRect.top + main.scrollTop
-              const targetY = elTopInMain - (main.clientHeight / 2) + (elRect.height / 2)
-              main.scrollTo(0, Math.max(0, Math.round(targetY)))
-              setEntering(false) // 立即显示
-              setTimeout(() => { restoringScroll.current = false }, 300)
-              setTimeout(() => main.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
-              return
-            }
-          }
-          if (saved.scrollY != null && saved.scrollY > 0 && main) {
-            const targetY = Number(saved.scrollY)
-            const tryScroll = (n) => {
-              if (!main) { restoringScroll.current = false; return }
-              if (main.scrollHeight > targetY) {
-                main.scrollTo(0, targetY)
-                setEntering(false) // 立即显示
-                setTimeout(() => { restoringScroll.current = false }, 300)
-                setTimeout(() => main.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
-              } else if (n > 0) {
-                setTimeout(() => tryScroll(n - 1), 50) // 快节奏重试
-              } else {
-                setEntering(false)
-                restoringScroll.current = false
-              }
-            }
-            tryScroll(40) // 40×50ms = 2s
-          } else {
-            setEntering(false)
-            restoringScroll.current = false
-          }
-        } else {
-          setEntering(false)
-          restoringScroll.current = false
-        }
-      })()
-    } else {
-      const main = document.querySelector('main')
-      if (main) main.scrollTo(0, 0)
+    if (!shouldRestore()) {
+      const main = getScroller()
+      if (main) main.scrollTop = 0
       try {
         const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
         if (defs.characters) setViewMode(defs.characters)
       } catch (_) {}
       loadData()
+      return undefined
     }
+    let cancelled = false
+    ;(async () => {
+      // 从详情页返回，模块缓存可能已过期，强制刷新
+      _invalidateCharsCache()
+      const saved = readSaved()
+      const st = saved && saved.state
+      if (st) {
+        if (st.viewMode) setViewMode(st.viewMode)
+        if (st.search) setSearch(st.search)
+        if (st.sortKeys?.length) setSortKeys(st.sortKeys)
+        if (st.filters) Object.entries(st.filters).forEach(([k, v]) => setFilter(k, v))
+        if (st.selectedElements?.length) setSelectedElements(new Set(st.selectedElements))
+      }
+      await loadData()
+      if (cancelled) return
+      await restore(saved && saved.snapshot)
+    })()
+    return () => { cancelled = true }
   }, [])
-
-
-  // 滚动时保存（使用 rAF 替代 setTimeout 减少主线程压力）
-  useLayoutEffect(() => {
-    const main = document.querySelector('main')
-    if (!main) return
-    let rafId = null
-    const save = () => {
-      if (restoringScroll.current) return
-      savePage('characters', stateRef.current)
-    }
-    const onScroll = () => {
-      if (rafId) cancelAnimationFrame(rafId)
-      rafId = requestAnimationFrame(save)
-    }
-    main.addEventListener('scroll', onScroll, { passive: true })
-    return () => {
-      main.removeEventListener('scroll', onScroll)
-      if (rafId) cancelAnimationFrame(rafId)
-      save()
-    }
-  }, [savePage])
 
   async function loadData() {
     if (_cachedCharsRaw) {
@@ -287,9 +225,9 @@ export default function CharactersPage() {
   pushRef.current = push
 
   const navigateToDetail = useCallback((id) => {
-    savePage('characters', stateRef.current)
+    saveNow()
     pushRef.current(`/characters/${id}`)
-  }, [savePage])
+  }, [saveNow])
   // 稳定引用：GalleryCard 带 memo，每次渲染新建箭头函数会让 memo 完全失效，
   // 于是任意状态变化（搜索输入、右键菜单开合）都会重渲染全部 ~124 张卡片。
   const handleCardContextMenu = useCallback((e, c) => {
@@ -486,8 +424,7 @@ export default function CharactersPage() {
     bumpLazyRevision()
   }, [sortKeys, filters])
 
-  // 用 ref 保持最新状态，避免 useLayoutEffect 频繁重建
-  const stateRef = useRef({ viewMode, search, sortKeys, filters, selectedElements: [] })
+  // 滚动记忆随附的页面状态
   stateRef.current = { viewMode, search, sortKeys, filters, selectedElements: [...selectedElements] }
 
   // ── 元素图标按钮 ──
@@ -500,7 +437,7 @@ export default function CharactersPage() {
   }
 
   return (
-    <div className={`p-6 ${entering ? 'opacity-0' : 'opacity-100'} transition-opacity duration-100`}>
+    <div className={`p-6 ${restoring ? 'opacity-0' : 'opacity-100'} transition-opacity duration-100`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>

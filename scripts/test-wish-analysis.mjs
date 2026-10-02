@@ -334,6 +334,15 @@ const items301b = [...items301.slice(0, 4), { id: '7', time: '2026-01-07', rank_
 const pity2 = computePityFromArchive({ 301: items301b })
 ok('最后五星 UP → 小保底', pity2.character.guaranteed === 0)
 ok('小保底后连保=1（上一个保底是琴→玛拉妮）', pity2.character.crStreak === 1, pity2.character.crStreak)
+// 回归：连保必须能数到 2 / 3。旧实现按 1 步进配对，而大保底必然形成「常驻→UP」交替，
+// 导致 crStreak 恒为 0 或 1，「连保2次(47/47/6)」「连保3次必中」永不生效。
+const crItems = (seq5) => ({ 301: seq5.map((n, i) => ({ id: String(i + 1), time: `2026-01-${String(i + 1).padStart(2, '0')}`, rank_type: 5, name: n })) })
+const pityCr2 = computePityFromArchive(crItems(['琴', '玛拉妮', '琴', '希诺宁']))
+ok('连续两次大保底 → 连保=2', pityCr2.character.crStreak === 2, pityCr2.character.crStreak)
+const pityCr3 = computePityFromArchive(crItems(['琴', '玛拉妮', '琴', '希诺宁', '琴', '恰斯卡']))
+ok('连续三次大保底 → 连保=3（封顶）', pityCr3.character.crStreak === 3, pityCr3.character.crStreak)
+const pityCr0 = computePityFromArchive(crItems(['琴', '玛拉妮', '希诺宁']))
+ok('小保底直接命中 → 连保=0', pityCr0.character.crStreak === 0, pityCr0.character.crStreak)
 
 console.log(failures === 0 ? '\n全部通过' : `\n${failures} 项失败`)
 process.exit(failures === 0 ? 0 : 1)

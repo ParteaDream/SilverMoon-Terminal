@@ -2,11 +2,13 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
-import { useNav } from '../context/NavContext'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { peekScrollRestore } from '../utils/navFlags'
+import { getScroller } from '../utils/scrollMemory.mjs'
 import useOverlay from '../hooks/useOverlay'
 import { useTheme, THEMES } from '../context/ThemeContext'
 import { useDownloadProgress } from '../hooks/useDownloadProgress'
-import { savePageStateSync, loadPageStateSync } from '../utils/pageStateStore'
+import { saveScrollStateSync, loadScrollStateSync } from '../utils/pageStateStore'
 import {
   FolderOpen, RefreshCw, Database, AlertTriangle, CheckCircle2,
   Palette, Type, Image, Upload, Settings, ChevronRight, Sparkles, Paintbrush,
@@ -47,6 +49,7 @@ const PAGE_OPTIONS = [
   { path: '/weapons', label: '武器' },
   { path: '/artifacts', label: '圣遗物' },
   { path: '/materials', label: '材料' },
+  { path: '/foods', label: '食物' },
   { path: '/wishes', label: '祈愿' },
   { path: '/challenges', label: '挑战' },
   { path: '/data', label: '数据' },
@@ -1075,7 +1078,7 @@ function AppIconSection() {
 function AppearanceModule() {
   const { theme, setTheme, themes, customColors, updateCustomColors, savedThemes, saveNewTheme, renameSavedTheme, editSavedThemeColors, deleteSavedTheme, applySavedTheme } = useTheme()
   const { dbPath, query } = useDb()
-  const DEFAULT_VIEWS = { characters: 'gallery', weapons: 'gallery', artifacts: 'gallery', materials: 'gallery', wishes: 'images' }
+  const DEFAULT_VIEWS = { characters: 'gallery', weapons: 'gallery', artifacts: 'gallery', materials: 'gallery', foods: 'gallery', wishes: 'images' }
   const [viewDefaults, setViewDefaults] = useState(DEFAULT_VIEWS)
   const [message, setMessage] = useState(null)
   const [saveAsName, setSaveAsName] = useState('')       // 保存方案名称
@@ -1131,10 +1134,9 @@ function AppearanceModule() {
     setViewDefaults(next)
     localStorage.setItem('default_view_mode', JSON.stringify(next))
     // Update page state cache so list pages pick up immediately,
-    // preserving existing scrollY so returning to the list page still scrolls correctly.
-    const current = loadPageStateSync(section)
-    const scrollY = current?.scrollY || 0
-    savePageStateSync(section, scrollY, { viewMode: mode })
+    // preserving existing scroll snapshot so returning still lands in the right place.
+    const current = loadScrollStateSync(section)
+    saveScrollStateSync(section, current?.snapshot || null, { ...(current?.state || {}), viewMode: mode })
     // Persist to DB (SQLite + user.json)
     try {
       window.electronAPI?.dbQuery(
@@ -1180,6 +1182,7 @@ function AppearanceModule() {
     { key: 'weapons', label: '武器' },
     { key: 'artifacts', label: '圣遗物' },
     { key: 'materials', label: '材料' },
+    { key: 'foods', label: '食物' },
   ]
 
   return (
@@ -2151,7 +2154,7 @@ function AdvancedModule() {
   const [loading, setLoading] = useState(false)
   const [seedVersionModal, setSeedVersionModal] = useState(false)
   const [seedVersionInput, setSeedVersionInput] = useState('')
-  const [seedVersionTag, setSeedVersionTag] = useState('')            // '' | 'pre' | 'origin' | 'extra'
+  const [seedVersionTag, setSeedVersionTag] = useState('')            // '' | 'pre' | 'STD' | 'extra'
   const [isComposing, setIsComposing] = useState(false)
   // M2：版本导出弹窗焦点管理
   const seedOv = useOverlay({ open: seedVersionModal, onClose: () => setSeedVersionModal(false), label: '输入新的数据版本号' })
@@ -2448,7 +2451,7 @@ function AdvancedModule() {
               {[
                 { value: '', label: '无' },
                 { value: 'pre', label: 'pre (预发布)' },
-                { value: 'origin', label: 'origin (标准)' },
+                { value: 'STD', label: 'STD (标准版)' },
                 { value: 'extra', label: 'extra (扩展)' },
               ].map(opt => (
                 <button
@@ -2504,15 +2507,17 @@ function AdvancedModule() {
 // ── Main Settings Page ──────────────────────────────────────────────
 export default function SettingsPage() {
   const [searchParams] = useSearchParams()
-  const { restorePage, savePage, consumeBackToList } = useNav()
-  const restoringScroll = useRef(false)
+  // ── 滚动位置记忆 ──
+  // 设置页没有条目锚点，用像素位置 + 收敛循环（模块内容是异步渲染的，
+  // 旧实现"高度够大就滚一次"会停在半路）。
+  const { readSaved, restore, shouldRestore } = useScrollMemory('settings')
   const [activeModule, setActiveModule] = useState(() => {
     // Check URL query param for initial module selection
     const moduleParam = searchParams.get('module')
     if (moduleParam && MODULES.some(m => m.key === moduleParam)) return moduleParam
     // 会话内导航返回时，从 localStorage 恢复上次的模块
     try {
-      if (sessionStorage.getItem('_nav_backToList') === '1') {
+      if (peekScrollRestore()) {
         const saved = localStorage.getItem('settings_active_module')
         if (saved && MODULES.some(m => m.key === saved)) return saved
       }
@@ -2524,43 +2529,22 @@ export default function SettingsPage() {
   // 持久化当前模块选择（会话内记住，重启时不读取）
   useEffect(() => { try { localStorage.setItem('settings_active_module', activeModule) } catch (_) {} }, [activeModule])
 
-  // ── 滚动位置持久化（参考武器板块）──
+  // ── 挂载：返回则恢复滚动位置，从侧栏进入则置顶 ──
   useEffect(() => {
-    const isBack = consumeBackToList()
-    if (isBack) {
-      restoringScroll.current = true
-      restorePage('settings').then(saved => {
-        const main = document.querySelector('main')
-        if (saved?.scrollY != null && saved.scrollY > 0 && main) {
-          const targetY = Number(saved.scrollY)
-          const tryScroll = (n) => {
-            if (main.scrollHeight > targetY) {
-              main.scrollTo(0, targetY)
-              setTimeout(() => { restoringScroll.current = false }, 300)
-            } else if (n > 0) setTimeout(() => tryScroll(n - 1), 200)
-          }
-          tryScroll(10)
-        }
-      })
-    } else {
-      const main = document.querySelector('main')
-      if (main) main.scrollTo(0, 0)
+    if (!shouldRestore()) {
+      const main = getScroller()
+      if (main) main.scrollTop = 0
+      return undefined
     }
+    let cancelled = false
+    ;(async () => {
+      // 让模块内容先渲染出来，再校正位置（restore 内部逐帧重试到收敛）
+      await new Promise(r => requestAnimationFrame(r))
+      if (cancelled) return
+      await restore(readSaved()?.snapshot)
+    })()
+    return () => { cancelled = true }
   }, [])
-
-  useLayoutEffect(() => {
-    const main = document.querySelector('main')
-    if (!main) return
-    let timer = null
-    const save = () => { if (!restoringScroll.current) savePage('settings') }
-    const onScroll = () => {
-      clearTimeout(timer)
-      if (restoringScroll.current) return
-      timer = setTimeout(save, 150)
-    }
-    main.addEventListener('scroll', onScroll, { passive: true })
-    return () => { main.removeEventListener('scroll', onScroll); clearTimeout(timer); save() }
-  }, [savePage])
 
   const panelMap = {
     general: GeneralModule,

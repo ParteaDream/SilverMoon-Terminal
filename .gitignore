@@ -18,3 +18,9 @@ Win.command
 Publish.txt
 reasonix.toml
 .changelog-preview/
+.foods-preview/
+.books-preview/
+.race-preview/
+.simulanka-preview/
+scripts/.foodCrawlSave.iife.js
+scripts/.bookCrawlSave.iife.js

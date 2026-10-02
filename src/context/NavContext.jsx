@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useReducer } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { savePageStateSync, loadPageState, loadPageStateSync, preloadPageStates } from '../utils/pageStateStore'
+import { markScrollRestore, consumeScrollRestore, peekScrollRestore, clearScrollRestore, setFocusItem, clearFocusItem } from '../utils/navFlags'
 
 const NavContext = createContext(null)
 
@@ -117,6 +118,8 @@ export function NavProvider({ children }) {
     )
     if (idx >= 0) {
       // It's a pop — just move cursor
+      // 往回走（浏览器后退/鼠标侧键）时同样按"返回"处理：列表页应恢复滚动位置
+      if (idx < cursorRef.current) markScrollRestore()
       dispatch({ type: 'POP', pathname: location.pathname, search: location.search })
     } else {
       // New external navigation — push to stack
@@ -133,6 +136,10 @@ export function NavProvider({ children }) {
   /** Push a new page onto the stack (e.g., list → detail) */
   const push = useCallback((path, search = '') => {
     navigatingRef.current = true
+    // 前进式导航（侧栏切换、列表→详情）：清掉可能残留的"返回"标记，
+    // 否则下一次以全新入口打开列表页会被旧标记误判成返回。
+    clearScrollRestore()
+    clearFocusItem()
     dispatch({ type: 'PUSH', pathname: path, search })
     const target = path + search
     const current = location.pathname + (location.search || '')
@@ -147,7 +154,8 @@ export function NavProvider({ children }) {
     const target = stackRef.current[cur - 1]
     if (!target) return
     navigatingRef.current = true
-    sessionStorage.setItem('_nav_backToList', '1')
+    // 目标页若是看过的列表页，挂载后要恢复滚动位置（页面自己判断有没有快照）
+    markScrollRestore()
     dispatch({ type: 'SET_CURSOR', index: cur - 1 })
     navigate(target.pathname + target.search, { replace: true })
   }, [navigate])
@@ -159,7 +167,7 @@ export function NavProvider({ children }) {
     const target = stackRef.current[cur + 1]
     if (!target) return
     navigatingRef.current = true
-    sessionStorage.setItem('_nav_backToList', '1')
+    markScrollRestore()
     dispatch({ type: 'SET_CURSOR', index: cur + 1 })
     navigate(target.pathname + target.search, { replace: true })
   }, [navigate])
@@ -169,44 +177,31 @@ export function NavProvider({ children }) {
     return cursor > 0 && stack[cursor - 1]?.pathname === pathname
   }, [cursor, stack])
 
-  // ── 返回列表：保存详情页状态，返回列表（不截断导航栈，保留上一步能力）──
-  const backToList = useCallback((listPath, scrollToItemId) => {
-    // Mark this navigation as "返回列表" so detail page hooks save their state
-    sessionStorage.setItem('_nav_backToList', '1')
+  // ── 返回列表：返回列表页并恢复滚动位置（不截断导航栈，保留上一步能力）──
+  // focusItemId 只是兜底：滚动快照还在时，位置本身就是最准的；
+  // 只有快照被挤掉（队列上限）时才退化成"至少让这条可见"。
+  const backToList = useCallback((listPath, focusItemId) => {
+    markScrollRestore()
+    if (focusItemId != null) setFocusItem(focusItemId)
 
     const cur = cursorRef.current
-    // 在栈中找到列表页位置，将游标移到那里（类似 goBack 但设置了保存标记）
+    // 在栈中找到列表页位置，将游标移到那里（类似 goBack 但标记了滚动恢复）
     const listIdx = stackRef.current.findIndex(e => e.pathname === listPath)
     if (listIdx >= 0 && listIdx < cur) {
-      if (scrollToItemId != null) {
-        sessionStorage.setItem('_nav_scroll_to_id', String(scrollToItemId))
-      }
       navigatingRef.current = true
       dispatch({ type: 'SET_CURSOR', index: listIdx })
       navigate(listPath, { replace: true })
     } else {
       // 列表页不在栈中：直接导航
-      if (scrollToItemId != null) {
-        sessionStorage.setItem('_nav_scroll_to_id', String(scrollToItemId))
-      }
       navigatingRef.current = true
       navigate(listPath, { replace: true })
     }
   }, [navigate])
 
-  // ── 检测并消费"返回列表"标记 ──
-  const consumeBackToList = useCallback(() => {
-    const flag = sessionStorage.getItem('_nav_backToList')
-    if (flag) {
-      sessionStorage.removeItem('_nav_backToList')
-      return true
-    }
-    return false
-  }, [])
+  // ── 检测并消费"返回"标记（列表页挂载时调用）──
+  const consumeBackToList = useCallback(() => consumeScrollRestore(), [])
 
-  const isBackToList = useCallback(() => {
-    return sessionStorage.getItem('_nav_backToList') === '1'
-  }, [])
+  const isBackToList = useCallback(() => peekScrollRestore(), [])
 
   // ── Scroll / page state persistence (for list pages, backed by user.json) ──
   const getScrollY = useCallback(() => {

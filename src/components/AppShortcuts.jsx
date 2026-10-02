@@ -14,6 +14,7 @@ import { useState } from 'react'
 import { useNav } from '../context/NavContext'
 import { useShortcut } from '../context/ShortcutContext'
 import { scrollMainByKey, focusPageSearch, focusSidebarControl } from '../utils/pageKeyboard'
+import { notifyUserScrollIntent } from '../utils/scrollMemory.mjs'
 import HelpOverlay from './HelpOverlay'
 import PageCursor from './PageCursor'
 
@@ -41,7 +42,11 @@ export default function AppShortcuts() {
   useShortcut('scroll.main', {
     keys: SCROLL_KEYS,
     scope: 'app',
-    handler: (e) => { if (scrollMainByKey(e.key)) e.preventDefault() },
+    handler: (e) => {
+      // 键盘滚动＝用户接管滚动位置：正在进行的滚动恢复要立刻让位
+      notifyUserScrollIntent()
+      if (scrollMainByKey(e.key)) e.preventDefault()
+    },
   })
 
   // '/' 聚焦当前页搜索框（与 '?' 同物理键 → 该键仅此一个功能）

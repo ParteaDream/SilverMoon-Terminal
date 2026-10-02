@@ -12,33 +12,19 @@ export function clearDetailScroll(prefix, id) {
 
 /**
  * useDetailScroll(prefix, id) — 详情页滚动恢复
- * 恢复逻辑：从 PageMemoryContext 获取上次保存的 scrollY 并恢复
- * 保存逻辑：由 PageMemoryProvider 的 useLayoutEffect cleanup 自动处理
+ * 恢复逻辑：把保存的滚动快照（像素位置 + 内容锚点）交给 scrollMemory 校正到收敛
+ * 保存逻辑：由 PageMemoryProvider 持续采集并在卸载时落盘
  */
 export function useDetailScroll(prefix, id) {
   const ctx = usePageMemory()
+  const restoreScroll = ctx.restoreScroll
 
-  // ready 后恢复滚动（持续重试直到内容足够滚动到目标位置）
   useEffect(() => {
-    if (!ctx.ready) return
-    const targetY = ctx.savedScroll
-    if (targetY > 0) {
-      let attempts = 0
-      const maxAttempts = 30 // 30 × 100ms = 3s 超时
-      const tryScroll = () => {
-        const main = document.querySelector('main')
-        if (!main) return
-        main.scrollTo(0, targetY)
-        attempts++
-        // 内容尚未加载完成时持续重试（scrollTop 未达目标 且 可滚动高度不足）
-        const needMore = main.scrollTop < targetY && main.scrollHeight - main.clientHeight < targetY
-        if (attempts < maxAttempts && needMore) {
-          setTimeout(tryScroll, 100)
-        }
-      }
-      setTimeout(tryScroll, 50)
-    }
-  }, [ctx.ready, ctx.savedScroll])
+    if (!ctx.ready || ctx.savedScroll <= 0) return undefined
+    let cancelled = false
+    restoreScroll({ isCancelled: () => cancelled })
+    return () => { cancelled = true }
+  }, [ctx.ready, ctx.savedScroll, restoreScroll])
 }
 
 /**

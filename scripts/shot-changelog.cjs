@@ -17,6 +17,12 @@ const PROJECT_ROOT = path.resolve(__dirname, '..')
 const REAL_DATA = '/Users/stargomia/Files/GenshinWikiData'
 const OUT_DIR = path.join(PROJECT_ROOT, '.changelog-preview')
 fs.mkdirSync(OUT_DIR, { recursive: true })
+// 磁盘安全：见 scripts/lib/sandbox.cjs 顶部的事故说明
+const { cloneTree, sweepLeftovers, makeCleanup, installCleanupHook, guardSandboxSize, volumeFreeBytes } =
+  require('./lib/sandbox.cjs')
+sweepLeftovers(['silvermoon-shot-'])
+const freeBeforeClone = volumeFreeBytes(os.tmpdir())   // tmpRoot 尚未创建，取 TMPDIR 所在卷
+
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'silvermoon-shot-'))
 const profileDir = path.join(tmpRoot, 'profile')
 const dataDir = path.join(tmpRoot, 'data')
@@ -26,29 +32,23 @@ for (const f of ['silvermoon_terminal.db', 'user.db', 'user.json']) {
   const src = path.join(REAL_DATA, f)
   if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dataDir, f))
 }
-function linkTree(src, dst) {
-  fs.mkdirSync(dst, { recursive: true })
-  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
-    const s = path.join(src, e.name), d = path.join(dst, e.name)
-    if (e.isDirectory()) linkTree(s, d)
-    else if (e.isFile()) { try { fs.linkSync(s, d) } catch (_) { try { fs.copyFileSync(s, d) } catch (_) {} } }
-  }
-}
 for (const entry of fs.readdirSync(REAL_DATA)) {
   if (!entry.startsWith('images-')) continue
   const src = path.join(REAL_DATA, entry)
   if (!fs.statSync(src).isDirectory()) continue
-  linkTree(src, path.join(dataDir, entry))
+  cloneTree(src, path.join(dataDir, entry))
 }
 fs.writeFileSync(path.join(profileDir, 'config.json'),
   JSON.stringify({ dbDir: dataDir, activeBaseDb: 'silvermoon_terminal.db' }, null, 2))
+guardSandboxSize(tmpRoot, { freeBefore: freeBeforeClone, label: 'shot-changelog.cjs' })   // 克隆退化会真占盘，这里立刻告警
 app.setPath('userData', profileDir)
 // 生产构建
 Object.defineProperty(app, 'isPackaged', { value: true, configurable: true })
 process.env.SILVERMOON_DISABLE_DEVTOOLS = '1'
 
 let finished = false
-function cleanup() { try { fs.rmSync(tmpRoot, { recursive: true, force: true }) } catch (_) {} }
+const cleanup = makeCleanup(tmpRoot)
+installCleanupHook(cleanup)   // app.exit() 不触发 'exit'，必须劫持
 process.once('exit', cleanup)
 function finish(payload, code) {
   if (finished) return

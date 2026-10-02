@@ -57,6 +57,8 @@ async function main() {
     character_talents:3, character_constellations:3, character_outfits:3,
     character_stories:3, character_ascension_materials:3, character_talent_materials:3,
     weapon_ascension_materials:3, wish_banners:3,
+    foods:3, food_variants:4, food_materials:4,
+    books:3, book_volumes:4,
     spiral_abyss_floors:3, imaginarium_theater_seasons:3, perilous_trail_bosses:3,
     wish_banner_items:4, talent_levels:4,
   };

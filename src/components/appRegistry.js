@@ -1,5 +1,5 @@
 import {
-  Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass, LayoutGrid, Bot
+  Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass, LayoutGrid, Bot, Flame, Sparkles
 } from 'lucide-react'
 
 /** 应用程序注册表 — 终端板块的权威定义 */
@@ -7,6 +7,7 @@ export const APPS = [
   { id: 'traincalc', name: '养成计算器', icon: Calculator, placeholder: false, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
   { id: 'betamemo', name: 'Beta备忘录', icon: FileText, placeholder: false, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
   { id: 'dragonsnake', name: '非完备证明', icon: Swords, placeholder: false, color: 'from-emerald-700 to-teal-400', iconClass: 'text-white drop-shadow-md' },
+  { id: 'nightsoulrace', name: '归火圣夜巡礼', icon: Flame, placeholder: false, color: 'from-orange-600 to-amber-300', iconClass: 'text-white drop-shadow-md' },
   { id: 'worldtree', name: '世界树', icon: Globe, placeholder: false, color: 'from-green-600 to-emerald-400', iconClass: 'text-white drop-shadow-sm' },
   { id: 'album', name: '切片辖域·鸽', icon: Images, placeholder: false, color: 'from-pink-500 to-rose-600', iconClass: 'text-white drop-shadow-md' },
   { id: 'ratefetcher', name: 'RateFetcher', icon: BarChart3, placeholder: false, color: 'from-cyan-700 to-blue-400', iconClass: 'text-white drop-shadow-md' },
@@ -14,6 +15,7 @@ export const APPS = [
   { id: 'gachastation', name: '祈愿捕捉站', icon: Star, placeholder: false, color: 'from-blue-600 to-cyan-400', iconClass: 'text-white drop-shadow-md' },
   { id: 'memoryhub', name: '摹忆中枢', icon: Compass, placeholder: false, color: 'from-amber-500 to-yellow-400', iconClass: 'text-white drop-shadow-md' },
   { id: 'hourglass', name: '时之沙', icon: Hourglass, placeholder: false, color: 'from-indigo-600 to-violet-500', iconClass: 'text-white drop-shadow-md' },
+  { id: 'simulanka', name: '希穆兰卡', icon: Sparkles, placeholder: false, color: 'from-fuchsia-500 to-sky-400', iconClass: 'text-white drop-shadow-md' },
 ]
 
 export const SYS_TOOLS = [

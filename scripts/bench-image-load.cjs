@@ -24,6 +24,12 @@ const PROJECT_ROOT = (() => {
   return a ? path.resolve(a.slice('--root='.length)) : path.resolve(__dirname, '..')
 })()
 const REAL_DATA = '/Users/stargomia/Files/GenshinWikiData'
+// 磁盘安全：见 scripts/lib/sandbox.cjs 顶部的事故说明
+const { cloneTree, sweepLeftovers, makeCleanup, installCleanupHook, guardSandboxSize, volumeFreeBytes } =
+  require('./lib/sandbox.cjs')
+sweepLeftovers(['silvermoon-img-load-'])
+const freeBeforeClone = volumeFreeBytes(os.tmpdir())   // tmpRoot 尚未创建，取 TMPDIR 所在卷
+
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'silvermoon-img-load-'))
 const profileDir = path.join(tmpRoot, 'profile')
 const dataDir = path.join(tmpRoot, 'data')
@@ -34,24 +40,15 @@ for (const f of ['silvermoon_terminal.db', 'user.db', 'user.json']) {
   if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dataDir, f))
 }
 
-function linkTree(src, dst) {
-  fs.mkdirSync(dst, { recursive: true })
-  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
-    const s2 = path.join(src, e.name), d2 = path.join(dst, e.name)
-    if (e.isDirectory()) linkTree(s2, d2)
-    else if (e.isFile()) {
-      try { fs.linkSync(s2, d2) } catch (_) { try { fs.copyFileSync(s2, d2) } catch (_) {} }
-    }
-  }
-}
 for (const entry of fs.readdirSync(REAL_DATA)) {
   if (!entry.startsWith('images-')) continue
   const src = path.join(REAL_DATA, entry)
   if (!fs.statSync(src).isDirectory()) continue
-  linkTree(src, path.join(dataDir, entry))
+  cloneTree(src, path.join(dataDir, entry))
 }
 fs.writeFileSync(path.join(profileDir, 'config.json'),
   JSON.stringify({ dbDir: dataDir, activeBaseDb: 'silvermoon_terminal.db' }, null, 2))
+guardSandboxSize(tmpRoot, { freeBefore: freeBeforeClone, label: 'bench-image-load.cjs' })   // 克隆退化会真占盘，这里立刻告警
 app.setPath('userData', profileDir)
 
 // per-page search query that matches several rows but is not empty
@@ -74,9 +71,8 @@ const injectedCss = cssB64 ? Buffer.from(cssB64, 'base64').toString('utf8') : ''
 const winWidth = parseInt(argOf('width', ''), 10) || 0
 
 let finished = false
-function cleanup() {
-  try { fs.rmSync(tmpRoot, { recursive: true, force: true }) } catch (_) {}
-}
+const cleanup = makeCleanup(tmpRoot)
+installCleanupHook(cleanup)   // app.exit() 不触发 'exit'，必须劫持
 process.once('exit', cleanup)
 function finish(payload, code) {
   if (finished) return

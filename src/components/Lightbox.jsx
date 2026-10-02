@@ -5,6 +5,7 @@
 // read：可选的自定义图片读取函数（默认数据库图片）
 // portalTo：可选，小程序窗口根元素。传入时灯箱挂载到该窗口内（absolute 相对窗口）
 // topOffset 为标题栏高度；不传则全屏遮罩
+// zIndex：可选，遮罩层级（默认 200）。叠在别的全屏层上时（如书籍阅读器 z-[250]）要抬高
 // 键盘：Esc 关闭（栈式，仅顶层）；Tab 圈闭在灯箱内；+/- 缩放
 // ═════════════════════════════════════════════════════════════════
 import { useState, useEffect, useRef } from 'react'
@@ -16,7 +17,7 @@ import useZoomPan from '../hooks/useZoomPan'
 import useOverlay from '../hooks/useOverlay'
 import useHideDock from '../hooks/useHideDock'
 
-export default function Lightbox({ filename, label, onClose, read, portalTo, topOffset = 0 }) {
+export default function Lightbox({ filename, label, onClose, read, portalTo, topOffset = 0, zIndex = 200 }) {
   const cleanLabel = stripFormatting(label)
   const [src, setSrc] = useState(null)
   const { readImage: dbReadImage } = useDb()
@@ -54,10 +55,12 @@ export default function Lightbox({ filename, label, onClose, read, portalTo, top
     return () => el.removeEventListener('wheel', onWheel)
   }, [src, onWheel])
   const wrap = (node) => (inWindow ? createPortal(node, portalTo) : node)
-  const overlayCls = inWindow ? 'absolute inset-0 z-[200] rounded-b-xl' : 'fixed inset-0 z-[200]'
-  const overlayStyle = inWindow ? { top: topOffset } : undefined
-  const closeCls = inWindow ? 'absolute z-[220]' : 'fixed z-[220]'
-  const closeStyle = inWindow ? { top: topOffset + 16, right: 16 } : undefined
+  const overlayCls = inWindow ? 'absolute inset-0 rounded-b-xl' : 'fixed inset-0'
+  // 层级走内联 style 而不是 Tailwind 类：调用方需要动态抬高（阅读器里要盖在 z-[250] 之上），
+  // 而 Tailwind 的任意值类必须是静态字面量
+  const overlayStyle = { zIndex, ...(inWindow ? { top: topOffset } : {}) }
+  const closeCls = inWindow ? 'absolute' : 'fixed'
+  const closeStyle = { zIndex: zIndex + 20, ...(inWindow ? { top: topOffset + 16, right: 16 } : {}) }
 
   // 圈闭根：包一层无样式容器，覆盖遮罩与关闭钮（fixed/absolute 子元素不受影响）
   const rootWrap = (node) => (

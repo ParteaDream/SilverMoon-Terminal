@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage, session, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const zlib = require('zlib');
 const crypto = require('crypto');
 const url = require('url');
 const { autoUpdater } = require('electron-updater');
@@ -45,6 +46,11 @@ function beijingDateStr() {
 }
 
 const DATA_VERSION = '6.7.0';
+
+// 武器名称判定规则（占位名 / 名称归一化），与维护脚本 scripts/fix-weapon-names.mjs 共用
+const { isPlaceholderName, findWeaponEntry } = require('./weapon-names.cjs');
+// 书籍爬虫的解析/配对/清洗规则（两站数据 → 可落库结构），见 electron/book-crawl.cjs
+const bookCrawl = require('./book-crawl.cjs');
 
 // 从 seed.sql 文件中读取数据版本
 function readSeedVersion() {
@@ -570,6 +576,8 @@ function ensureUserDbSchema() {
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS northlandbank_records (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
     // 北国银行 · 祈愿分析：卡池组合方案表
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS wish_analysis_plans (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
+    // 希穆兰卡（祈愿模拟器）：多存档表。data_json 含祈愿方案 + 剩余资源 + 抽取历史 + 保底状态
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS wish_sim_archives (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '未命名存档', data_json TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
     // 世界树 · 圣遗物练度分析：每个角色的有效副词条组合与权重（按米游社角色ID）
     try { userDb.exec(`CREATE TABLE IF NOT EXISTS worldtree_build_configs (character_id INTEGER PRIMARY KEY, effective_subs TEXT NOT NULL, weights TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now','localtime')))`); } catch (_) {}
     // AI 助手：会话记录（对话消息存于 data_json）
@@ -627,6 +635,80 @@ function ensureUserDbSchema() {
       map_id TEXT PRIMARY KEY,
       config TEXT NOT NULL DEFAULT '{}',
       updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`); } catch (_) {}
+    // 食物板块存根表：非开发者模式下 INSERT 需先落到 user.db（同 map_markers 的处理）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS foods (
+      id INTEGER PRIMARY KEY,
+      name_zh TEXT NOT NULL,
+      name_en TEXT,
+      rarity INTEGER DEFAULT 1,
+      type TEXT DEFAULT 'dish',
+      category TEXT,
+      region TEXT,
+      description_zh TEXT,
+      effect TEXT,
+      source TEXT,
+      image TEXT,
+      has_variants INTEGER DEFAULT 0,
+      recipe_source TEXT,
+      recipe_price TEXT,
+      special_char TEXT,
+      specialty TEXT,
+      wiki_title TEXT,
+      sort_order INTEGER DEFAULT 0
+    )`); } catch (_) {}
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS food_variants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      food_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      item_id INTEGER,
+      name_zh TEXT,
+      name_en TEXT,
+      description_zh TEXT,
+      effect TEXT,
+      image TEXT,
+      rarity INTEGER,
+      UNIQUE(food_id, kind)
+    )`); } catch (_) {}
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS food_materials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      food_id INTEGER NOT NULL,
+      material_id INTEGER NOT NULL,
+      quantity TEXT,
+      UNIQUE(food_id, material_id)
+    )`); } catch (_) {}
+    // 书籍板块存根表：非开发者模式下 INSERT 需先落到 user.db（同 foods 的处理）
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS books (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name_zh TEXT NOT NULL UNIQUE,
+      name_en TEXT,
+      rarity INTEGER DEFAULT 0,
+      genre TEXT,
+      country TEXT,
+      version TEXT,
+      source TEXT,
+      source_type TEXT,
+      description_zh TEXT,
+      author TEXT,
+      image TEXT,
+      wiki_title TEXT,
+      mihoyo_id INTEGER,
+      related_chars TEXT,
+      illustrated INTEGER DEFAULT 0,
+      volume_count INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0
+    )`); } catch (_) {}
+    try { userDb.exec(`CREATE TABLE IF NOT EXISTS book_volumes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      book_id INTEGER NOT NULL,
+      volume_no INTEGER NOT NULL,
+      title_zh TEXT,
+      description_zh TEXT,
+      content TEXT,
+      source TEXT,
+      author TEXT,
+      content_source TEXT,
+      UNIQUE(book_id, volume_no)
     )`); } catch (_) {}
   } catch (e) {
     console.error('[ensureUserDbSchema] error:', e.message);
@@ -1089,6 +1171,82 @@ function migrateSchema() {
       name TEXT NOT NULL,
       content TEXT NOT NULL DEFAULT '',
       sort_order INTEGER DEFAULT 0
+    )`);
+
+    // 食物板块（foods / food_variants / food_materials）—— 老库开机自动补表
+    dbRun(`CREATE TABLE IF NOT EXISTS foods (
+      id INTEGER PRIMARY KEY,
+      name_zh TEXT NOT NULL,
+      name_en TEXT,
+      rarity INTEGER DEFAULT 1,
+      type TEXT DEFAULT 'dish',
+      category TEXT,
+      region TEXT,
+      description_zh TEXT,
+      effect TEXT,
+      source TEXT,
+      image TEXT,
+      has_variants INTEGER DEFAULT 0,
+      recipe_source TEXT,
+      recipe_price TEXT,
+      special_char TEXT,
+      specialty TEXT,
+      wiki_title TEXT,
+      sort_order INTEGER DEFAULT 0
+    )`);
+    dbRun(`CREATE TABLE IF NOT EXISTS food_variants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      food_id INTEGER NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      item_id INTEGER,
+      name_zh TEXT,
+      name_en TEXT,
+      description_zh TEXT,
+      effect TEXT,
+      image TEXT,
+      rarity INTEGER,
+      UNIQUE(food_id, kind)
+    )`);
+    dbRun(`CREATE TABLE IF NOT EXISTS food_materials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      food_id INTEGER NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
+      material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      quantity TEXT,
+      UNIQUE(food_id, material_id)
+    )`);
+
+    // 书籍板块（books / book_volumes）—— 老库开机自动补表
+    dbRun(`CREATE TABLE IF NOT EXISTS books (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name_zh TEXT NOT NULL UNIQUE,
+      name_en TEXT,
+      rarity INTEGER DEFAULT 0,
+      genre TEXT,
+      country TEXT,
+      version TEXT,
+      source TEXT,
+      source_type TEXT,
+      description_zh TEXT,
+      author TEXT,
+      image TEXT,
+      wiki_title TEXT,
+      mihoyo_id INTEGER,
+      related_chars TEXT,
+      illustrated INTEGER DEFAULT 0,
+      volume_count INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0
+    )`);
+    dbRun(`CREATE TABLE IF NOT EXISTS book_volumes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+      volume_no INTEGER NOT NULL,
+      title_zh TEXT,
+      description_zh TEXT,
+      content TEXT,
+      source TEXT,
+      author TEXT,
+      content_source TEXT,
+      UNIQUE(book_id, volume_no)
     )`);
 
     // 为 weapons 添加 category 列（武器/武器装扮/TPS）
@@ -4157,6 +4315,29 @@ function convertColorMarkup(text) {
   return result;
 }
 
+/**
+ * bilibili wiki 的反爬：不带 Referer 的 API 请求会被 WAF 拦下，返回 HTTP 567
+ * （一个 JS 挑战页而不是 JSON）。浏览器里因为同源导航天然带 Referer 所以碰不到，
+ * 主进程直连就必须自己补——否则书籍目录（action=ask，2MB）和食物配方（wikitext
+ * 批量取）会在「偶尔能跑通、偶尔 567」之间摇摆。
+ *
+ * 实测：不带 Referer → 567；带上 → 200。UA 换不换都一样。
+ */
+const WIKI_REFERER = 'https://wiki.biligame.com/ys/';
+function extraHeadersFor(url) {
+  try {
+    const host = new URL(url).hostname;
+    if (/(^|\.)biligame\.com$/i.test(host)) return { Referer: WIKI_REFERER };
+  } catch (_) { /* 非法 URL 交给下游报错 */ }
+  return {};
+}
+
+/** HTTP 状态码 → 可读错误（567 是 bilibili WAF 的挑战页，重试通常可恢复） */
+function httpError(status) {
+  if (status === 567) return new Error('HTTP 567（bilibili wiki 反爬拦截，稍后重试即可）');
+  return new Error(`HTTP ${status}`);
+}
+
 // 通过 https 获取 JSON（Electron 主进程可用 Node.js http/https）
 async function fetchJson(url, timeoutMs = 90000) {
   // 优先使用 Chromium 网络栈（与浏览器行为一致：跟随系统代理、HTTP/2、连接复用），
@@ -4169,10 +4350,11 @@ async function fetchJson(url, timeoutMs = 90000) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'application/json,*/*',
+          ...extraHeadersFor(url),
         },
         signal: controller.signal,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw httpError(res.status);
       return await res.json();
     } catch (e) {
       if (e.name === 'AbortError') throw new Error('Request timeout');
@@ -4189,10 +4371,11 @@ async function fetchJson(url, timeoutMs = 90000) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json,*/*',
+        ...extraHeadersFor(url),
       }
     }, (res) => {
       if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
+        reject(httpError(res.statusCode));
         return;
       }
       const chunks = [];
@@ -4215,13 +4398,15 @@ async function fetchJson(url, timeoutMs = 90000) {
 // 带重试的 JSON 获取：网络抖动/超时后自动重试，避免一次失败导致功能不可用
 async function fetchWithRetry(url, retries = 2, retryDelayMs = 1000) {
   let lastErr;
+  const isWiki = !!extraHeadersFor(url).Referer;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fetchJson(url);
     } catch (e) {
       lastErr = e;
       console.warn(`[fetchWithRetry] attempt ${attempt + 1}/${retries + 1} failed:`, url, e.message);
-      if (attempt < retries) await new Promise(r => setTimeout(r, retryDelayMs));
+      // wiki 被反爬拦下时多等一会儿：567 的挑战态通常几秒内自行解除
+      if (attempt < retries) await new Promise(r => setTimeout(r, isWiki ? retryDelayMs * (attempt + 2) : retryDelayMs));
     }
   }
   throw lastErr;
@@ -4237,10 +4422,11 @@ async function fetchText(url, timeoutMs = 90000) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'text/html,application/json,*/*',
+          ...extraHeadersFor(url),
         },
         signal: controller.signal,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw httpError(res.status);
       return await res.text();
     } catch (e) {
       if (e.name === 'AbortError') throw new Error('Request timeout');
@@ -4257,10 +4443,11 @@ async function fetchText(url, timeoutMs = 90000) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'text/html,application/json,*/*',
+        ...extraHeadersFor(url),
       }
     }, (res) => {
       if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
+        reject(httpError(res.statusCode));
         return;
       }
       const chunks = [];
@@ -4454,19 +4641,45 @@ async function tryFetchJson(urls) {
 }
 
 // ── 静态数据版本 ──
+const NANOKA_GI_BASE = 'https://static.nanoka.cc/gi';
 let _dataVersion = null;
-let _dataVersionFallback = false;   // 最近一次获取失败（回退到 7.0）
+let _dataVersionFallback = false;   // 最近一次获取失败（回退到上次可用版本）
 let _dataVersionRetryAt = 0;        // 获取失败后的自动重试时间窗
+let _manifestVersions = [];         // manifest.gi.available（备用候选，新的在前）
+let _lastGoodVersion = null;        // 最近一次真的取到过数据的版本（跨会话记忆）
+
+// 版本号解析失败时不能瞎猜：以前固定回退 "7.0"，而 CDN 上早就没有 7.0 了，
+// 于是 manifest 一旦拉取失败，整个会话的爬虫/查漏全部 404 失败。
+// 改成记忆"上次真正取到过数据的版本"，并持久化到 user.json，重启也能续上。
+function loadCachedDataVersion() {
+  if (_lastGoodVersion) return _lastGoodVersion;
+  try {
+    const cfg = loadUserConfig();
+    const v = cfg && cfg.nanokaDataVersion;
+    if (typeof v === 'string' && /^\d+(\.\d+)*$/.test(v)) _lastGoodVersion = v;
+  } catch (_) {}
+  return _lastGoodVersion;
+}
+
+function rememberDataVersion(v) {
+  if (!v || v === _lastGoodVersion) return;
+  _lastGoodVersion = v;
+  try {
+    const cfg = loadUserConfig();
+    cfg.nanokaDataVersion = v;
+    saveUserConfig(cfg);
+  } catch (_) {}
+}
 
 async function getDataVersion() {
   if (_dataVersion) {
     _dataVersionFallback = false;
     return _dataVersion;
   }
-  // 上次获取失败后 60 秒内直接回退，避免反复请求
+  // 上次获取失败后 60 秒内直接用上次可用版本，避免反复请求
   if (Date.now() < _dataVersionRetryAt) {
     _dataVersionFallback = true;
-    return '7.0';
+    return loadCachedDataVersion() || '';
   }
   // nanoka.cc 重构后首页改为 SPA，版本号需从 manifest.json 的 gi.latest 解析
   // （与网站前端 gi.7d4a860d.js 的解析逻辑一致）
@@ -4475,17 +4688,43 @@ async function getDataVersion() {
     const manifest = await fetchWithRetry('https://static.nanoka.cc/manifest.json');
     const gi = manifest && manifest.gi ? manifest.gi : {};
     resolved = gi.latest || gi.live || gi.cn || '';
+    if (Array.isArray(gi.available) && gi.available.length) {
+      // available 顺序为从旧到新；倒序作为备用候选
+      _manifestVersions = [...gi.available].reverse();
+      if (!resolved) resolved = _manifestVersions[0];
+    }
   } catch (_) {}
   if (resolved) {
     _dataVersion = resolved;
     _dataVersionFallback = false;
+    rememberDataVersion(resolved);
     return resolved;
   }
-  // 获取失败：临时回退到 7.0 但不永久缓存，稍后自动重试最新版本，
-  // 避免整个会话一直使用旧版本数据导致查漏误判
+  // manifest 拉取失败：回退到上次可用版本（可能为空），稍后自动重试最新版本，
+  // 避免整个会话一直用不存在的版本号导致爬虫全线失败
   _dataVersionFallback = true;
   _dataVersionRetryAt = Date.now() + 60000;
-  return '7.0';
+  return loadCachedDataVersion() || '';
+}
+
+/** 依次尝试候选版本，返回第一个真正能取到 JSON 的版本（用于版本解析失败时兜底） */
+async function resolveWorkingVersion(pathAfterVersion) {
+  const candidates = [...new Set([
+    await getDataVersion(),
+    loadCachedDataVersion(),
+    ..._manifestVersions,
+  ].filter(Boolean))];
+  if (candidates.length === 0) return '';
+  for (const v of candidates) {
+    try {
+      await fetchJson(`${NANOKA_GI_BASE}/${v}/${pathAfterVersion}`, 20000);
+      rememberDataVersion(v);
+      _dataVersion = v;
+      _dataVersionFallback = false;
+      return v;
+    } catch (_) {}
+  }
+  return '';
 }
 
 // ── 武器列表（从 nanoka.cc 获取）──
@@ -4493,27 +4732,33 @@ let _cachedWeaponList = null;
 
 async function getWeaponList() {
   if (_cachedWeaponList) return _cachedWeaponList;
-  const version = await getDataVersion();
-  _cachedWeaponList = await fetchWithRetry(`https://static.nanoka.cc/gi/${version}/weapon.json`);
-  console.log('[getWeaponList] loaded, count:', Object.keys(_cachedWeaponList).length);
+  const version = await resolveWorkingVersion('weapon.json');
+  if (!version) {
+    throw new Error('无法获取武器列表：网络不可用或 nanoka.cc 数据版本解析失败');
+  }
+  _cachedWeaponList = await fetchWithRetry(`${NANOKA_GI_BASE}/${version}/weapon.json`);
+  console.log('[getWeaponList] loaded, version:', version, 'count:', Object.keys(_cachedWeaponList).length);
   return _cachedWeaponList;
 }
 
 async function findWeaponId(name) {
   const list = await getWeaponList();
-  // 精确匹配
-  for (const [id, info] of Object.entries(list)) {
-    if (info.zh === name || info.en === name || info.en?.toLowerCase() === name?.toLowerCase()) {
-      return { id, info };
-    }
+  // 精确 → 归一化（忽略「」（）等装饰差异）→ 包含；规则见 electron/weapon-names.cjs
+  return findWeaponEntry(list, name);
+}
+
+/** 取武器的英文名：优先列表值，占位/缺失时退回英文详情页 */
+async function resolveWeaponNameEn(weaponId, version, listName) {
+  if (listName && !isPlaceholderName(listName)) return listName;
+  if (!version || !weaponId) return listName || '';
+  try {
+    const en = await fetchWithRetry(`${NANOKA_GI_BASE}/${version}/en/weapon/${weaponId}.json`, 1, 600);
+    const n = (en && en.name) || '';
+    if (n && !isPlaceholderName(n)) return n;
+  } catch (e) {
+    console.warn('[crawl-weapon] en detail failed:', weaponId, e.message);
   }
-  // 模糊匹配
-  for (const [id, info] of Object.entries(list)) {
-    if (info.zh?.includes(name) || info.en?.toLowerCase().includes(name?.toLowerCase())) {
-      return { id, info };
-    }
-  }
-  return null;
+  return listName || '';
 }
 
 // ── 武器类型映射 ──
@@ -5426,33 +5671,95 @@ ipcMain.handle('download-banner-image', async (_event, url, filename) => {
   }
 });
 
-// ── 从指定 URL 下载图片到本地 ──
-async function downloadImage(url, iconName, ext = 'png') {
-  if (!dbDir || !url || !iconName) return;
-  const filename = `${iconName}.${ext}`;
-  const imagesDir = getImagesDir(dbDir);
-  
-  // 如果已有同名图片（忽略扩展名），跳过下载
-  if (resolveImagePath(imagesDir, filename)) return;
-  
-  const destPath = path.join(imagesDir, filename);
-  try {
-    const imageData = await new Promise((resolve, reject) => {
-      const proto = url.startsWith('https') ? require('https') : require('http');
-      const req = proto.get(url, (res) => {
-        if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}: ${url}`)); return; }
-        const chunks = [];
-        res.on('data', chunk => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks)));
-      });
-      req.on('error', reject);
-      req.setTimeout(15000, () => { req.destroy(); reject(new Error(`Timeout: ${url}`)); });
+// ── 图片格式嗅探 ──
+// nanoka 的素材实际是 webp，而老代码一律按调用方给的扩展名（多为 png）落盘，
+// 于是盘上出现「.png 结尾的 webp 文件」。extname 不参与查找（resolveImagePath
+// 只按 basename 匹配），所以显示不受影响，但文件本身是错的。
+// 这里按内容魔数判定真实格式，扩展名不可信时以内容为准。
+function sniffImageExt(buf) {
+  if (!buf || buf.length < 12) return null;
+  const ascii = (start, end) => buf.toString('ascii', start, end);
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'webp';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (ascii(0, 3) === 'GIF') return 'gif';
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return 'bmp';
+  const head = buf.toString('utf8', 0, Math.min(buf.length, 256)).trimStart().toLowerCase();
+  if (head.startsWith('<?xml') || head.startsWith('<svg')) return 'svg';
+  return null;
+}
+
+/** 从 URL / 调用方提示里取一个兜底扩展名 */
+function fallbackImageExt(url, hint) {
+  const clean = (v) => String(v || '').split('?')[0].split('#')[0].trim().toLowerCase();
+  const h = clean(hint);
+  if (h && /^[a-z0-9]{2,5}$/.test(h)) return h;
+  const m = /\.([a-z0-9]{2,5})$/.exec(clean(url));
+  return m ? m[1] : 'png';
+}
+
+/** 用 Node http/https 取一段二进制（跟随一层 3xx 重定向） */
+function fetchBinary(url, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const proto = url.startsWith('https') ? require('https') : require('http');
+    const req = proto.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        const next = new URL(res.headers.location, url).toString();
+        fetchBinary(next, timeoutMs).then(resolve, reject);
+        return;
+      }
+      if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}: ${url}`)); return; }
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
     });
-    fs.writeFileSync(destPath, imageData);
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error(`Timeout: ${url}`)); });
+  });
+}
+
+/**
+ * 从指定 URL 下载图片到本地图包目录。
+ *
+ * 落盘扩展名以**内容**为准（webp/png/jpg/gif/bmp/svg），内容无法识别时才退回
+ * 调用方给的 hint / URL 后缀 / png。文件已存在（忽略扩展名）时不重复下载。
+ *
+ * @returns {Promise<{ok: boolean, filename: string|null, existed?: boolean, error?: string}>}
+ */
+async function downloadImage(url, iconName, ext = 'png') {
+  if (!dbDir || !url || !iconName) return { ok: false, filename: null, error: '参数不完整' };
+  const imagesDir = getImagesDir(dbDir);
+
+  // 已有同名图片（忽略扩展名，所以能命中图包里历史遗留的 .png）
+  const existing = resolveImagePath(imagesDir, iconName);
+  if (existing) {
+    // 图包里可能同时存在 X.png 与 X.webp（历史遗留：早期版本把 webp 存成了 .png），
+    // resolveImagePath 取体积最大的那个。这里**只读嗅探**、不擅自改名或删除：
+    // 用户图包是共享资产，删掉"扩展名不对"的那份会连带丢掉更高分辨率的一份。
+    // 新下载的图片才会按真实格式命名。
+    const curExt = path.extname(existing).slice(1).toLowerCase();
+    let realExt = null;
+    try { realExt = sniffImageExt(fs.readFileSync(existing)); } catch (_) {}
+    if (realExt && realExt !== curExt) {
+      console.warn('[downloadImage] 扩展名与内容不符（保留原文件不动）:',
+        path.basename(existing), '实际为', realExt);
+      return { ok: true, filename: path.basename(existing), existed: true, extMismatch: realExt };
+    }
+    return { ok: true, filename: path.basename(existing), existed: true };
+  }
+
+  try {
+    const imageData = await fetchBinary(url);
+    const realExt = sniffImageExt(imageData) || fallbackImageExt(url, ext);
+    const filename = `${iconName}.${realExt}`;
+    fs.writeFileSync(path.join(imagesDir, filename), imageData);
     clearImagePathCache();
     console.log('[downloadImage] saved:', filename);
+    return { ok: true, filename, existed: false };
   } catch (e) {
     console.error('[downloadImage] error:', url, e.message);
+    return { ok: false, filename: null, error: e.message };
   }
 }
 
@@ -5888,6 +6195,8 @@ ipcMain.handle('export-seed', async (_event, newVersion) => {
       character_stories:3, character_ascension_materials:3, character_talent_materials:3,
       character_related_effects:3,
       weapon_ascension_materials:3, wish_banners:3,
+      foods:3, food_variants:4, food_materials:4,
+      books:3, book_volumes:4,
       spiral_abyss_floors:3, imaginarium_theater_seasons:3, perilous_trail_bosses:3,
       wish_banner_items:4, talent_levels:4,
       wish_rate_ups:4, version_tags:4, version_additions:4, version_meta:4,
@@ -5973,6 +6282,7 @@ ipcMain.handle('clean-unused-images', () => {
       { table: 'weapons', cols: ['image', 'simple_art'] },
       { table: 'artifacts', cols: ['image', 'flower_image', 'plume_image', 'sands_image', 'goblet_image', 'circlet_image'] },
       { table: 'materials', cols: ['image'] },
+      { table: 'books', cols: ['image'] },
       { table: 'character_outfits', cols: ['image', 'avatar_image'] },
       { table: 'character_talents', cols: ['icon'] },
       { table: 'character_constellations', cols: ['icon'] },
@@ -6297,6 +6607,116 @@ ipcMain.handle('wishanalysis-save-plans', (_event, plans) => {
     return { success: true };
   } catch (e) {
     console.error('[wishanalysis-save-plans] error:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 希穆兰卡（祈愿模拟器）：多存档 IPC ──
+// 存档语义：一个存档 = 一份「祈愿方案 + 剩余资源 + 抽取历史 + 保底状态」的快照。
+// 「继续进度」按用户约定走另存为（新 id），因此这里只提供整体读写，不做覆盖式合并。
+
+ipcMain.handle('wishsim-list-archives', () => {
+  try {
+    if (!userDb) return { success: true, archives: [] };
+    const res = userDb.exec(
+      "SELECT id, name, updated_at, created_at, LENGTH(data_json) FROM wish_sim_archives ORDER BY updated_at DESC"
+    );
+    const archives = (res[0]?.values || []).map(([id, name, updatedAt, createdAt, size]) => ({
+      id, name, updatedAt, createdAt, size,
+    }));
+    return { success: true, archives };
+  } catch (e) {
+    console.error('[wishsim-list-archives] error:', e.message);
+    return { success: false, archives: [], error: e.message };
+  }
+});
+
+ipcMain.handle('wishsim-load-archive', (_e, id) => {
+  try {
+    if (!userDb) throw new Error('userDb not open');
+    const stmt = userDb.prepare("SELECT id, name, data_json, created_at, updated_at FROM wish_sim_archives WHERE id = ?");
+    stmt.bind([String(id)]);
+    let row = null;
+    if (stmt.step()) row = stmt.getAsObject();
+    stmt.free();
+    if (!row) return { success: false, error: '存档不存在' };
+    let data = null;
+    try { data = decodeWishSimArchive(row.data_json); } catch (err) { return { success: false, error: '存档内容损坏：' + err.message }; }
+    return { success: true, archive: { id: row.id, name: row.name, createdAt: row.created_at, updatedAt: row.updated_at, data } };
+  } catch (e) {
+    console.error('[wishsim-load-archive] error:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+// 存档体积优化：data_json 以 gzip 存为 BLOB。
+// 从祈愿捕捉站导入的四五千条历史记录里，绝大部分字段是常量或可由 itemId 现推，
+// 前端已先做瘦身（见 wishSimData.slimArchiveRecords），这里再压一层：
+// 2.7 MB → 约 0.6 MB（瘦身）→ 约 60 KB（gzip）。旧存档是纯文本，读取时按魔数兼容。
+const WISH_SIM_GZIP_MAGIC = [0x1f, 0x8b];
+function encodeWishSimArchive(data) {
+  const json = JSON.stringify(data ?? null);
+  return zlib.gzipSync(Buffer.from(json, 'utf-8'), { level: 9 });
+}
+function decodeWishSimArchive(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'string') return JSON.parse(raw);          // 旧存档：明文 JSON
+  const buf = Buffer.from(raw);
+  if (buf.length >= 2 && buf[0] === WISH_SIM_GZIP_MAGIC[0] && buf[1] === WISH_SIM_GZIP_MAGIC[1]) {
+    return JSON.parse(zlib.gunzipSync(buf).toString('utf-8'));
+  }
+  return JSON.parse(buf.toString('utf-8'));
+}
+
+ipcMain.handle('wishsim-save-archive', (_e, archive) => {
+  try {
+    if (!userDb) throw new Error('userDb not open');
+    if (!archive || !archive.id) throw new Error('archive.id required');
+    const stmt = userDb.prepare(
+      "INSERT INTO wish_sim_archives (id, name, data_json) VALUES (?, ?, ?) " +
+      "ON CONFLICT(id) DO UPDATE SET name = excluded.name, data_json = excluded.data_json, updated_at = datetime('now','localtime')"
+    );
+    const blob = encodeWishSimArchive(archive.data);
+    stmt.bind([String(archive.id), String(archive.name || '未命名存档'), blob]);
+    stmt.step();
+    stmt.free();
+    userDbSave();
+    console.log(`[wishsim-save-archive] dbDir=${dbDir} bytes=${blob.length}`);
+    return { success: true, bytes: blob.length };
+  } catch (e) {
+    console.error('[wishsim-save-archive] error:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('wishsim-delete-archive', (_e, id) => {
+  try {
+    if (!userDb) throw new Error('userDb not open');
+    const stmt = userDb.prepare("DELETE FROM wish_sim_archives WHERE id = ?");
+    stmt.bind([String(id)]);
+    stmt.step();
+    stmt.free();
+    userDbSave();
+    return { success: true };
+  } catch (e) {
+    console.error('[wishsim-delete-archive] error:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('wishsim-rename-archive', (_e, id, name) => {
+  try {
+    if (!userDb) throw new Error('userDb not open');
+    const stmt = userDb.prepare(
+      "UPDATE wish_sim_archives SET name = ?, updated_at = datetime('now','localtime') WHERE id = ?"
+    );
+    stmt.bind([String(name || '未命名存档'), String(id)]);
+    stmt.step();
+    stmt.free();
+    userDbSave();
+    return { success: true };
+  } catch (e) {
+    console.error('[wishsim-rename-archive] error:', e.message);
     return { success: false, error: e.message };
   }
 });
@@ -7379,6 +7799,9 @@ function clearCachedData() {
   _cachedItemAll = null;
   _cachedItemAllEn = null;
   _cachedAppVersion = null;
+  _cachedFoodCatalog = null;
+  _cachedIngredientIndex = null;
+  _cachedMihoyoFoodIndex = null;
 }
 
 function checkUpdateOnStartup() {
@@ -7395,7 +7818,7 @@ function checkUpdateOnStartup() {
   }
 }
 
-// ── 页面状态持久化（最近5页的滚动+滑块信息）──
+// ── 页面状态持久化（最近 12 页的滚动快照 + 页面状态）──
 ipcMain.handle('load-page-states', () => {
   try {
     const config = loadUserConfig();
@@ -7408,8 +7831,9 @@ ipcMain.handle('load-page-states', () => {
 ipcMain.handle('save-page-states', (_event, states) => {
   try {
     const config = loadUserConfig();
-    // 只保留最近5条
-    if (states.length > 5) states = states.slice(-5);
+    // 只保留最近 20 条：列表页与详情页共用这个队列，返回链较深时需要足够的保留量，
+    // 否则列表页的滚动快照会被沿途打开的详情页挤掉（表现为"返回后回到顶部"）。
+    if (states.length > 20) states = states.slice(-20);
     config.pageStates = states;
     saveUserConfig(config);
     return { success: true };
@@ -7449,7 +7873,7 @@ ipcMain.handle('crawl-weapon', async (_event, weaponName, options = {}) => {
     // 2. 获取武器详细信息（从 nanoka.cc），同时预热物品列表缓存
     let detail = null;
     const version = await getDataVersion();
-    const detailUrl = `https://static.nanoka.cc/gi/${version}/zh/weapon/${weaponId}.json`;
+    const detailUrl = `${NANOKA_GI_BASE}/${version}/zh/weapon/${weaponId}.json`;
     // 并行启动 item_all 加载（5MB+，最慢的部分，提前下载）
     const itemsPromise = getItemAll();
     try {
@@ -7465,6 +7889,10 @@ ipcMain.handle('crawl-weapon', async (_event, weaponName, options = {}) => {
     // 3. 等待物品列表（此时大概率已下载完成）
     let items = {};
     try { items = await itemsPromise; } catch (_) { items = {}; }
+
+    // 3.5 名称：中文名以详情为准；英文名优先列表，占位/缺失时回退英文详情页
+    //     （"Weapon: Sword" 这类占位名绝不能写库，之前就是这么污染了英文名）
+    const resolvedNameEn = await resolveWeaponNameEn(weaponId, version, info?.en || '');
 
     // 材料类型映射（武器相关）
     function mapWeaponMatType(itemInfo, rarity) {
@@ -7587,7 +8015,7 @@ ipcMain.handle('crawl-weapon', async (_event, weaponName, options = {}) => {
       id: Number(weaponId),         // nanoka.cc 的正确武器 ID
       db_id: dbId,                  // 原数据库 ID（可能不同，供前端更新用）
       name_zh: detail.name || info?.zh || weaponName,
-      name_en: info?.en || '',
+      name_en: resolvedNameEn,
       rarity: detail.rarity || info?.rank || 4,
       weapon_type: WEAPON_TYPE_MAP[detail.weapon_type] || 0,
       base_atk: baseAtkLv1,
@@ -7955,10 +8383,1049 @@ ipcMain.handle('check-missing-artifacts', async () => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// 食物爬虫
+//   · 主体数据：nanoka 静态数据 zh/item_all.json（type === '食物'），
+//     按「奇怪的 / 普通 / 美味的」三形态合并为一条食物记录。
+//   · 烹饪材料与数量：nanoka 没有这部分数据，从 bilibili wiki
+//     （wiki.biligame.com/ys）的 {{食物图鉴新}} 模板「所需食材」字段补充；
+//     失败时回退米游社观测枢。
+// ═══════════════════════════════════════════════════════════
+
+const FOOD_VARIANT_PREFIXES = [['美味的', 'tasty'], ['奇怪的', 'weird']];
+// nanoka 里未实装/占位的条目名为「？？？」「???」等，整条跳过
+const FOOD_PLACEHOLDER_NAME_RE = /^[?？\s]*$/;
+
+/** 「美味的黄金蟹」→ { base: '黄金蟹', kind: 'tasty' } */
+function splitFoodVariantName(name) {
+  const n = String(name || '').trim();
+  for (const [prefix, kind] of FOOD_VARIANT_PREFIXES) {
+    if (n.startsWith(prefix)) return { base: n.slice(prefix.length).trim(), kind };
+  }
+  return { base: n, kind: 'normal' };
+}
+
+/** 同一格里的多个候选（重复实装条目）择优：先看是不是真正的料理，再看与基准 ID 的距离 */
+function pickFoodCandidate(candidates, anchorId) {
+  if (!candidates || candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  const anchor = anchorId != null ? Number(anchorId) : null;
+  const score = (c) => {
+    const info = c.info || {};
+    let s = 0;
+    if (info.material_type !== 'MATERIAL_FOOD') s += 100;              // 食谱/任务道具残留在前
+    if (/^UI_ItemIcon_Recipe_/.test(info.icon || '')) s += 10;
+    if (anchor != null) s += Math.min(9, Math.abs(Number(c.id) - anchor) / 100);
+    return s;
+  };
+  return [...candidates].sort((a, b) => score(a) - score(b))[0];
+}
+
+// ── 食物目录（分组后的完整列表，进程内缓存）──
+let _cachedFoodCatalog = null;
+let _cachedIngredientIndex = null;
+
+async function getFoodCatalog() {
+  if (_cachedFoodCatalog) return _cachedFoodCatalog;
+  const items = await getItemAll();
+  let itemsEn = {};
+  try { itemsEn = await getItemAllEn(); } catch (_) { itemsEn = {}; }
+
+  const groups = new Map();          // base name → { base, variants: Map(kind → [candidates]) }
+  const byVariantId = new Map();     // 任意形态 ID → base name
+
+  for (const [id, info] of Object.entries(items)) {
+    if (!info || info.type !== '食物') continue;
+    const name = String(info.name || '').trim();
+    if (!name || FOOD_PLACEHOLDER_NAME_RE.test(name)) continue;
+    const { base, kind } = splitFoodVariantName(name);
+    if (!base || FOOD_PLACEHOLDER_NAME_RE.test(base)) continue;
+    if (!groups.has(base)) groups.set(base, { base, variants: new Map() });
+    const g = groups.get(base);
+    if (!g.variants.has(kind)) g.variants.set(kind, []);
+    g.variants.get(kind).push({ id, info });
+    byVariantId.set(String(id), base);
+  }
+
+  const entries = [];
+  const byId = new Map();
+  const byName = new Map();
+  for (const g of groups.values()) {
+    const normalPick = pickFoodCandidate(g.variants.get('normal'), null);
+    if (!normalPick) continue;                       // 没有普通形态的组不成立
+    const anchor = Number(normalPick.id);
+    const picked = { normal: normalPick };
+    for (const kind of ['tasty', 'weird']) {
+      const c = pickFoodCandidate(g.variants.get(kind), anchor);
+      if (c) picked[kind] = c;
+    }
+    const hasVariants = !!(picked.tasty && picked.weird);
+    const entry = {
+      base: g.base,
+      id: String(normalPick.id),
+      anchor,
+      hasVariants,
+      normal: picked.normal,
+      tasty: picked.tasty || null,
+      weird: picked.weird || null,
+      en: (itemsEn[String(normalPick.id)] || {}).name || '',
+    };
+    entries.push(entry);
+    byId.set(String(entry.id), entry);
+    byName.set(g.base, entry);
+  }
+
+  entries.sort((a, b) => a.anchor - b.anchor);
+  _cachedFoodCatalog = { entries, byId, byName, byVariantId, items, itemsEn };
+  console.log('[getFoodCatalog] groups:', entries.length, '/ raw food items:', byVariantId.size,
+    '/ with variants:', entries.filter(e => e.hasVariants).length);
+  return _cachedFoodCatalog;
+}
+
+/** 食材名称 → nanoka 物品条目（用于把 wiki 的「所需食材」落到 materials 表） */
+async function getIngredientIndex() {
+  if (_cachedIngredientIndex) return _cachedIngredientIndex;
+  const items = await getItemAll();
+  let itemsEn = {};
+  try { itemsEn = await getItemAllEn(); } catch (_) { itemsEn = {}; }
+  const priority = (t) => {
+    const s = String(t || '');
+    if (s === '食材') return 0;
+    if (s === '食物') return 1;
+    if (s.endsWith('区域特产')) return 2;
+    if (s === '素材') return 3;
+    if (s === '鱼') return 4;
+    return 5;
+  };
+  const index = new Map();
+  for (const [id, info] of Object.entries(items)) {
+    if (!info || !info.name) continue;
+    const name = String(info.name).trim();
+    if (!name || FOOD_PLACEHOLDER_NAME_RE.test(name)) continue;
+    const cur = index.get(name);
+    if (!cur || priority(info.type) < priority(cur.info.type)) index.set(name, { id, info });
+  }
+  // 英文名索引（wiki 偶有英文/别名条目时兜底）
+  _cachedIngredientIndex = { byName: index, items, itemsEn };
+  return _cachedIngredientIndex;
+}
+
+// ── bilibili wiki：{{食物图鉴新}} 模板解析 ──
+
+/** 去掉 wikitext 里的 HTML 注释 */
+function stripWikiComments(text) {
+  return String(text || '').replace(/<!--[\s\S]*?-->/g, '');
+}
+
+/** 解析模板参数：|键=值（值可跨行，遇到下一个 |键= 或 }} 结束） */
+function parseWikiTemplateFields(text) {
+  const clean = stripWikiComments(text);
+  const out = {};
+  let key = null;
+  for (const rawLine of clean.split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    const m = /^\s*\|([^=|{}\n]+)=(.*)$/.exec(line);
+    if (m) { key = m[1].trim(); out[key] = m[2]; continue; }
+    if (/^\s*[{}]/.test(line)) { key = null; continue; }
+    if (key && line.trim()) out[key] += '\n' + line;
+  }
+  for (const k of Object.keys(out)) out[k] = out[k].trim();
+  const regionM = /\{\{[^}]*所属国家\s*=\s*([^}|]+)/.exec(clean);
+  if (regionM) out['所属国家'] = regionM[1].trim();
+  return out;
+}
+
+/** 「无」「—」「暂无」这类占位值不是材料名（观测枢对不可烹饪的条目就是这么填的） */
+const FOOD_EMPTY_FIELD_RE = /^(无|沒有|没有|暂无|無|none|null|n\/a|—+|-+|\/|×|x|0)$/i;
+
+/** 「鸟蛋*5、面粉*5、螃蟹*4、盐*2」→ [{name, quantity}] */
+function parseWikiIngredients(text) {
+  const clean = stripWikiComments(text).replace(/<br\s*\/?>/gi, '、');
+  const out = [];
+  for (const raw of clean.split(/[、,，;；\n]/)) {
+    const part = raw.trim().replace(/^[·・\-—]+|[·・\-—]+$/g, '').trim();
+    if (!part) continue;
+    if (FOOD_EMPTY_FIELD_RE.test(part)) continue;
+    const m = /^(.+?)\s*[*×xX]\s*(\d+)\s*$/.exec(part);
+    if (m) out.push({ name: m[1].trim(), quantity: Number(m[2]) });
+    else out.push({ name: part, quantity: null });
+  }
+  return out.filter(i => i.name && !FOOD_PLACEHOLDER_NAME_RE.test(i.name) && !FOOD_EMPTY_FIELD_RE.test(i.name));
+}
+
+const WIKI_API = 'https://wiki.biligame.com/ys/api.php';
+
+/** 批量取 wiki 页面 wikitext：titles → 已解析的模板字段（每批 40 条，含重定向） */
+async function fetchWikiFoodPages(titles) {
+  const result = new Map();
+  const list = [...new Set((titles || []).filter(Boolean))];
+  const BATCH = 40;
+  for (let i = 0; i < list.length; i += BATCH) {
+    const batch = list.slice(i, i + BATCH);
+    const url = `${WIKI_API}?action=query&prop=revisions&rvprop=content&rvslots=main&format=json&redirects=1&titles=`
+      + encodeURIComponent(batch.join('|'));
+    let data;
+    try {
+      data = await fetchJson(url, 45000);
+    } catch (e) {
+      console.warn('[crawl-food] wiki batch failed:', e.message);
+      continue;
+    }
+    const pages = (data && data.query && data.query.pages) || {};
+    const redirects = (data && data.query && data.query.redirects) || [];
+    const redirectMap = new Map(redirects.map(r => [r.from, r.to]));
+    for (const page of Object.values(pages)) {
+      const title = page.title;
+      if (page.missing !== undefined) continue;
+      const content = page.revisions?.[0]?.slots?.main?.['*'] || '';
+      if (!content) continue;
+      const fields = parseWikiTemplateFields(content);
+      result.set(title, fields);
+    }
+    // 重定向来源也指向同一份字段
+    for (const [from, to] of redirectMap) {
+      if (result.has(to)) result.set(from, result.get(to));
+    }
+  }
+  return result;
+}
+
+// ── 备选数据源：米游社观测枢（baike.mihoyo.com/ys/obc/channel/map/189/21）──
+// bilibili wiki 没有配方（或页面不存在）时用它补烹饪材料与三形态文案。
+// 列表一次返回全部条目；详情需按 content_id 逐条取（因此只在必要时调用）。
+const MIHOYO_FOOD_LIST_API = 'https://api-static.mihoyo.com/common/blackboard/ys_obc/v1/home/content/list?app_sn=ys_obc&channel_id=21';
+const MIHOYO_ENTRY_API = 'https://act-api-takumi-static.mihoyo.com/hoyowiki/genshin/wapi/entry_page?entry_page_id=';
+let _cachedMihoyoFoodIndex = null;
+
+async function getMihoyoFoodIndex() {
+  if (_cachedMihoyoFoodIndex) return _cachedMihoyoFoodIndex;
+  const map = new Map();
+  try {
+    const data = await fetchJson(MIHOYO_FOOD_LIST_API, 45000);
+    const channel = data && data.data && data.data.list && data.data.list[0];
+    for (const item of (channel && channel.list) || []) {
+      const title = String(item.title || '').trim();
+      if (!title) continue;
+      map.set(title, item.content_id);
+      const alias = String(item.alias_name || '').trim();
+      if (alias && !map.has(alias)) map.set(alias, item.content_id);
+    }
+    console.log('[crawl-food] mihoyo index loaded:', map.size);
+  } catch (e) {
+    console.warn('[crawl-food] mihoyo list failed:', e.message);
+  }
+  _cachedMihoyoFoodIndex = map;
+  return map;
+}
+
+/**
+ * 观测枢的食材 HTML → [{name, quantity}]
+ *
+ * 每个食材是一个带 data-entry-* 属性的 span：
+ *   <span class="custom-entry-wrapper" data-entry-name="鸟蛋" data-entry-amount="5">…</span>
+ * 不能走"去标签取文本"：这些 span 之间没有分隔符，剥完标签会得到
+ * 「鸟蛋*5面粉*5螃蟹*4盐*2」这样连成一串的字符串。
+ */
+function parseMihoyoIngredients(html) {
+  const src = String(html || '');
+  const out = [];
+  const wrapperRe = /<span[^>]*custom-entry-wrapper[^>]*>/gi;
+  let m;
+  while ((m = wrapperRe.exec(src))) {
+    const tag = m[0];
+    const nameM = /data-entry-name="([^"]*)"/i.exec(tag);
+    if (!nameM) continue;
+    const name = nameM[1].trim();
+    if (!name || FOOD_EMPTY_FIELD_RE.test(name)) continue;
+    const amountM = /data-entry-amount="([^"]*)"/i.exec(tag);
+    const qty = amountM ? Number(String(amountM[1]).replace(/[^\d.]/g, '')) : NaN;
+    out.push({ name, quantity: Number.isFinite(qty) ? qty : null });
+  }
+  return out;
+}
+
+/** 条目正文里的 HTML 片段 → 纯文本（保留换行） */
+function htmlFragmentToText(html) {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .split('\n').map(s => s.trim()).filter(Boolean).join('\n')
+    .trim();
+}
+
+/**
+ * 观测枢「食物」条目 → 三形态文案 + 烹饪材料。
+ * 数据在 modules[].components[] 里 component_id === 'material_base_info' 的 JSON 串中，
+ * 每个形态一个组件（奇怪的X / X / 美味的X）。
+ */
+async function fetchMihoyoFoodRecipe(title) {
+  const index = await getMihoyoFoodIndex();
+  const contentId = index.get(String(title || '').trim());
+  if (!contentId) return null;
+  try {
+    const data = await fetchJson(`${MIHOYO_ENTRY_API}${contentId}`, 45000);
+    const page = data && data.data && data.data.page;
+    if (!page) return null;
+    const variants = [];
+    for (const mod of page.modules || []) {
+      for (const comp of mod.components || []) {
+        if (comp.component_id !== 'material_base_info') continue;
+        let parsed;
+        try { parsed = JSON.parse(comp.data); } catch (_) { continue; }
+        const attr = {};
+        for (const a of parsed.attr || []) {
+          attr[String(a.key || '')] = htmlFragmentToText((a.value || []).join('\n'));
+        }
+        const materialHtml = (parsed.materials || {}).value || '';
+        const structured = parseMihoyoIngredients(materialHtml);
+        variants.push({
+          name: String(parsed.name || '').trim(),
+          description: attr['描述'] || '',
+          effect: attr['使用效果'] || '',
+          source: attr['获得方式'] || '',
+          recipeSource: attr['食谱获得'] || '',
+          materials: htmlFragmentToText(materialHtml),
+          ingredients: structured.length > 0 ? structured : parseWikiIngredients(htmlFragmentToText(materialHtml)),
+        });
+      }
+    }
+    if (variants.length === 0) return null;
+    return { contentId, variants };
+  } catch (e) {
+    console.warn('[crawl-food] mihoyo entry failed:', title, e.message);
+    return null;
+  }
+}
+
+/** wiki 模板 → 归一化字段（含三形态文案与烹饪材料） */function normalizeWikiFood(fields) {
+  if (!fields || Object.keys(fields).length === 0) return null;
+  const typeRaw = stripWikiComments(fields['类型'] || '').trim();
+  return {
+    title: fields['名称'] || '',
+    rarity: Number(String(stripWikiComments(fields['稀有度'] || '')).replace(/[^\d]/g, '')) || null,
+    category: stripWikiComments(fields['类别'] || '').trim(),
+    type: typeRaw,
+    ingredients: parseWikiIngredients(fields['所需食材'] || ''),
+    introductions: {
+      normal: stripWikiComments(fields['介绍'] || '').trim(),
+      tasty: stripWikiComments(fields['完美介绍'] || '').trim(),
+      weird: stripWikiComments(fields['失败介绍'] || '').trim(),
+    },
+    effects: {
+      normal: stripWikiComments(fields['效果说明'] || '').trim(),
+      tasty: stripWikiComments(fields['完美效果说明'] || '').trim(),
+      weird: stripWikiComments(fields['失败效果说明'] || '').trim(),
+    },
+    recipeSource: stripWikiComments(fields['食谱获取方式'] || '').trim(),
+    recipePrice: stripWikiComments(fields['食谱价格'] || fields['价格'] || '').trim(),
+    source: stripWikiComments(fields['获取方式'] || '').trim(),
+    specialChar: stripWikiComments(fields['特殊料理角色'] || '').trim(),
+    specialty: stripWikiComments(fields['特殊料理'] || '').trim(),
+    region: stripWikiComments(fields['所属国家'] || '').trim(),
+  };
+}
+
+/** wiki 的「类型」+ nanoka 数据 → 食物分类 key（见 src/pages/FoodsPage.jsx 的 FOOD_TYPES） */
+function classifyFoodType(entry, wiki) {
+  const wt = String((wiki && wiki.type) || '');
+  if (wt.includes('特殊料理')) return 'special';
+  if (wt.includes('饮品')) return 'drink';
+  if (wt.includes('活动料理')) return 'event';
+  if (wt.includes('食材')) return 'ingredient';
+  if (wt.includes('正常料理')) return 'dish';
+  if (entry.hasVariants) return 'dish';
+  const info = entry.normal.info || {};
+  if (Number(info.rank) === 0) return 'ingredient';
+  if (info.material_type === 'MATERIAL_FOOD') return 'dish';
+  if (info.material_type === 'MATERIAL_NOTICE_ADD_HP') return 'ingredient';
+  return 'other';
+}
+
+/** 食材的 nanoka type → materials.type（与材料板块的既有取值保持一致） */
+function mapIngredientMaterialType(nanokaType) {
+  const t = String(nanokaType || '');
+  if (t === '食材' || t === '食物' || t === '鱼') return 'cooking';
+  if (t.endsWith('区域特产')) return 'local_specialty';
+  if (t === '素材' || t === '角色与武器培养素材') return 'common';
+  return 'cooking';
+}
+
+function foodVariantPayload(picked, catalog, kind) {
+  if (!picked) return null;
+  const info = picked.info || {};
+  const en = catalog.itemsEn[String(picked.id)] || {};
+  return {
+    kind,
+    item_id: Number(picked.id),
+    name_zh: info.name || '',
+    name_en: en.name || '',
+    description_zh: convertColorMarkup(info.desc || ''),
+    effect: convertColorMarkup(info.effect || ''),
+    image: info.icon ? `${info.icon}.png` : '',
+    rarity: info.rank != null ? info.rank : null,
+  };
+}
+
+/** 单条食物（分组 + wiki 字段）→ 渲染进程可直接落库的完整结构 */
+function buildFoodPayload(entry, catalog, wiki, ingredientIndex, mihoyo) {
+  const normal = entry.normal.info || {};
+  const normalEn = catalog.itemsEn[String(entry.id)] || {};
+  const variants = [foodVariantPayload(entry.normal, catalog, 'normal')];
+  if (entry.weird) variants.push(foodVariantPayload(entry.weird, catalog, 'weird'));
+  if (entry.tasty) variants.push(foodVariantPayload(entry.tasty, catalog, 'tasty'));
+  // wiki 文案比 nanoka 更贴近游戏内三形态的差异描述，存在时优先
+  if (wiki) {
+    for (const v of variants) {
+      const intro = wiki.introductions[v.kind];
+      const eff = wiki.effects[v.kind];
+      if (intro) v.description_zh = intro.replace(/<br\s*\/?>/gi, '\n');
+      if (eff) v.effect = eff.replace(/<br\s*\/?>/gi, '\n');
+    }
+  }
+  // 观测枢兜底：按形态名匹配（奇怪的X / X / 美味的X）
+  const mihoyoByKind = new Map();
+  if (mihoyo && Array.isArray(mihoyo.variants)) {
+    for (const mv of mihoyo.variants) {
+      const { base, kind } = splitFoodVariantName(mv.name);
+      if (base === entry.base) mihoyoByKind.set(kind, mv);
+    }
+  }
+  for (const v of variants) {
+    const mv = mihoyoByKind.get(v.kind);
+    if (!mv) continue;
+    if (!v.description_zh && mv.description) v.description_zh = mv.description;
+    if (!v.effect && mv.effect) v.effect = mv.effect;
+  }
+  const normalVariant = variants.find(v => v.kind === 'normal') || variants[0];
+
+  // 烹饪材料：bilibili wiki 优先，缺失时用观测枢
+  const wikiIngredients = (wiki && wiki.ingredients) || [];
+  const mihoyoPick = mihoyo ? (mihoyoByKind.get('normal') || mihoyo.variants[0] || {}) : null;
+  // 优先用结构化解析出的食材；老数据没有该字段时再退化到文本解析
+  const mihoyoIngredients = mihoyoPick
+    ? (Array.isArray(mihoyoPick.ingredients) && mihoyoPick.ingredients.length > 0
+      ? mihoyoPick.ingredients
+      : parseWikiIngredients(mihoyoPick.materials || ''))
+    : [];
+  const ingredients = wikiIngredients.length > 0 ? wikiIngredients : mihoyoIngredients;
+  const materialsSource = wikiIngredients.length > 0 ? 'biligame' : (mihoyoIngredients.length > 0 ? 'mihoyo' : 'none');
+
+  const materials = [];
+  const missingIngredients = [];
+  for (const ing of ingredients) {
+    const hit = ingredientIndex.byName.get(ing.name);
+    if (!hit) { missingIngredients.push(ing.name); continue; }
+    const info = hit.info || {};
+    const en = ingredientIndex.itemsEn[String(hit.id)] || {};
+    materials.push({
+      material_id: Number(hit.id),
+      material_name: info.name,
+      material_name_en: en.name || '',
+      material_type: mapIngredientMaterialType(info.type),
+      rarity: info.rank != null ? info.rank : 1,
+      description: convertColorMarkup(info.desc || ''),
+      source: (info.source_list || []).join('；'),
+      image: info.icon ? `${info.icon}.png` : '',
+      icon: info.icon || '',
+      quantity: ing.quantity != null ? String(ing.quantity) : '',
+    });
+  }
+
+  const type = classifyFoodType(entry, wiki);
+  const displayName = entry.base;
+  const mihoyoNormal = mihoyoByKind.get('normal');
+
+  return {
+    id: Number(entry.id),
+    db_id: null,
+    name_zh: displayName,
+    name_en: normalEn.name || entry.en || '',
+    rarity: wiki && wiki.rarity ? wiki.rarity : (normal.rank != null ? normal.rank : 1),
+    type,
+    category: (wiki && wiki.category) || '',
+    region: (wiki && wiki.region) || '',
+    description_zh: normalVariant ? normalVariant.description_zh : convertColorMarkup(normal.desc || ''),
+    effect: normalVariant ? normalVariant.effect : convertColorMarkup(normal.effect || ''),
+    source: (normal.source_list || []).join('；') || (wiki && wiki.source) || (mihoyoNormal && mihoyoNormal.source) || '',
+    image: normal.icon ? `${normal.icon}.png` : '',
+    has_variants: entry.hasVariants ? 1 : 0,
+    recipe_source: (wiki && wiki.recipeSource) || (mihoyoNormal && mihoyoNormal.recipeSource) || '',
+    recipe_price: (wiki && wiki.recipePrice) || '',
+    special_char: (wiki && wiki.specialChar) || '',
+    specialty: (wiki && wiki.specialty) || '',
+    wiki_title: (wiki && wiki.title) || displayName,
+    images: {
+      icon: normal.icon || '',
+      icon_url: normal.icon ? `https://static.nanoka.cc/assets/gi/${normal.icon}.webp` : '',
+    },
+    variants,
+    materials,
+    materials_source: materialsSource,
+    missing_ingredients: missingIngredients,
+    wiki_found: !!(wiki && Object.keys(wiki).length),
+    mihoyo_found: !!mihoyo,
+  };
+}
+
+/** 按名称/ID 解析目录条目（ID 可以是任意形态的 item id） */
+function resolveFoodEntry(catalog, foodName, foodId) {
+  if (foodId != null && foodId !== '') {
+    const hit = catalog.byId.get(String(foodId));
+    if (hit) return hit;
+    const base = catalog.byVariantId.get(String(foodId));
+    if (base) return catalog.byName.get(base) || null;
+  }
+  const name = String(foodName || '').trim();
+  if (!name) return null;
+  if (catalog.byName.has(name)) return catalog.byName.get(name);
+  // 传入的可能是「美味的 X」这类派生形态名
+  const { base } = splitFoodVariantName(name);
+  if (catalog.byName.has(base)) return catalog.byName.get(base);
+  // 去掉「食谱：」前缀与括号注释后再试
+  const stripped = name.replace(/^食谱[:：]/, '').replace(/[（(].*?[)）]/g, '').trim();
+  if (stripped && catalog.byName.has(stripped)) return catalog.byName.get(stripped);
+  for (const [k, v] of catalog.byName) {
+    if (k.includes(base) || base.includes(k)) return v;
+  }
+  return null;
+}
+
+// ── 食物爬虫：单条 ──
+ipcMain.handle('crawl-food', async (_event, foodName, options = {}) => {
+  try {
+    const catalog = await getFoodCatalog();
+    const entry = resolveFoodEntry(catalog, foodName, options.foodId);
+    if (!entry) return { success: false, error: `未找到食物: ${foodName || options.foodId}` };
+    const ingredientIndex = await getIngredientIndex();
+    // options.source：'auto'（默认，wiki 优先、观测枢兜底）/ 'biligame' / 'mihoyo'
+    const source = options.source || 'auto';
+    let wiki = null;
+    let mihoyo = null;
+    if (options.withWiki !== false && source !== 'mihoyo') {
+      const pages = await fetchWikiFoodPages([entry.base]);
+      wiki = normalizeWikiFood(pages.get(entry.base));
+    }
+    // bilibili wiki 没有配方时回退观测枢（逐条请求，所以只在必要时发）
+    if (options.withWiki !== false && source !== 'biligame' && (!wiki || wiki.ingredients.length === 0)) {
+      mihoyo = await fetchMihoyoFoodRecipe(entry.base);
+    }
+    const data = buildFoodPayload(entry, catalog, wiki, ingredientIndex, mihoyo);
+    data.db_id = options.foodId != null ? options.foodId : null;
+    console.log('[crawl-food]', entry.base, '| variants:', data.variants.length,
+      '| materials:', data.materials.length, `(${data.materials_source})`, '| wiki:', data.wiki_found, '| mihoyo:', data.mihoyo_found);
+    return { success: true, data };
+  } catch (e) {
+    console.error('[crawl-food] error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 食物爬虫：批量（多选批量爬取 / 查漏补缺共用；wiki 按批合并请求）──
+ipcMain.handle('crawl-foods', async (_event, requests, options = {}) => {
+  try {
+    const list = Array.isArray(requests) ? requests : [];
+    if (list.length === 0) return { success: true, results: [] };
+    const catalog = await getFoodCatalog();
+    const ingredientIndex = await getIngredientIndex();
+
+    const resolved = [];
+    for (const req of list) {
+      const name = typeof req === 'string' ? req : (req && req.name);
+      const foodId = typeof req === 'string' ? null : (req && req.id);
+      const entry = resolveFoodEntry(catalog, name, foodId);
+      resolved.push({ req, entry });
+    }
+
+    const source = options.source || 'auto';
+    let wikiPages = new Map();
+    if (options.withWiki !== false && source !== 'mihoyo') {
+      const titles = resolved.filter(r => r.entry).map(r => r.entry.base);
+      wikiPages = await fetchWikiFoodPages(titles);
+    }
+
+    const results = [];
+    for (const { req, entry } of resolved) {
+      const name = typeof req === 'string' ? req : (req && req.name);
+      const foodId = typeof req === 'string' ? null : (req && req.id);
+      if (!entry) { results.push({ success: false, error: `未找到食物: ${name || foodId}`, request: req }); continue; }
+      const wiki = (options.withWiki === false || source === 'mihoyo') ? null : normalizeWikiFood(wikiPages.get(entry.base));
+      // wiki 没给出配方时，逐条回退观测枢（串行，避免把对方接口打爆）
+      let mihoyo = null;
+      if (options.withWiki !== false && source !== 'biligame' && (!wiki || wiki.ingredients.length === 0)) {
+        mihoyo = await fetchMihoyoFoodRecipe(entry.base);
+      }
+      const data = buildFoodPayload(entry, catalog, wiki, ingredientIndex, mihoyo);
+      data.db_id = foodId != null ? foodId : null;
+      results.push({ success: true, data, request: req });
+    }
+    console.log('[crawl-foods] done:', results.filter(r => r.success).length, '/', results.length);
+    return { success: true, results };
+  } catch (e) {
+    console.error('[crawl-foods] error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 食物查漏：返回线上全部食物条目，供渲染进程与数据库比对 ──
+ipcMain.handle('check-missing-foods', async () => {
+  try {
+    const catalog = await getFoodCatalog();
+    const ids = [];
+    const names = {};
+    for (const entry of catalog.entries) {
+      const id = Number(entry.id);
+      ids.push(id);
+      names[id] = {
+        zh: entry.base,
+        en: entry.en || '',
+        hasVariants: entry.hasVariants,
+        variantIds: [entry.id, entry.weird && entry.weird.id, entry.tasty && entry.tasty.id].filter(Boolean).map(Number),
+        type: classifyFoodType(entry, null),
+      };
+    }
+    return {
+      success: true,
+      total: ids.length,
+      ids,
+      names,
+      version: await getDataVersion(),
+      versionFallback: _dataVersionFallback,
+    };
+  } catch (e) {
+    console.error('[check-missing-foods] error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 食物图片下载（复用 getImageUrl 的 CDN 规则，批量落盘到图包目录）──
+// 返回值里带上「图标名 → 实际落盘文件名」的映射：nanoka 的素材是 webp，
+// 文件按内容嗅探出的扩展名落盘，调用方要拿这个真实文件名写库，
+// 否则库里会存成 .png 而盘上是 .webp（能显示，但是错的）。
+ipcMain.handle('download-food-images', async (_event, iconNames) => {
+  if (!dbDir) return { success: false, error: '数据库未初始化' };
+  const list = [...new Set((Array.isArray(iconNames) ? iconNames : []).filter(Boolean))];
+  const files = {};
+  let saved = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const icon of list) {
+    try {
+      const r = await downloadImage(getImageUrl(icon), icon, 'png');
+      if (r && r.ok && r.filename) {
+        files[icon] = r.filename;
+        if (r.existed) skipped++; else saved++;
+      } else {
+        failed++;
+      }
+    } catch (_) { failed++; }
+  }
+  console.log('[download-food-images] saved:', saved, 'skipped:', skipped, 'failed:', failed, '/', list.length);
+  return { success: true, saved, skipped, failed, total: list.length, files };
+});
+
 // 清理爬虫窗口（批量爬取结束后调用）
 ipcMain.handle('cleanup-scrape-window', async () => {
   destroyScrapeWindow();
   return { success: true };
+});
+
+// ═══════════════════════════════════════════════════════════
+// 书籍爬虫
+//   · 主体数据：bilibili wiki（wiki.biligame.com/ys）
+//     action=ask 一次请求即返回「分类:书籍」的全部 105 本书 —— 含稀有度、体裁、
+//     国家、实装版本、图鉴，以及每本的卷名/获取地点/描述/正文。筛选维度只有这里有。
+//   · 正文与作者：米游社观测枢（channel_id=68）逐条取 entry_page，
+//     正文是规整的 <p> 段落，另有作者与「获取方式」分类；观测枢缺失时回退 wiki 正文。
+//   · 封面：wiki 的 File:<书名>.png 尺寸更稳定（195~220px，观测枢旧书仅 98px），
+//     因此优先取 wiki，观测枢的 icon 作为兜底。
+//
+//   两站的配对/清洗规则全部在 electron/book-crawl.cjs（可用 node 直接单测），
+//   这里只负责发请求与缓存。
+// ═══════════════════════════════════════════════════════════
+
+const MIHOYO_BOOK_LIST_API = 'https://api-static.mihoyo.com/common/blackboard/ys_obc/v1/home/content/list?app_sn=ys_obc&channel_id=68';
+const MIHOYO_ENTRY_API_BASE = 'https://act-api-takumi-static.mihoyo.com/hoyowiki/genshin/wapi/entry_page?entry_page_id=';
+// 观测枢条目的卷正文在模块里，页面本身与卷序无关，逐条取回后由 book-crawl.cjs 配对
+const BOOK_ASK_PROPERTIES = (() => {
+  const props = ['书籍名', '卷数', '稀有度', '体裁', '国家', '图鉴', '实装版本', '相关角色'];
+  for (let i = 1; i <= 12; i++) props.push(`卷${i}名`, `卷${i}获取地点`, `卷${i}描述`, `卷${i}内容`);
+  return props;
+})();
+
+let _cachedBookCatalog = null;
+
+/**
+ * wiki 的文件地址（内容寻址，必须走 API）。
+ * 入参是**带扩展名的完整文件标题**（`清泉之心.png`、`出发吧！嘟嘟可-插图1.png`），
+ * 返回「文件标题 → CDN 地址」，标题里没有的文件不会出现在结果里。
+ */
+async function fetchWikiFileUrls(fileTitles) {
+  const urls = new Map();
+  const list = [...new Set((fileTitles || []).filter(Boolean))];
+  const BATCH = 45;
+  for (let i = 0; i < list.length; i += BATCH) {
+    const batch = list.slice(i, i + BATCH);
+    const url = `${WIKI_API}?action=query&prop=imageinfo&iiprop=url&format=json&redirects=1&titles=`
+      + encodeURIComponent(batch.map(t => `File:${t}`).join('|'));
+    let data;
+    try {
+      data = await fetchWithRetry(url);
+    } catch (e) {
+      console.warn('[crawl-book] 文件地址批量获取失败:', e.message);
+      continue;
+    }
+    const pages = (data && data.query && data.query.pages) || {};
+    for (const page of Object.values(pages)) {
+      if (!page || page.missing !== undefined) continue;
+      const info = (page.imageinfo || [])[0];
+      if (!info || !info.url) continue;
+      // 归一化后的标题带「文件:」前缀，回填时去掉
+      const key = String(page.title || '').replace(/^(File|文件|Image)\s*:\s*/i, '');
+      urls.set(key, info.url);
+    }
+  }
+  return urls;
+}
+
+/**
+ * 取这些书的页面原文并解析 {{书籍}} 字段。
+ *
+ * 只有正文里出现 `UNIQ--…-QINU` 占位符的书才需要（实测 4 本）：SMW 存下来的
+ * 卷正文会把 <tabber> / <nowiki> / <ref> 换成占位符，插图就在被换掉的那段里。
+ */
+async function fetchWikiBookRawFields(titles) {
+  const out = new Map();
+  const list = [...new Set((titles || []).filter(Boolean))];
+  const BATCH = 20;
+  for (let i = 0; i < list.length; i += BATCH) {
+    const batch = list.slice(i, i + BATCH);
+    const url = `${WIKI_API}?action=query&prop=revisions&rvprop=content&rvslots=main&format=json&redirects=1&titles=`
+      + encodeURIComponent(batch.join('|'));
+    let data;
+    try {
+      data = await fetchWithRetry(url);
+    } catch (e) {
+      console.warn('[crawl-book] 页面原文批量获取失败:', e.message);
+      continue;
+    }
+    const pages = (data && data.query && data.query.pages) || {};
+    for (const page of Object.values(pages)) {
+      if (!page || page.missing !== undefined) continue;
+      const content = ((page.revisions || [])[0] || {}).slots?.main?.['*'] || '';
+      if (!content) continue;
+      const fields = bookCrawl.parseWikiBookTemplate(content);
+      if (fields) out.set(String(page.title || ''), fields);
+    }
+  }
+  return out;
+}
+
+/**
+ * 书籍目录的本地缓存。
+ *
+ * wiki 的 action=ask 一次要拉 2MB，而 bilibili 的 WAF 时不时会拦一下（HTTP 567）。
+ * 每次重试都重新下 2MB 既慢又更容易触发拦截，所以成功一次就落盘；
+ * **只在实时请求失败时才回退到缓存**（不做「多久之内直接用缓存」的新鲜度窗口）——
+ * 查漏补缺的意义就是比对最新目录，能用线上时不能拿旧数据糊弄。
+ */
+function bookCatalogCachePath() {
+  if (!dbDir) return null;
+  return path.join(dbDir, 'cache', 'book-catalog.json');
+}
+
+function writeBookCatalogCache(wikiBooks, coverUrls, imageUrls) {
+  const file = bookCatalogCachePath();
+  if (!file) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({
+      savedAt: beijingISO(),
+      wikiBooks,
+      coverUrls: [...coverUrls.entries()],
+      imageUrls: [...(imageUrls || new Map()).entries()],
+    }), 'utf-8');
+  } catch (e) {
+    console.warn('[crawl-book] 目录缓存写入失败:', e.message);
+  }
+}
+
+function readBookCatalogCache() {
+  const file = bookCatalogCachePath();
+  if (!file || !fs.existsSync(file)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    if (!Array.isArray(raw.wikiBooks) || raw.wikiBooks.length === 0) return null;
+    return {
+      savedAt: raw.savedAt || '', wikiBooks: raw.wikiBooks,
+      coverUrls: new Map(raw.coverUrls || []), imageUrls: new Map(raw.imageUrls || []),
+    };
+  } catch (e) {
+    console.warn('[crawl-book] 目录缓存解析失败:', e.message);
+    return null;
+  }
+}
+
+/** 书籍目录（wiki 全集 + 观测枢全集，进程内缓存） */
+async function getBookCatalog() {
+  if (_cachedBookCatalog) return _cachedBookCatalog;
+  const askUrl = `${WIKI_API}?action=ask&format=json&query=`
+    + encodeURIComponent(`[[分类:书籍]]|${BOOK_ASK_PROPERTIES.map(p => '?' + p).join('|')}|limit=1000`);
+
+  let wikiBooks = null;
+  let coverUrls = new Map();
+  let imageUrls = new Map();     // 正文插图：文件标题 → CDN 地址
+  let stale = false;
+  let cachedAt = '';
+  let staleReason = '';
+  try {
+    wikiBooks = bookCrawl.parseWikiAsk(await fetchWithRetry(askUrl, 4, 1200));
+
+    // 卷正文里出现 UNIQ 占位符的书，用页面原文重解析一次（插图/脚注就藏在被替换的标签里）
+    const needRaw = wikiBooks.filter(b => (b.volumes || []).some(v => v.needs_raw));
+    if (needRaw.length > 0) {
+      const rawFields = await fetchWikiBookRawFields(needRaw.map(b => b.title));
+      const patched = bookCrawl.applyRawVolumeContent(
+        needRaw.filter(b => rawFields.has(b.title)), rawFields);
+      console.log('[crawl-book] 用页面原文修复卷正文:', patched, '卷 /', rawFields.size, '本');
+    }
+
+    // 封面（File:<书名>.png）与正文插图一起取地址：同一个 API，合成一批更省请求
+    const coverFiles = wikiBooks.map(b => `${b.title}.png`);
+    const contentFiles = [];
+    for (const b of wikiBooks) {
+      for (const v of b.volumes || []) for (const img of v.images || []) contentFiles.push(img.file);
+    }
+    const allFiles = await fetchWikiFileUrls([...coverFiles, ...contentFiles]);
+    for (const b of wikiBooks) {
+      const u = allFiles.get(`${b.title}.png`);
+      if (u) coverUrls.set(b.title, u);
+    }
+    for (const f of contentFiles) {
+      const u = allFiles.get(f);
+      if (u) imageUrls.set(f, u);
+    }
+    writeBookCatalogCache(wikiBooks, coverUrls, imageUrls);
+  } catch (e) {
+    const cached = readBookCatalogCache();
+    if (!cached) throw e;
+    wikiBooks = cached.wikiBooks;
+    coverUrls = cached.coverUrls;
+    imageUrls = cached.imageUrls;
+    stale = true;
+    cachedAt = cached.savedAt;
+    staleReason = e.message;
+    console.warn('[crawl-book] wiki 目录获取失败（' + e.message + '），回退本地缓存（' + cachedAt + '）');
+  }
+
+  let mihoyoBooks = [];
+  try {
+    mihoyoBooks = bookCrawl.parseMihoyoList(await fetchJson(MIHOYO_BOOK_LIST_API));
+  } catch (e) {
+    console.warn('[crawl-book] 观测枢目录获取失败，仅使用 bilibili wiki:', e.message);
+  }
+
+  const { merged, onlyMihoyo, redundantMihoyo } = bookCrawl.matchBooks(wikiBooks, mihoyoBooks);
+
+  const byKey = new Map();
+  const entries = [];
+  for (const item of merged) {
+    const name = item.wiki.name_zh || item.wiki.title;
+    const entry = {
+      name,
+      wiki: item.wiki,
+      mihoyo: item.mihoyo,
+      coverUrl: coverUrls.get(item.wiki.title) || '',
+      imageUrls,
+      sources: ['biligame', ...(item.mihoyo ? ['mihoyo'] : [])],
+    };
+    entries.push(entry);
+    byKey.set(bookCrawl.matchKey(name), entry);
+  }
+  for (const item of onlyMihoyo) {
+    const name = item.mihoyo.name;
+    const entry = { name, wiki: null, mihoyo: item.mihoyo, coverUrl: '', imageUrls, sources: ['mihoyo'] };
+    entries.push(entry);
+    byKey.set(bookCrawl.matchKey(name), entry);
+  }
+
+  _cachedBookCatalog = { entries, byKey, wikiBooks, mihoyoBooks, coverUrls, stale, cachedAt, staleReason };
+  console.log('[getBookCatalog] wiki:', wikiBooks.length, stale ? '(缓存 ' + cachedAt + ')' : '', '/ 观测枢:', mihoyoBooks.length,
+    '/ 合并后:', entries.length, '/ 双源:', merged.filter(m => m.mihoyo).length,
+    '/ 观测枢独有:', onlyMihoyo.length,
+    '/ 跳过重复建页:', redundantMihoyo.map(r => r.name).join('、') || '无');
+  return _cachedBookCatalog;
+}
+
+/** 观测枢条目详情 → 已配对的卷（按条目缓存，重爬同一本不再请求） */
+const _mihoyoBookEntryCache = new Map();
+async function getMihoyoBookVolumes(contentId) {
+  if (!contentId) return [];
+  if (_mihoyoBookEntryCache.has(contentId)) return _mihoyoBookEntryCache.get(contentId);
+  let volumes = [];
+  try {
+    const data = await fetchJson(`${MIHOYO_ENTRY_API_BASE}${contentId}`, 45000);
+    const page = data && data.data && data.data.page;
+    if (page) {
+      const parsed = bookCrawl.parseMihoyoEntry(page);
+      volumes = bookCrawl.pairMihoyoVolumes(parsed.bases, parsed.bodies);
+    }
+  } catch (e) {
+    console.warn('[crawl-book] 观测枢条目获取失败:', contentId, e.message);
+  }
+  _mihoyoBookEntryCache.set(contentId, volumes);
+  return volumes;
+}
+
+/** 按书名解析目录条目（支持「野猪公主·卷一」这类派生名与去括号兜底） */
+function resolveBookEntry(catalog, bookName) {
+  const name = String(bookName || '').trim();
+  if (!name) return null;
+  const key = bookCrawl.matchKey(name);
+  if (catalog.byKey.has(key)) return catalog.byKey.get(key);
+  // 传入的是某一卷的名字时，回退到书名
+  const base = name.split(/[·•・]/)[0].trim();
+  if (base && catalog.byKey.has(bookCrawl.matchKey(base))) return catalog.byKey.get(bookCrawl.matchKey(base));
+  for (const [k, v] of catalog.byKey) {
+    if (k.length >= 2 && (k.includes(key) || key.includes(k))) return v;
+  }
+  return null;
+}
+
+/** 目录条目 → 可落库的书籍结构（含封面下载地址与卷正文） */
+async function buildBookCrawlResult(entry, options = {}) {
+  const withMihoyo = options.withMihoyo !== false;
+  const mihoyoVolumes = withMihoyo && entry.mihoyo
+    ? await getMihoyoBookVolumes(entry.mihoyo.contentId)
+    : [];
+  const mihoyo = entry.mihoyo ? { ...entry.mihoyo, volumes: mihoyoVolumes } : null;
+  const data = bookCrawl.buildBookPayload({ wiki: entry.wiki, mihoyo, wikiCoverUrl: entry.coverUrl });
+  if (data) {
+    data.sources = entry.sources;
+    // 给插图补上下载地址（查不到地址的保留在列表里，前端会显示占位）
+    const urlMap = entry.imageUrls || new Map();
+    data.images = (data.images || []).map(img => ({ ...img, url: urlMap.get(img.file) || '' }));
+  }
+  return data;
+}
+
+// ── 书籍爬虫：单条 ──
+ipcMain.handle('crawl-book', async (_event, bookName, options = {}) => {
+  try {
+    const catalog = await getBookCatalog();
+    const entry = resolveBookEntry(catalog, bookName);
+    if (!entry) return { success: false, error: `未找到书籍: ${bookName}` };
+    const data = await buildBookCrawlResult(entry, options);
+    if (!data) return { success: false, error: `书籍数据为空: ${bookName}` };
+    console.log('[crawl-book]', data.name_zh, '| 卷:', data.volume_count,
+      '| 正文 观测枢', data.debug.body_from_mihoyo, '/ wiki', data.debug.body_from_wiki,
+      '/ 缺', data.debug.body_missing, '| 假正文', data.debug.fake_bodies);
+    return { success: true, data };
+  } catch (e) {
+    console.error('[crawl-book] error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 书籍爬虫：批量（多选批量爬取 / 查漏补缺共用）──
+// 观测枢的正文必须逐条取（卷序无法从目录推断），因此这里串行 + 间隔，
+// 目录与 wiki 正文只在第一次调用时拉一次（进程内缓存）。
+ipcMain.handle('crawl-books', async (_event, requests, options = {}) => {
+  try {
+    const list = Array.isArray(requests) ? requests : [];
+    if (list.length === 0) return { success: true, results: [] };
+    const catalog = await getBookCatalog();
+
+    const resolved = list.map(req => {
+      const name = typeof req === 'string' ? req : (req && req.name);
+      return { req, entry: resolveBookEntry(catalog, name) };
+    });
+
+    const results = [];
+    for (const { req, entry } of resolved) {
+      const name = typeof req === 'string' ? req : (req && req.name);
+      if (!entry) { results.push({ success: false, error: `未找到书籍: ${name}`, request: req }); continue; }
+      const data = await buildBookCrawlResult(entry, options);
+      if (!data) { results.push({ success: false, error: `书籍数据为空: ${name}`, request: req }); continue; }
+      data.sources = entry.sources;
+      results.push({ success: true, data, request: req });
+      // 观测枢限流不明确，串行之间留一点间隔
+      if (entry.mihoyo) await new Promise(r => setTimeout(r, 250));
+    }
+    console.log('[crawl-books] done:', results.filter(r => r.success).length, '/', results.length);
+    return { success: true, results };
+  } catch (e) {
+    console.error('[crawl-books] error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 书籍查漏：返回线上全部书籍，供渲染进程与数据库比对 ──
+ipcMain.handle('check-missing-books', async () => {
+  try {
+    const catalog = await getBookCatalog();
+    const items = catalog.entries.map(e => ({
+      name: e.name,
+      sources: e.sources,
+      rarity: e.wiki ? e.wiki.rarity : (e.mihoyo ? null : null),
+      genre: e.wiki ? e.wiki.genres.join('、') : '',
+      country: e.wiki ? e.wiki.countries : '',
+      version: e.wiki ? bookCrawl.normalizeVersions(e.wiki.versions) : '',
+      illustrated: e.wiki ? (e.wiki.illustrated ? 1 : 0) : 0,
+      volumeCount: e.wiki ? e.wiki.volumes.length : 0,
+      // 线上这本文正文里有多少张插图——用来发现"库里的正文被旧版爬虫洗掉了插图"
+      imageCount: e.wiki
+        ? e.wiki.volumes.reduce((sum, v) => sum + ((v.images || []).length), 0)
+        : 0,
+      mihoyoId: e.mihoyo ? e.mihoyo.contentId : null,
+    }));
+    return {
+      success: true, total: items.length, items,
+      stale: !!catalog.stale, cachedAt: catalog.cachedAt || '', staleReason: catalog.staleReason || '',
+      version: await getDataVersion(), versionFallback: _dataVersionFallback,
+    };
+  } catch (e) {
+    console.error('[check-missing-books] error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// ── 书籍封面下载 ──
+// 入参：[{ name: 图标基名, url: 主地址, altUrl: 备选地址 }]
+// 返回 name → 实际落盘文件名（真实扩展名由内容嗅探决定，必须回传给写库逻辑）
+ipcMain.handle('download-book-images', async (_event, items) => {
+  if (!dbDir) return { success: false, error: '数据库未初始化' };
+  const list = Array.isArray(items) ? items : [];
+  const files = {};
+  let saved = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const item of list) {
+    const name = item && item.name;
+    if (!name) continue;
+    const candidates = [item.url, item.altUrl].filter(Boolean);
+    if (candidates.length === 0) { failed++; continue; }
+    let done = false;
+    for (const url of candidates) {
+      try {
+        const r = await downloadImage(url, name, 'png');
+        if (r && r.ok && r.filename) {
+          files[name] = r.filename;
+          if (r.existed) skipped++; else saved++;
+          done = true;
+          break;
+        }
+      } catch (_) { /* 试下一个地址 */ }
+    }
+    if (!done) failed++;
+  }
+  console.log('[download-book-images] saved:', saved, 'skipped:', skipped, 'failed:', failed, '/', list.length);
+  return { success: true, saved, skipped, failed, total: list.length, files };
 });
 
 // ═══════════════════════════════════════════════════════════

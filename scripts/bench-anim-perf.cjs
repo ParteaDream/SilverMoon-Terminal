@@ -20,6 +20,12 @@ const path = require('path')
 
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 const REAL_DATA = '/Users/stargomia/Files/GenshinWikiData'
+// 磁盘安全：见 scripts/lib/sandbox.cjs 顶部的事故说明
+const { cloneTree, sweepLeftovers, makeCleanup, installCleanupHook, guardSandboxSize, volumeFreeBytes } =
+  require('./lib/sandbox.cjs')
+sweepLeftovers(['silvermoon-anim-perf-'])
+const freeBeforeClone = volumeFreeBytes(os.tmpdir())   // tmpRoot 尚未创建，取 TMPDIR 所在卷
+
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'silvermoon-anim-perf-'))
 const profileDir = path.join(tmpRoot, 'profile')
 const dataDir = path.join(tmpRoot, 'data')
@@ -32,24 +38,15 @@ for (const f of ['silvermoon_terminal.db', 'user.db', 'user.json']) {
 // 图包很大（264M / 1.6G），不能复制；但 main.js 的 buildImagePathCache 会
 // 显式跳过软链接（entry.isSymbolicLink() -> continue），所以软链接无效。
 // 硬链接是真实 inode，isFile()/isSymbolicLink() 检查都能通过。
-function linkTree(src, dst) {
-  fs.mkdirSync(dst, { recursive: true })
-  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
-    const s2 = path.join(src, e.name), d2 = path.join(dst, e.name)
-    if (e.isDirectory()) linkTree(s2, d2)
-    else if (e.isFile()) {
-      try { fs.linkSync(s2, d2) } catch (_) { try { fs.copyFileSync(s2, d2) } catch (_) {} }
-    }
-  }
-}
 for (const entry of fs.readdirSync(REAL_DATA)) {
   if (!entry.startsWith('images-')) continue
   const src = path.join(REAL_DATA, entry)
   if (!fs.statSync(src).isDirectory()) continue
-  linkTree(src, path.join(dataDir, entry))
+  cloneTree(src, path.join(dataDir, entry))
 }
 fs.writeFileSync(path.join(profileDir, 'config.json'),
   JSON.stringify({ dbDir: dataDir, activeBaseDb: 'silvermoon_terminal.db' }, null, 2))
+guardSandboxSize(tmpRoot, { freeBefore: freeBeforeClone, label: 'bench-anim-perf.cjs' })   // 克隆退化会真占盘，这里立刻告警
 app.setPath('userData', profileDir)
 
 const only = (process.argv.find(a => a.startsWith('--scenario=')) || '').slice('--scenario='.length)
@@ -63,11 +60,13 @@ const useDev = process.argv.includes('--dev')
 let viteProcess = null
 let finished = false
 let viteOutput = ''
+// 临时目录交给共享沙箱清理；本脚本额外要回收自己拉起的 vite 子进程
+const sandboxCleanup = makeCleanup(tmpRoot)
 function cleanup() {
   if (viteProcess && !viteProcess.killed) { try { viteProcess.kill('SIGTERM') } catch (_) {} }
-  try { fs.rmSync(tmpRoot, { recursive: true, force: true }) } catch (_) {}
+  sandboxCleanup()
 }
-process.once('exit', cleanup)
+installCleanupHook(cleanup)
 function finish(payload, code) {
   if (finished) return
   finished = true

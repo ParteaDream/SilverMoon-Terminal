@@ -7,7 +7,7 @@ import { getSidebarControls, focusPageZone } from '../utils/pageKeyboard'
 import { beginHeavyAnimation } from '../utils/animPerf'
 import {
   Users, Swords, Crown, Package, Sparkle, Skull, Database, Globe, Terminal, Settings, Info,
-  PanelLeftClose, PanelLeftOpen, ScrollText
+  PanelLeftClose, PanelLeftOpen, ScrollText, UtensilsCrossed, BookMarked
 } from 'lucide-react'
 
 const navItems = [
@@ -15,6 +15,8 @@ const navItems = [
   { to: '/weapons', icon: Swords, label: '武器' },
   { to: '/artifacts', icon: Crown, label: '圣遗物' },
   { to: '/materials', icon: Package, label: '材料' },
+  { to: '/foods', icon: UtensilsCrossed, label: '食物' },
+  { to: '/books', icon: BookMarked, label: '书籍' },
   { to: '/wishes', icon: Sparkle, label: '祈愿' },
   { to: '/challenges', icon: Skull, label: '挑战' },
   { to: '/data', icon: Database, label: '数据' },

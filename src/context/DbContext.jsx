@@ -197,6 +197,48 @@ const _imageQueue = createImageQueue({
     return await window.electronAPI.checkMissingArtifacts()
   }, [])
 
+  // ── 食物爬虫 ──
+  const crawlFood = useCallback(async (foodName, options = {}) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.crawlFood(foodName, options)
+  }, [])
+
+  const crawlFoods = useCallback(async (requests, options = {}) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.crawlFoods(requests, options)
+  }, [])
+
+  const checkMissingFoods = useCallback(async () => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.checkMissingFoods()
+  }, [])
+
+  const downloadFoodImages = useCallback(async (iconNames) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.downloadFoodImages(iconNames)
+  }, [])
+
+  // ── 书籍爬虫 ──
+  const crawlBook = useCallback(async (bookName, options = {}) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.crawlBook(bookName, options)
+  }, [])
+
+  const crawlBooks = useCallback(async (requests, options = {}) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.crawlBooks(requests, options)
+  }, [])
+
+  const checkMissingBooks = useCallback(async () => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.checkMissingBooks()
+  }, [])
+
+  const downloadBookImages = useCallback(async (items) => {
+    if (!window.electronAPI) return { success: false, error: 'electronAPI not available' }
+    return await window.electronAPI.downloadBookImages(items)
+  }, [])
+
   const cleanupScrapeWindow = useCallback(async () => {
     if (!window.electronAPI) return
     return await window.electronAPI.cleanupScrapeWindow()
@@ -304,7 +346,7 @@ const _imageQueue = createImageQueue({
             if (window.electronAPI.setDualDbMode) {
               await window.electronAPI.setDualDbMode(ddMode)
             }
-            const DEFAULT_VIEWS = { characters: 'gallery', weapons: 'gallery', artifacts: 'gallery', materials: 'gallery', wishes: 'images' }
+            const DEFAULT_VIEWS = { characters: 'gallery', weapons: 'gallery', artifacts: 'gallery', materials: 'gallery', foods: 'gallery', books: 'gallery', wishes: 'images' }
             if (res.config.defaultViewMode) {
               const merged = { ...DEFAULT_VIEWS, ...res.config.defaultViewMode }
               setDefaultViewMode(merged)
@@ -330,6 +372,8 @@ const _imageQueue = createImageQueue({
       getDbPath, updateDatabase, backupDatabase, importDatabase, exportSeed,
       listBackups, createBackup, restoreBackup, deleteBackup,
       crawlCharacter, crawlWeapon, checkMissingWeapons, crawlArtifact, checkMissingArtifacts, crawlWishes, crawlWishImages, challengeCatalog, challengeDetail, downloadBannerImage, cleanupScrapeWindow, downloadMaterialImage, cleanUnusedImages,
+      crawlFood, crawlFoods, checkMissingFoods, downloadFoodImages,
+      crawlBook, crawlBooks, checkMissingBooks, downloadBookImages,
       checkDbIntegrity, repairWebsites,
       toggleDevMode, toggleDualDbMode,
       listBaselineDbs, switchBaselineDb,

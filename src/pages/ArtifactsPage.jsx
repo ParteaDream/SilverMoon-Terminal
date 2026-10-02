@@ -1,7 +1,9 @@
-import { useState, useEffect, useLayoutEffect, useRef, memo } from 'react'
+import { useState, useEffect, useRef, memo } from 'react'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
 import { loadPageStateSync } from '../utils/pageStateStore'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { getScroller } from '../utils/scrollMemory.mjs'
 import { useLazyImage, bumpLazyRevision } from '../hooks/useLazyImage'
 import DataTable, { useSortFilter, SortBar, FilterBar } from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
@@ -35,7 +37,7 @@ const RARITY_COLOR = { 1: 'text-gray-300', 2: 'text-green-400', 3: 'text-blue-40
 
 export default function ArtifactsPage() {
   const { query } = useDb()
-  const { restorePage, savePage, push, consumeBackToList } = useNav()
+  const { push } = useNav()
   const [artifacts, setArtifacts] = useState([])
 
   // ── 同步初始化：仅 viewMode 从缓存恢复 ──
@@ -53,122 +55,44 @@ export default function ArtifactsPage() {
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({})
   const [selected, setSelected] = useState(new Set())
-  const restoringScroll = useRef(false)
-  const [entering, setEntering] = useState(() => {
-    if (sessionStorage.getItem('_nav_backToList')) return true
-    return false
-  })
   const [contextMenu, setContextMenu] = useState(null)
-  // 用 ref 保持最新状态
-  const stateRef = useRef({ viewMode, search, sortKeys: [], filters: {} })
-  stateRef.current = { viewMode, search }
 
+  // ── 滚动位置记忆 ──
+  // 状态字段随滚动一起落盘；返回列表时按「内容锚点」精确还原（见 utils/scrollMemory.mjs）。
+  // stateRef 的实际内容在 useSortFilter 之后填充。
+  const stateRef = useRef({})
+  const { restoring, readSaved, restore, saveNow, shouldRestore } = useScrollMemory('artifacts', {
+    getState: () => stateRef.current,
+  })
+
+  // ── 挂载：返回则恢复（状态 + 滚动位置），从侧栏进入则置顶 ──
   useEffect(() => {
-    const isBack = consumeBackToList()
-    if (isBack) {
-      // 从详情页返回，模块缓存可能已过期，强制刷新
-      _invalidateArtifactsCache()
-      // 同步预设 scrollY 消除置顶闪烁
-      const cached = loadPageStateSync('artifacts')
-      if (cached?.scrollY > 0) {
-        const m = document.querySelector('main')
-        if (m) m.scrollTop = cached.scrollY
-      }
-      loadData()
-      restoringScroll.current = true
-      setEntering(true)
-      setTimeout(() => setEntering(false), 150)
-      restorePage('artifacts').then(saved => {
-        if (saved) {
-          if (saved.viewMode) setViewMode(saved.viewMode)
-          if (saved.search) setSearch(saved.search)
-          // 等待 React 处理搜索后再恢复滚动位置
-          requestAnimationFrame(() => {
-          const main = document.querySelector('main')
-          // 先尝试 scrollToItem（精确计算 scrollY）
-          const scrollToId = sessionStorage.getItem('_nav_scroll_to_id')
-          if (scrollToId) {
-            sessionStorage.removeItem('_nav_scroll_to_id')
-            const el = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
-            const m = document.querySelector('main')
-            if (el && m) {
-              const elRect = el.getBoundingClientRect()
-              const mRect = m.getBoundingClientRect()
-              const elTopInMain = elRect.top - mRect.top + m.scrollTop
-              const targetY = elTopInMain - (m.clientHeight / 2) + (elRect.height / 2)
-              m.scrollTo(0, Math.max(0, Math.round(targetY)))
-              setTimeout(() => { restoringScroll.current = false }, 300)
-              setTimeout(() => m.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
-              return
-            }
-            // 元素不在 DOM（可能被筛选隐藏）：后台重试，同时走 scrollY 回退
-            const retryScrollToItem = (n) => {
-              const el2 = document.querySelector(`[data-item-id="${CSS.escape(scrollToId)}"]`)
-              const m2 = document.querySelector('main')
-              if (el2 && m2) {
-                const er = el2.getBoundingClientRect()
-                const mr = m2.getBoundingClientRect()
-                const et = er.top - mr.top + m2.scrollTop
-                const ty = et - (m2.clientHeight / 2) + (er.height / 2)
-                m2.scrollTo(0, Math.max(0, Math.round(ty)))
-                setTimeout(() => { restoringScroll.current = false }, 300)
-                setTimeout(() => m2.dispatchEvent(new Event('scroll', { bubbles: true })), 150)
-              } else if (n > 0) {
-                setTimeout(() => retryScrollToItem(n - 1), 200)
-              }
-            }
-            setTimeout(() => retryScrollToItem(15), 200)
-            // 不 return — 走下方 scrollY 回退作为近似定位
-          }
-          // 否则恢复保存的 scrollY
-          if (saved.scrollY != null && saved.scrollY > 0) {
-            restoringScroll.current = true
-            const targetY = Number(saved.scrollY)
-            const tryScroll = (attempt) => {
-              const main = document.querySelector('main')
-              if (!main) return
-              if (main.scrollHeight > targetY) {
-                main.scrollTo(0, targetY)
-                setTimeout(() => { restoringScroll.current = false }, 300)
-                setTimeout(() => {
-                  if (main) main.dispatchEvent(new Event('scroll', { bubbles: true }))
-                }, 150)
-              } else if (attempt > 0) {
-                setTimeout(() => tryScroll(attempt - 1), 200)
-              }
-            }
-            setTimeout(() => tryScroll(10), 100)
-          }
-          }) // end requestAnimationFrame
-        }
-      })
-    } else {
-      // 从侧边栏进入：使用全局默认视图模式，重置滚动位置
-      const main = document.querySelector('main')
-      if (main) main.scrollTo(0, 0)
+    if (!shouldRestore()) {
+      const main = getScroller()
+      if (main) main.scrollTop = 0
       try {
         const defs = JSON.parse(localStorage.getItem('default_view_mode') || '{}')
         if (defs.artifacts) setViewMode(defs.artifacts)
       } catch (_) {}
       loadData()
+      return undefined
     }
+    let cancelled = false
+    ;(async () => {
+      // 从详情页返回，模块缓存可能已过期，强制刷新
+      _invalidateArtifactsCache()
+      const saved = readSaved()
+      const st = saved && saved.state
+      if (st) {
+        if (st.viewMode) setViewMode(st.viewMode)
+        if (st.search) setSearch(st.search)
+      }
+      await loadData()
+      if (cancelled) return
+      await restore(saved && saved.snapshot)
+    })()
+    return () => { cancelled = true }
   }, [])
-
-  useLayoutEffect(() => {
-    const main = document.querySelector('main')
-    if (!main) return
-    let timer = null
-    const onScroll = () => {
-      clearTimeout(timer)
-      if (restoringScroll.current) return
-      timer = setTimeout(() => savePage('artifacts', stateRef.current), 200)
-    }
-    main.addEventListener('scroll', onScroll, { passive: true })
-    return () => {
-      main.removeEventListener('scroll', onScroll)
-      clearTimeout(timer)
-    }
-  }, [savePage])
 
   async function loadData() {
     if (_cachedArtifacts) { setArtifacts(_cachedArtifacts); return }
@@ -184,7 +108,7 @@ export default function ArtifactsPage() {
   }, [selected, artifacts])
 
   function navigateToDetail(id) {
-    savePage('artifacts', stateRef.current)
+    saveNow()
     push(`/artifacts/${id}`)
   }
 
@@ -262,15 +186,13 @@ export default function ArtifactsPage() {
     showFilters, setShowFilters, filterableCols, filterOptions,
     processed, activeFilterCount,
   } = useSortFilter(filtered, columns)
+  stateRef.current = { viewMode, search, sortKeys, filters }
 
   // 排序/筛选变化时通知懒加载图片重新检查视口
   useEffect(() => { bumpLazyRevision() }, [sortKeys, filters])
 
-  // 用 ref 保持最新状态
-  stateRef.current = { viewMode, search, sortKeys, filters }
-
   return (
-    <div className={`p-6 ${entering ? 'opacity-0' : 'opacity-100'} transition-opacity duration-100`}>
+    <div className={`p-6 ${restoring ? 'opacity-0' : 'opacity-100'} transition-opacity duration-100`}>
       <div className="flex items-center justify-between mb-4">
         <div><h1 className="text-lg font-semibold tracking-tight">圣遗物</h1><p className="text-xs text-surface-500 mt-0.5">{processed.length} 条记录</p></div>
         <div className="flex items-center gap-2">

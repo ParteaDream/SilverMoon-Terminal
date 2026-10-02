@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
-import { savePageStateSync, loadPageStateSync, flushPageStates } from '../utils/pageStateStore'
+import { flushPageStates, saveScrollStateSync, loadScrollState } from '../utils/pageStateStore'
+import { applyScrollSnapshot, captureScrollSnapshot } from '../utils/scrollMemory.mjs'
 import DataTable from '../components/DataTable'
 import SearchBar from '../components/SearchBar'
 import EditModal, { FormInput } from '../components/EditModal'
@@ -509,7 +510,7 @@ function RelatedLinksDisplay({ sourceId, sourceType, onBeforeNavigate }) {
 
 export default function GameDataPage() {
   const { query, devMode } = useDb()
-  const { restorePage, savePage, consumeBackToList } = useNav()
+  const { consumeBackToList } = useNav()
   const restoringScroll = useRef(false)
   const listScrollRef = useRef(null)  // 左侧数据列表滚动容器
   const [data, setData] = useState([])
@@ -706,32 +707,31 @@ export default function GameDataPage() {
         } catch (_) {}
         // 回退到 pageStateStore
         if (!saved) {
-          saved = await restorePage('gamedata')
+          const stored = await loadScrollState('gamedata')
+          if (stored) {
+            saved = { scrollTop: stored.snapshot.scrollTop, atBottom: stored.snapshot.atBottom, anchor: stored.snapshot.anchor, activeDetailId: stored.state?.activeDetailId }
+          }
         }
         if (!saved) { restoringScroll.current = false; return }
         if (saved.activeDetailId != null) {
           setActiveDetailId(saved.activeDetailId)
         }
-        if (saved.scrollY != null && saved.scrollY > 0) {
-          const targetY = Number(saved.scrollY)
-          requestAnimationFrame(() => {
-            const el = listScrollRef.current
-            if (!el) { restoringScroll.current = false; return }
-            if (el.scrollHeight > targetY) {
-              el.scrollTo(0, targetY)
-              setTimeout(() => {
-                restoringScroll.current = false
-                if (el) el.dispatchEvent(new Event('scroll', { bubbles: true }))
-              }, 300)
-            } else {
-              restoringScroll.current = false
-            }
-          })
-        } else {
+        requestAnimationFrame(async () => {
           const el = listScrollRef.current
-          if (el) el.scrollTo(0, 0)
+          if (!el) { restoringScroll.current = false; return }
+          const snapshot = { scrollTop: Number(saved.scrollTop || saved.scrollY || 0), atBottom: !!saved.atBottom, anchor: saved.anchor || null }
+          if (snapshot.scrollTop > 0 || snapshot.atBottom) {
+            // 左侧列表是带 content-visibility 的虚拟化表格：位置要靠行锚点逐帧收敛
+            await applyScrollSnapshot(el, snapshot, {
+              itemSelector: '[data-item-id]',
+              isCancelled: () => !listScrollRef.current,
+            })
+          } else {
+            el.scrollTo(0, 0)
+          }
           restoringScroll.current = false
-        }
+          if (listScrollRef.current) listScrollRef.current.dispatchEvent(new Event('scroll', { bubbles: true }))
+        })
       } else {
         restoringScroll.current = false
       }
@@ -767,7 +767,9 @@ export default function GameDataPage() {
       if (restoringScroll.current) return
       if (!listScrollRef.current) return
       timer = setTimeout(() => {
-        savePageStateSync('gamedata', listScrollRef.current.scrollTop, { activeDetailId })
+        const el = listScrollRef.current
+        if (!el) return
+        saveScrollStateSync('gamedata', captureScrollSnapshot(el, { itemSelector: '[data-item-id]' }), { activeDetailId })
       }, 200)
     }
     el.addEventListener('scroll', onScroll, { passive: true })
@@ -775,15 +777,14 @@ export default function GameDataPage() {
       el.removeEventListener('scroll', onScroll)
       clearTimeout(timer)
     }
-  }, [savePageStateSync, activeDetailId])
+  }, [activeDetailId])
 
   // activeDetailId 变化时立即触发保存（不限滚动事件）
   useEffect(() => {
     const el = listScrollRef.current
     if (data.length === 0) return
-    const scrollY = el ? el.scrollTop : 0
-    savePageStateSync('gamedata', scrollY, { activeDetailId })
-  }, [activeDetailId, data, savePageStateSync])
+    saveScrollStateSync('gamedata', el ? captureScrollSnapshot(el, { itemSelector: '[data-item-id]' }) : null, { activeDetailId })
+  }, [activeDetailId, data])
 
   return (
     <div className="pt-6 px-6 pb-0 flex gap-4 h-full min-h-0">
@@ -996,12 +997,17 @@ export default function GameDataPage() {
             <RelatedLinksDisplay key={relatedLinksKey} sourceId={activeDetail.id} sourceType="game_data"
               onBeforeNavigate={() => {
                 const el = listScrollRef.current
-                const scrollY = el ? el.scrollTop : 0
+                const snap = el ? captureScrollSnapshot(el, { itemSelector: '[data-item-id]' }) : null
                 // 同时保存到 pageStateStore 和 sessionStorage
                 // sessionStorage 不会被后续页面的保存覆盖，确保"上一步"能恢复到当前条目
-                savePageStateSync('gamedata', scrollY, { activeDetailId })
+                saveScrollStateSync('gamedata', snap, { activeDetailId })
                 try {
-                  sessionStorage.setItem('_nav_prelink_gamedata', JSON.stringify({ scrollY, activeDetailId }))
+                  sessionStorage.setItem('_nav_prelink_gamedata', JSON.stringify({
+                    scrollTop: snap ? snap.scrollTop : 0,
+                    atBottom: !!(snap && snap.atBottom),
+                    anchor: snap ? snap.anchor : null,
+                    activeDetailId,
+                  }))
                 } catch (_) {}
                 flushPageStates()
               }}

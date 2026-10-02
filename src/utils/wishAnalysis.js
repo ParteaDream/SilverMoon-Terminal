@@ -71,7 +71,9 @@ export function computePityFromArchive(itemsByType) {
       for (let i = n - 1; i >= 0; i--) {
         if (Number(list[i].rank_type) === 5) seq.push(list[i].name)
       }
-      for (let i = 0; i < seq.length - 1; i++) {
+      // 大保底命中必然形成「常驻 → UP」的交替（大保底本身必出 UP，不会连续两次常驻），
+      // 因此按 2 步进配对 (seq[i], seq[i+1])：前者是 UP、后者是它前面那次歪掉的常驻五星。
+      for (let i = 0; i + 1 < seq.length; i += 2) {
         if (stdList.includes(seq[i])) break
         if (!stdList.includes(seq[i + 1])) break
         crStreak++

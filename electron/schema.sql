@@ -242,6 +242,91 @@ CREATE TABLE IF NOT EXISTS materials (
   sort_order INTEGER DEFAULT 0
 );
 
+-- ── 食物：一个条目 = 一道菜（三形态合并），或一份无法烹饪的食材/饮品 ──
+CREATE TABLE IF NOT EXISTS foods (
+  id INTEGER PRIMARY KEY,             -- 普通形态的 nanoka 物品 ID（无普通形态时取任意形态）
+  name_zh TEXT NOT NULL,              -- 普通形态名称，也是三形态的分组基名
+  name_en TEXT,
+  rarity INTEGER DEFAULT 1,
+  type TEXT DEFAULT 'dish',           -- dish 正常料理 / special 特殊料理 / drink 饮品 / event 活动料理 / ingredient 食材
+  category TEXT,                      -- 功效类别，如「提升攻击、提升暴击」
+  region TEXT,                        -- 所属国家/地区（取自 wiki）
+  description_zh TEXT,                -- 普通形态简介
+  effect TEXT,                        -- 普通形态效果
+  source TEXT,                        -- 获取方式
+  image TEXT,                         -- 普通形态图片（文件名）
+  has_variants INTEGER DEFAULT 0,     -- 是否存在「奇怪的/美味的」两种派生形态
+  recipe_source TEXT,                 -- 食谱获取方式
+  recipe_price TEXT,                  -- 食谱价格
+  special_char TEXT,                  -- 特殊料理对应角色
+  specialty TEXT,                     -- 特殊料理效果说明
+  wiki_title TEXT,                    -- bilibili wiki 页面标题（回爬时优先命中）
+  sort_order INTEGER DEFAULT 0
+);
+
+-- ── 食物形态：同一道菜的「奇怪的」/「普通」/「美味的」三个版本 ──
+-- 三者名称、简介、效果各不相同（图片在 nanoka 中共用普通形态图标，可单独覆盖）
+CREATE TABLE IF NOT EXISTS food_variants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  food_id INTEGER NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                 -- weird 奇怪的 / normal 普通 / tasty 美味的
+  item_id INTEGER,                    -- 该形态在 nanoka 中的物品 ID
+  name_zh TEXT,
+  name_en TEXT,
+  description_zh TEXT,
+  effect TEXT,
+  image TEXT,
+  rarity INTEGER,
+  UNIQUE(food_id, kind)
+);
+
+-- ── 食物 → 烹饪材料（与材料板块条目关联）──
+CREATE TABLE IF NOT EXISTS food_materials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  food_id INTEGER NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
+  material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  quantity TEXT,
+  UNIQUE(food_id, material_id)
+);
+
+-- ── 书籍：一个条目 = 一部书（多卷合并），正文按卷存在 book_volumes ──
+-- 元数据（稀有度/体裁/国家/实装版本/图鉴）以 bilibili wiki 的语义化属性为准，
+-- 正文与作者优先取米游社观测枢（HTML 段落规整），缺失时回退 wiki 的卷N内容。
+CREATE TABLE IF NOT EXISTS books (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name_zh TEXT NOT NULL UNIQUE,       -- 书名（系列名，非单卷名）
+  name_en TEXT,
+  rarity INTEGER DEFAULT 0,           -- 稀有度 0-4（游戏内书籍最高 4 星）
+  genre TEXT,                         -- 体裁，多值用「、」分隔（小说/诗歌/史书…）
+  country TEXT,                       -- 国家/地区，多值用「、」分隔（蒙德/璃月…）
+  version TEXT,                       -- 实装版本，多值用「、」分隔（如「1.0、2.6」）
+  source TEXT,                        -- 获取方式（汇总各卷获取地点）
+  source_type TEXT,                   -- 获取方式分类（观测枢：地图探索/NPC购买/任务获取）
+  description_zh TEXT,                -- 描述（各卷描述去重合并）
+  author TEXT,                        -- 作者（观测枢）
+  image TEXT,                         -- 封面图片（文件名）
+  wiki_title TEXT,                    -- bilibili wiki 页面标题（回爬时优先命中）
+  mihoyo_id INTEGER,                  -- 米游社观测枢 content_id
+  related_chars TEXT,                 -- 相关角色（wiki）
+  illustrated INTEGER DEFAULT 0,      -- 是否收录进游戏内「图鉴」
+  volume_count INTEGER DEFAULT 0,     -- 卷数（由 book_volumes 同步）
+  sort_order INTEGER DEFAULT 0
+);
+
+-- ── 书籍卷/章：正文的最小单位 ──
+CREATE TABLE IF NOT EXISTS book_volumes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  volume_no INTEGER NOT NULL,         -- 卷序，从 1 开始（排版与排序的唯一依据）
+  title_zh TEXT,                      -- 卷名（如「野猪公主·卷一」）
+  description_zh TEXT,                -- 本卷描述
+  content TEXT,                       -- 本卷正文
+  source TEXT,                        -- 本卷获取地点
+  author TEXT,                        -- 本卷作者
+  content_source TEXT,                -- 正文来源：mihoyo / biligame（便于排查与重爬）
+  UNIQUE(book_id, volume_no)
+);
+
 CREATE TABLE IF NOT EXISTS perilous_trail_bosses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       challenge_id INTEGER NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,

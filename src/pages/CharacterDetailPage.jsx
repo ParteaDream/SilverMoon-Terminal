@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
 import { useNav } from '../context/NavContext'
@@ -9,14 +9,17 @@ import { useImageDrag } from '../hooks/useImageDrag'
 import { useDetailScroll } from '../hooks/useDetailState'
 import {
   ArrowLeft, Star, Edit3, Plus, Trash2, Image, ChevronDown, ChevronRight, X,
-  Zap, BookOpen, Crown, Sparkles, User, Info, MapPin, Calendar, Sword, Shirt, UtensilsCrossed, FileText, FlaskConical, Upload, CheckCircle2, Copy, GripVertical
+  Zap, BookOpen, Crown, Sparkles, User, Info, MapPin, Calendar, Sword, Shirt, UtensilsCrossed, FileText, FlaskConical, Upload, CheckCircle2, Copy, GripVertical, ChefHat
 } from 'lucide-react'
 import EditModal, { FormInput, FormSelect, SearchSelect, ImagePicker } from '../components/EditModal'
 import ColoredText from '../components/ColoredText'
+import Reader from '../components/Reader'
 import Lightbox from '../components/Lightbox'
 import GalleryDropConfirm from '../components/GalleryDropConfirm'
 import ColorTextInput from '../components/ColorTextInput'
 import { ELEM_ID_TO_SETTINGS_INDEX, stripFormatting } from '../utils/colorMarkup'
+import { findCharacterDish, findCharacterDishPrototype } from '../utils/dishLinks'
+import { FOOD_TYPES, FOOD_TYPE_STYLE } from '../utils/foodMeta'
 
 const ELEMENT_COLORS = {
   1: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20', glow: 'shadow-red-500/10' },
@@ -77,7 +80,8 @@ function CharacterDetailContent() {
   const { id } = useParams()
   const location = useLocation()
   const { query, importImage } = useDb()
-  const { backToList, consumeBackToList } = useNav()
+  const { backToList, consumeBackToList, push } = useNav()
+  const { saveNow } = usePageMemory()
   const { launchTrainCalc } = useTerminal()
   const [character, setCharacter] = useState(null)
   const [elements, setElements] = useState([])
@@ -114,6 +118,8 @@ function CharacterDetailContent() {
   const [effectForm, setEffectForm] = useState({ name: '', content: '' })
   const [form, setForm] = useState({})
   const [dish, setDish] = useState({ name_zh: '', description_zh: '', effect: '', image: null })
+  const [dishFood, setDishFood] = useState(null)   // 食物板块里对应的条目（特殊料理双向跳转用）
+  const [dishPrototype, setDishPrototype] = useState(null)  // 该特殊料理的原型（基础菜），同样跳食物板块
   const [gallery, setGallery] = useState([])   // 自定义图库 [{label, filename}]
   const [elementColors, setElementColors] = useState(null)  // 元素颜色配置
   const [useNamecardBg, setUseNamecardBg] = useState(false) // 立绘使用名片背景
@@ -122,33 +128,15 @@ function CharacterDetailContent() {
   const [outfitDragOver, setOutfitDragOver] = useState({})   // { [outfitId]: true } — 衣装卡片的拖放高亮
   const [storyPreview, setStoryPreview] = useState(null)       // 衣装故事预览
   const [readerOpen, setReaderOpen] = useState(false)           // 角色故事阅读器
-  const [readerMode, setReaderMode] = useState('scroll')        // scroll | page
-  const [readerTheme, setReaderTheme] = useState('dark')        // dark | light | sepia
   const [statLevel, setStatLevel] = useDetailState('statLevel', 90) // 属性查看等级: 80/90/95/100
   const [travelerElement, setTravelerElement] = useDetailState('travelerElement', null) // 旅行者当前选中的元素
   useDetailScroll('character', id)  // 保存/恢复详情页滚动位置
 
-  const readerMounted = useRef(false)
-  useEffect(() => {
-    if (!readerMounted.current) return
-    window.electronAPI?.setUserConfig('readerTheme', readerTheme)
-  }, [readerTheme])
-  useEffect(() => {
-    if (!readerMounted.current) return
-    window.electronAPI?.setUserConfig('readerMode', readerMode)
-  }, [readerMode])
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.electronAPI?.getUserConfig()
-        if (res?.success && res.config) {
-          if (res.config.readerTheme) setReaderTheme(res.config.readerTheme)
-          if (res.config.readerMode) setReaderMode(res.config.readerMode)
-        }
-      } catch (_) {}
-      readerMounted.current = true
-    })()
-  }, [])
+  // 角色故事 → 通用阅读器的章节结构（书籍板块共用同一套阅读器）
+  const storyChapters = useMemo(
+    () => stories.map(s => ({ id: s.id, title: s.title_zh, content: s.content })),
+    [stories]
+  )
 
   // 挂载时加载数据（状态恢复由 useDetailState 的懒初始化自动处理）
   useEffect(() => {
@@ -217,6 +205,11 @@ function CharacterDetailContent() {
         if (c.dish_name) {
           setDish({ name_zh: c.dish_name || '', description_zh: c.dish_description || '', effect: c.dish_effect || '', image: c.dish_image || null })
         }
+        // 特殊料理 ↔ 食物板块 / 料理原型：命中就给出跳转入口（匹配规则见 utils/dishLinks.js）
+        const dishFoodHit = await findCharacterDish(query, { characterName: c.name_zh, dishName: c.dish_name })
+        setDishFood(dishFoodHit)
+        // 料理原型以角色名为锚点找那道被变化的基础菜（同上）
+        setDishPrototype(await findCharacterDishPrototype(query, { characterName: c.name_zh, dishFoodId: dishFoodHit?.id }))
         if (c.namecard_name) {
           setNamecardName(c.namecard_name)
         } else {
@@ -325,6 +318,22 @@ function CharacterDetailContent() {
     } finally {
       setSaving(false)
     }
+  }
+
+  // ── 特殊料理 → 食物板块条目 ──
+  // saveNow 先把本页的位置/状态落盘，从食物页返回时还能回到原处；
+  // 走 push 而不是裸 navigate，导航栈里才有这一步（浮动「上一步」可用）。
+  function openDishFood() {
+    if (!dishFood) return
+    saveNow()
+    push(`/foods/${dishFood.id}`)
+  }
+
+  // ── 特殊料理 → 料理原型（基础菜，同样落在食物板块） ──
+  function openDishPrototype() {
+    if (!dishPrototype) return
+    saveNow()
+    push(`/foods/${dishPrototype.id}`)
   }
 
   // ── Save namecard ──
@@ -1304,6 +1313,38 @@ function CharacterDetailContent() {
                       <p className="text-xs text-surface-300 leading-relaxed mt-0.5"><ColoredText text={dish.effect}  effectMap={effectMap} /></p>
                     </div>
                   )}
+                  {dishFood && (
+                    <button
+                      onClick={openDishFood}
+                      title={`在食物板块查看「${dishFood.name_zh}」`}
+                      className="mt-3 inline-flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg text-[11px]
+                                 bg-surface-800/60 border border-surface-700 text-surface-300
+                                 hover:border-primary-500/50 hover:text-primary-300 hover:bg-surface-800 transition-colors"
+                    >
+                      <UtensilsCrossed className="w-3.5 h-3.5" />
+                      <span className="text-surface-500">食物板块</span>
+                      <span className={`px-1.5 py-0.5 rounded-full border text-[10px] ${FOOD_TYPE_STYLE[dishFood.type] || FOOD_TYPE_STYLE.other}`}>
+                        {FOOD_TYPES[dishFood.type] || dishFood.type}
+                      </span>
+                      <span className="font-medium text-surface-200">{dishFood.name_zh}</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {/* 料理原型：特殊料理都是某道基础菜的衍生版本，直接给出原型入口 */}
+                  {dishPrototype && (
+                    <button
+                      onClick={openDishPrototype}
+                      title={`料理原型：「${dishPrototype.name_zh}」`}
+                      className="mt-3 ml-0 sm:ml-2 inline-flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg text-[11px]
+                                 bg-surface-800/60 border border-surface-700 text-surface-300
+                                 hover:border-amber-500/50 hover:text-amber-300 hover:bg-surface-800 transition-colors"
+                    >
+                      <ChefHat className="w-3.5 h-3.5" />
+                      <span className="text-surface-500">料理原型</span>
+                      <span className="font-medium text-surface-200">{dishPrototype.name_zh}</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
@@ -1459,17 +1500,16 @@ function CharacterDetailContent() {
 
 
       
-      {/* ═══ Story Reader ═══ */}
+      {/* ═══ Story Reader（通用阅读器，与书籍板块共用） ═══ */}
       {readerOpen && (
-        <StoryReader
+        <Reader
           key="story-reader"
-          stories={stories}
-          characterName={character?.name_zh}
+          chapters={storyChapters}
+          title={character?.name_zh}
+          subtitle={`角色故事 · 共 ${storyChapters.length} 篇`}
+          progressKey={`character_${id}_story`}
+          emptyText="暂无内容"
           onClose={() => setReaderOpen(false)}
-          mode={readerMode}
-          onModeChange={(m) => setReaderMode(m)}
-          theme={readerTheme}
-          onThemeChange={setReaderTheme}
         />
       )}
 
@@ -2315,247 +2355,6 @@ function getLevelStat(character, level, stat) {
   return character[key]
 }
 
-
-// ═══════════════════════════════════════════════
-// 角色故事阅读器
-// ═══════════════════════════════════════════════
-const READER_THEMES = {
-  dark: {
-    name: '暗色', bg: 'bg-[#1a1a2e]', card: 'bg-[#1f1f35]',
-    text: 'text-[#c8c8d4]', textMuted: 'text-[#8888a0]', heading: 'text-[#e0e0f0]',
-    chapterText: 'text-white/70', chapterHover: 'hover:text-white/90 hover:bg-white/8',
-    buttonBg: 'bg-white/8', buttonHover: 'hover:bg-white/14', buttonText: 'text-white/70',
-    buttonActive: 'bg-white/14 text-white', border: 'border-[#2a2a45]', borderSubtle: 'border-white/8',
-
-    chapterActive: 'bg-primary-500/12 text-primary-400 border-l-2 border-primary-500',
-    chapterInactive: 'text-white/70 border-l-2 border-transparent',
-    toggleBg: 'bg-white/10', toggleActive: 'bg-white/18 text-white', toggleInactive: 'text-white/35 hover:text-white/60',
-  },
-  sepia: {
-    name: '仿古', bg: 'bg-[#f5ecd7]', card: 'bg-[#ede0c8]',
-    text: 'text-[#5c4b3a]', textMuted: 'text-[#8b7b6a]', heading: 'text-[#3d2b1a]',
-    chapterText: 'text-[#3d2b1a]/75', chapterHover: 'hover:text-[#2a1808] hover:bg-[#d4c4a8]/40',
-    buttonBg: 'bg-[#d4c4a8]/60', buttonHover: 'hover:bg-[#c8b490]/70', buttonText: 'text-[#5c4b3a]/70',
-    buttonActive: 'bg-[#c8b490]/70 text-[#3d2b1a]', border: 'border-[#d4c4a8]', borderSubtle: 'border-[#d4c4a8]/50',
-
-    chapterActive: 'bg-[#c8a060]/20 text-[#8b6020] border-l-2 border-[#c8a060]',
-    chapterInactive: 'text-[#3d2b1a]/75 border-l-2 border-transparent',
-    toggleBg: 'bg-[#d4c4a8]/50', toggleActive: 'bg-[#c8b490]/70 text-[#3d2b1a]', toggleInactive: 'text-[#5c4b3a]/40 hover:text-[#5c4b3a]/60',
-  },
-  light: {
-    name: '亮色', bg: 'bg-[#fafaf9]', card: 'bg-[#f2f1ef]',
-    text: 'text-[#2d2d2d]', textMuted: 'text-[#7a7a7a]', heading: 'text-[#1a1a1a]',
-    chapterText: 'text-[#1a1a1a]/75', chapterHover: 'hover:text-[#0a0a0a] hover:bg-[#e8e8e6]/70',
-    buttonBg: 'bg-[#e8e8e6]', buttonHover: 'hover:bg-[#dddcd8]', buttonText: 'text-[#2d2d2d]/70',
-    buttonActive: 'bg-[#e0e0de] text-[#1a1a1a]', border: 'border-[#e0e0de]', borderSubtle: 'border-[#e8e8e6]',
-
-    chapterActive: 'bg-primary-500/8 text-primary-600 border-l-2 border-primary-500',
-    chapterInactive: 'text-[#1a1a1a]/75 border-l-2 border-transparent',
-    toggleBg: 'bg-[#e8e8e6]', toggleActive: 'bg-[#e0e0de] text-[#1a1a1a]', toggleInactive: 'text-[#2d2d2d]/35 hover:text-[#2d2d2d]/55',
-  },
-}
-
-function StoryReader({ stories, characterName, onClose, mode, onModeChange, theme, onThemeChange }) {
-  const [activeIdx, setActiveIdx] = useState(0)
-  const [animating, setAnimating] = useState(false)
-  const [animDir, setAnimDir] = useState(1)
-  const contentRef = useRef(null)
-  const scrollJumping = useRef(false)  // 侧栏点击跳转中，暂停 Observer 更新
-  const t = READER_THEMES[theme] || READER_THEMES.dark
-  const story = stories[activeIdx]
-  const hasPrev = activeIdx > 0
-  const hasNext = activeIdx < stories.length - 1
-
-  const goToChapter = useCallback((idx) => {
-    if (idx < 0 || idx >= stories.length || animating) return
-    setAnimDir(idx > activeIdx ? 1 : -1)
-    setAnimating(true)
-    setTimeout(() => { setActiveIdx(idx); setAnimating(false) }, 250)
-  }, [activeIdx, stories.length, animating])
-
-  // ── Scroll mode: IntersectionObserver auto-highlight current chapter ──
-  useEffect(() => {
-    if (mode !== 'scroll' || !contentRef.current) return
-    const visibleChapters = new Map()  // idx -> max ratio seen
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (scrollJumping.current) return
-        for (const entry of entries) {
-          const idx = parseInt(entry.target.dataset.chapterIdx, 10)
-          if (isNaN(idx)) continue
-          if (entry.isIntersecting) {
-            visibleChapters.set(idx, Math.max(visibleChapters.get(idx) || 0, entry.intersectionRatio))
-          } else {
-            visibleChapters.delete(idx)
-          }
-        }
-        // 选出在最上方且可见比例最高的章节（优先取 DOM 顺序靠前的）
-        if (visibleChapters.size > 0) {
-          let bestIdx = Infinity
-          for (const idx of visibleChapters.keys()) {
-            if (idx < bestIdx) bestIdx = idx
-          }
-          setActiveIdx(bestIdx)
-        }
-      },
-      { root: contentRef.current, threshold: [0, 0.1, 0.3, 0.5, 0.7] }
-    )
-    const els = contentRef.current.querySelectorAll('[data-chapter-idx]')
-    els.forEach(el => observer.observe(el))
-    return () => observer.disconnect()
-  }, [mode, stories])
-
-  // ── Scroll mode: click sidebar → scroll to chapter ──
-  const scrollToChapter = useCallback((idx) => {
-    setActiveIdx(idx)
-    if (mode === 'scroll' && contentRef.current) {
-      scrollJumping.current = true
-      const el = contentRef.current.querySelector('[data-chapter-idx="' + idx + '"]')
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      // 等滚动动画结束后恢复 Observer
-      clearTimeout(scrollJumping._timer)
-      scrollJumping._timer = setTimeout(() => { scrollJumping.current = false }, 800)
-    } else {
-      goToChapter(idx)
-    }
-  }, [mode, goToChapter])
-
-  // ── Keyboard shortcuts ──
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') { onClose(); return }
-      if (e.key === 'f' || e.key === 'F') {
-        e.preventDefault()
-        onModeChange(mode === 'scroll' ? 'chapter' : 'scroll')
-        return
-      }
-      if (mode === 'chapter' && (e.key === 'a' || e.key === 'A' || e.key === 'd' || e.key === 'D' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        e.preventDefault()
-        if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') goToChapter(activeIdx - 1)
-        if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') goToChapter(activeIdx + 1)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [mode, activeIdx, onClose, goToChapter])
-
-  // 章节模式切换时重置滚动位置（滚动模式不重置，由用户自由滚动）
-  useEffect(() => {
-    if (mode !== 'scroll' && contentRef.current) contentRef.current.scrollTop = 0
-  }, [activeIdx, mode])
-
-  // 切换到滚动模式时，滚到当前章节位置（继承章节模式阅读进度）
-  const prevMode = useRef(mode)
-  useEffect(() => {
-    if (mode === 'scroll' && prevMode.current !== 'scroll' && contentRef.current) {
-      const el = contentRef.current.querySelector(`[data-chapter-idx="${activeIdx}"]`)
-      if (el) el.scrollIntoView({ block: 'start' })
-    }
-    prevMode.current = mode
-  }, [mode, activeIdx])
-
-  if (!stories.length) return null
-
-  return (
-    <div className="fixed inset-0 z-[250] flex no-drag">
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className={`relative z-10 flex flex-1 m-3 sm:m-6 rounded-2xl overflow-hidden shadow-2xl border ${t.border} ${t.bg} animate-fade-in transition-colors duration-500`} onClick={e => e.stopPropagation()}>
-        {/* ── Left Sidebar ── */}
-        <div className={`w-52 lg:w-60 flex-shrink-0 border-r ${t.border} flex flex-col ${t.card} transition-colors duration-500`}>
-          <div className={`px-4 py-3 border-b ${t.borderSubtle}`}>
-            <h3 className={`text-sm font-semibold ${t.heading}`}>{characterName || ''} · 故事</h3>
-            <p className={`text-[10px] ${t.textMuted} mt-0.5`}>共 {stories.length} 篇</p>
-          </div>
-          <div className="flex-1 overflow-y-auto py-2">
-            {stories.map((s, i) => (
-              <button key={s.id} tabIndex={-1} onMouseDown={e => e.preventDefault()} onClick={() => scrollToChapter(i)}
-                className={`w-full text-left px-4 py-2.5 text-xs transition-colors duration-200 flex items-center gap-2 ${
-                  i === activeIdx ? t.chapterActive : `${t.chapterText} ${t.chapterHover} border-l-2 border-transparent`
-                }`}>
-                <FileText className="w-3 h-3 flex-shrink-0" /><span className="truncate">{s.title_zh}</span>
-              </button>
-            ))}
-          </div>
-          <div className={`border-t ${t.borderSubtle} px-4 py-3 space-y-2.5 transition-colors duration-500`}>
-            <div className="flex items-center gap-1.5">
-              {['dark', 'sepia', 'light'].map(th => {
-                const thInfo = READER_THEMES[th]
-                const colors = { dark: '#1a1a2e', sepia: '#d4b896', light: '#fafaf9' }
-                return (
-                  <div key={th} onClick={() => onThemeChange(th)}
-                    className="w-6 h-6 rounded-full border-2 transition-[border-color,box-shadow] duration-300 cursor-pointer"
-                    style={{ backgroundColor: colors[th], borderColor: theme === th ? 'rgb(129 140 248)' : 'rgba(255,255,255,0.15)' }}
-                    onMouseEnter={e => { if (theme !== th) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.6)' }}
-                    onMouseLeave={e => { if (theme !== th) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)' }}
-                    title={thInfo.name} />
-                )
-              })}
-            </div>
-            <div className={`flex items-center rounded-lg ${t.toggleBg} p-0.5 transition-colors duration-300`}>
-              <button onMouseDown={e => e.preventDefault()} onClick={() => onModeChange('scroll')} className={`flex-1 py-1 rounded-md text-[10px] transition-colors duration-200 ${mode === 'scroll' ? t.toggleActive : t.toggleInactive}`}>滚动</button>
-              <button onMouseDown={e => e.preventDefault()} onClick={() => onModeChange('chapter')} className={`flex-1 py-1 rounded-md text-[10px] transition-colors duration-200 ${mode === 'chapter' ? t.toggleActive : t.toggleInactive}`}>章节</button>
-            </div>
-            <div className="text-center text-[8px] pointer-events-none" style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.3)' : theme === 'sepia' ? 'rgba(61,43,26,0.35)' : 'rgba(10,10,10,0.3)' }}>F 切换模式</div>
-          </div>
-        </div>
-
-        {/* ── Main Content ── */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <div className={`flex items-center justify-between px-5 py-3 border-b ${t.border} flex-shrink-0 transition-colors duration-500 drag-region`}>
-            <div className="flex items-center gap-2 min-w-0 no-drag">
-              <BookOpen className="w-4 h-4 text-primary-400 flex-shrink-0" />
-              <span className={`text-sm font-medium ${t.heading} truncate`}>{story?.title_zh || ''}</span>
-            </div>
-            <button onClick={onClose} className={`no-drag p-1.5 rounded-lg ${t.textMuted} hover:${t.heading} ${t.buttonBg} ${t.buttonHover} transition-colors flex-shrink-0 ml-2`}><X className="w-4 h-4" /></button>
-          </div>
-
-          {/* ── Scroll Mode ── */}
-          {mode === 'scroll' ? (
-            <div ref={contentRef} className={`flex-1 overflow-y-auto px-6 sm:px-12 lg:px-20 py-8 ${t.text} text-sm leading-relaxed transition-colors duration-500`}>
-              <div className="max-w-2xl mx-auto space-y-12">
-                {stories.map((s, i) => (
-                  <div key={s.id} data-chapter-idx={i} className="pt-4">
-                    <h2 className={`text-lg font-bold mb-4 ${t.heading}`} style={{ scrollMarginTop: '1rem' }}>{s.title_zh}</h2>
-                    <div className="whitespace-pre-wrap">{s.content || '暂无内容'}</div>
-                    {i < stories.length - 1 && <div className={`mt-8 pt-4 border-t ${t.border} text-center text-[10px] ${t.textMuted}`}>— 第 {i + 1} 篇完 —</div>}
-                  </div>
-                ))}
-                <div className="h-[60vh]" />
-              </div>
-            </div>
-          ) : (
-            /* ── Chapter Mode ── */
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-              <div ref={contentRef} className={`flex-1 overflow-y-auto px-6 sm:px-12 lg:px-20 py-8 ${t.text} text-sm leading-relaxed transition-colors duration-500`}>
-                <div className={`max-w-2xl mx-auto transition-all duration-300 ${animating ? (animDir > 0 ? 'opacity-0 translate-x-8' : 'opacity-0 -translate-x-8') : 'opacity-100 translate-x-0'}`}>
-                  <h2 className={`text-lg font-bold mb-6 ${t.heading}`}>{story?.title_zh}</h2>
-                  <div className="whitespace-pre-wrap">{story?.content || '暂无内容'}</div>
-                </div>
-              </div>
-              <div className={`flex items-center justify-between px-6 py-4 border-t ${t.border} flex-shrink-0 transition-colors duration-500`}>
-                <div className="relative">
-                  <button onClick={() => goToChapter(activeIdx - 1)} disabled={!hasPrev}
-                    className={`px-4 py-2 rounded-lg text-xs ${t.buttonBg} ${t.buttonHover} ${t.buttonText} disabled:opacity-25 transition-colors`}>
-                    ← 上一章
-                  </button>
-                  <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-mono pointer-events-none" style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.35)' : theme === 'sepia' ? 'rgba(61,43,26,0.3)' : 'rgba(10,10,10,0.3)' }}>A</span>
-                </div>
-                <span className={`text-xs ${t.textMuted}`}>{activeIdx + 1} / {stories.length}</span>
-                <div className="relative">
-                  <button onClick={() => goToChapter(activeIdx + 1)} disabled={!hasNext}
-                    className={`px-4 py-2 rounded-lg text-xs ${t.buttonBg} ${t.buttonHover} ${t.buttonText} disabled:opacity-25 transition-colors`}>
-                    下一章 →
-                  </button>
-                  <span className="absolute -bottom-0.5 left-0.5 text-[8px] font-mono pointer-events-none" style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.35)' : theme === 'sepia' ? 'rgba(61,43,26,0.3)' : 'rgba(10,10,10,0.3)' }}>D</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ── 相关效果栏（支持拖拽排序）──
 function RelatedEffectsSection({ effects, effectMap, onAdd, onEdit, onDelete, onReorder }) {

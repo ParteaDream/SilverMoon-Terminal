@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass, Bot } from 'lucide-react'
+import { Calculator, FileText, FolderOpen, Settings2, Swords, Globe, Images, BarChart3, Landmark, Star, Compass, Hourglass, Bot, Flame, Sparkles } from 'lucide-react'
 
 const TerminalContext = createContext(null)
 
@@ -8,6 +8,7 @@ const APP_REGISTRY = {
   traincalc: { icon: Calculator, color: 'from-gray-700 to-orange-400', iconClass: 'text-white drop-shadow-md' },
   betamemo: { icon: FileText, color: 'from-white to-gray-100', iconClass: 'text-yellow-500 drop-shadow-sm' },
   dragonsnake: { icon: Swords, color: 'from-emerald-700 to-teal-400', iconClass: 'text-white drop-shadow-md' },
+  nightsoulrace: { icon: Flame, color: 'from-orange-600 to-amber-300', iconClass: 'text-white drop-shadow-md' },
   worldtree: { icon: Globe, color: 'from-green-600 to-emerald-400', iconClass: 'text-white drop-shadow-sm' },
   album: { icon: Images, color: 'from-pink-500 to-rose-600', iconClass: 'text-white drop-shadow-md' },
   ratefetcher: { icon: BarChart3, color: 'from-cyan-700 to-blue-400', iconClass: 'text-white drop-shadow-md' },
@@ -15,6 +16,7 @@ const APP_REGISTRY = {
   gachastation: { icon: Star, color: 'from-blue-600 to-cyan-400', iconClass: 'text-white drop-shadow-md' },
   memoryhub: { icon: Compass, color: 'from-amber-500 to-yellow-400', iconClass: 'text-white drop-shadow-md' },
   hourglass: { icon: Hourglass, color: 'from-indigo-600 to-violet-500', iconClass: 'text-white drop-shadow-md' },
+  simulanka: { icon: Sparkles, color: 'from-fuchsia-500 to-sky-400', iconClass: 'text-white drop-shadow-md' },
   resources: { icon: FolderOpen, color: 'from-blue-500 to-sky-300', iconClass: 'text-white drop-shadow-md' },
   customize: { icon: Settings2, color: 'from-purple-500 to-pink-400', iconClass: 'text-white drop-shadow-md' },
   ai: { icon: Bot, color: 'from-indigo-600 to-violet-500', iconClass: 'text-white drop-shadow-md' },
@@ -26,6 +28,7 @@ function getDefaultPosition(index, appId) {
   const isCalc = appId === 'traincalc'
   const isMemo = appId === 'betamemo'
   const isSnake = appId === 'dragonsnake'
+  const isRace = appId === 'nightsoulrace'
   const isWorldTree = appId === 'worldtree'
   const isAlbum = appId === 'album'
   const isRateFetcher = appId === 'ratefetcher'
@@ -35,11 +38,12 @@ function getDefaultPosition(index, appId) {
   const isHourglass = appId === 'hourglass'
   const isCustomize = appId === 'customize'
   const isAI = appId === 'ai'
+  const isSimulanka = appId === 'simulanka'   // 祈愿模拟器：卡池横幅 + 十连网格需要宽窗
   return {
     left: sidebarW + 30 + index * 30,
     top: 50 + index * 30,
-    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : isWorldTree ? 700 : isAlbum ? 860 : isRateFetcher ? 720 : isNorthlandBank ? 800 : isGachaStation ? 620 : isMemoryHub ? 960 : isHourglass ? 860 : isCustomize ? 560 : isAI ? 880 : 600,
-    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 660 : isWorldTree ? 580 : isAlbum ? 620 : isRateFetcher ? 640 : isNorthlandBank ? 660 : isGachaStation ? 620 : isMemoryHub ? 700 : isHourglass ? 680 : isCustomize ? 520 : isAI ? 640 : 420,
+    width: isCalc ? 460 : isMemo ? 900 : isSnake ? 520 : isRace ? 820 : isWorldTree ? 700 : isAlbum ? 860 : isRateFetcher ? 720 : isNorthlandBank ? 800 : isGachaStation ? 620 : isMemoryHub ? 960 : isHourglass ? 860 : isCustomize ? 560 : isAI ? 880 : isSimulanka ? 1100 : 600,
+    height: isCalc ? 640 : isMemo ? 680 : isSnake ? 660 : isRace ? 820 : isWorldTree ? 580 : isAlbum ? 620 : isRateFetcher ? 640 : isNorthlandBank ? 660 : isGachaStation ? 620 : isMemoryHub ? 700 : isHourglass ? 680 : isCustomize ? 520 : isAI ? 640 : isSimulanka ? 740 : 420,
   }
 }
 

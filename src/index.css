@@ -321,6 +321,19 @@ body {
   padding-right: var(--page-rail-gutter-w, 0px);
 }
 
+/* ── 开发者工具栏（DevToolbar，fixed bottom-0 h-10）的页面末尾预留 ──
+   预留必须落在内容流里：放在 <main> 的 padding 上会被吃掉 —— 页面容器是 h-full
+   （高度固定），内容溢出时滚动容器的 padding 不计入滚动区，滚到底时最后一行
+   仍然贴着窗口底边，正好压在工具栏下面。
+   所以用页面容器末尾的伪元素补出一块空白。高度由 useDevToolbarReserve 测量后给出：
+   会滚动的页面 64px（工具栏 40 + 呼吸 24），满高页面不滚动则保持 0（否则会凭空
+   多出一条滚动条）。 */
+main.dev-reserve-bottom > [data-page-host]::after {
+  content: '';
+  display: block;
+  height: var(--devbar-reserve-h, 0px);
+}
+
 /* Selection */
 ::selection {
   background: rgba(99, 102, 241, 0.3);
@@ -471,6 +484,33 @@ body.cursor-ring-on main :focus-visible {
 @keyframes fadeOut {
   from { opacity: 1; }
   to { opacity: 0; }
+}
+
+/* 希穆兰卡 · 抽卡动画专用：五星揭示时自下而上的星屑 */
+@keyframes simulankaRise {
+  0%   { opacity: 0; transform: translateY(0) scale(0.6); }
+  12%  { opacity: 0.95; }
+  100% { opacity: 0; transform: translateY(-80vh) scale(1.05); }
+}
+/* 希穆兰卡 · 抽卡动画专用：五星卡面扫光 */
+@keyframes simulankaSweep {
+  0%   { transform: translateX(0) rotate(12deg); opacity: 0; }
+  18%  { opacity: 0.9; }
+  100% { transform: translateX(640px) rotate(12deg); opacity: 0; }
+}
+/* 希穆兰卡 · 四/五星揭示（两层叠放，只动 opacity —— drop-shadow 逐帧重算会掉帧）：
+   simulankaSilhouette：黑色剪影层，边缘带稀有度色光辉，先亮起再淡出
+   simulankaRekindle   ：原图层，剪影亮到顶点时开始点亮 */
+@keyframes simulankaSilhouette {
+  0%   { opacity: 0; }
+  18%  { opacity: 1; }
+  62%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes simulankaRekindle {
+  0%   { opacity: 0; }
+  55%  { opacity: 0; }
+  100% { opacity: 1; }
 }
 
 .animate-fade-in { animation: fadeIn 0.2s ease-out; }

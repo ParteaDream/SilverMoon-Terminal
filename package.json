@@ -1,13 +1,17 @@
 {
   "name": "silvermoon-terminal",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "SilverMoon Terminal - 银月终端",
   "main": "electron/main.js",
+  "config": {
+    "electron_builder_binaries_mirror": "https://registry.npmmirror.com/-/binary/electron-builder-binaries/"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test:memoryhub": "node scripts/test-marker-overlap.mjs && node scripts/test-idle-loader.mjs && node scripts/test-map-viewport.mjs",
     "test:desktop": "node scripts/test-desktop-placement.mjs",
+    "clean:temp": "node scripts/clean-temp.cjs",
     "test:keyboard": "node scripts/test-keyboard.mjs",
     "audit:keyboard": "node scripts/audit-keyboard.mjs",
     "audit:keyboard:baseline": "node scripts/audit-keyboard.mjs --write-baseline",
@@ -15,6 +19,30 @@
     "test:wish": "node scripts/test-wish-analysis.mjs",
     "test:pity": "node scripts/test-pity-at-date.mjs",
     "test:ai": "node scripts/test-ai-models.mjs",
+    "test:scroll": "node scripts/test-scroll-memory.mjs",
+    "test:scroll:e2e": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-scroll-restore.cjs",
+    "test:scroll:dev": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-scroll-restore-dev.cjs",
+    "test:detail-top": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-detail-open-top.cjs",
+    "test:detail-top:dev": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-detail-open-top.cjs --dev",
+    "test:dish-links": "node scripts/test-dish-links.mjs",
+    "test:dish-links:e2e": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-dish-links.cjs",
+    "test:material-cook": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-material-cook.cjs",
+    "test:devbar": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-devtoolbar-reserve.cjs",
+    "test:crawler": "node scripts/test-weapon-crawl-names.mjs",
+    "test:crawler:e2e": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-weapon-crawl.cjs",
+    "test:food": "node scripts/test-food-save.mjs",
+    "test:book": "node scripts/test-book-merge.mjs && node scripts/test-book-save.mjs",
+    "test:race": "node scripts/test-nightsoul-race.mjs",
+    "shot:race": "env -u ELECTRON_RUN_AS_NODE electron scripts/shot-nightsoul-race.cjs",
+    "test:food:e2e": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-food-crawl.cjs",
+    "test:book:e2e": "npm run build:book-save-bundle && env -u ELECTRON_RUN_AS_NODE electron scripts/test-book-crawl.cjs",
+    "test:reader": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-reader.cjs",
+    "build:food-save-bundle": "esbuild src/utils/foodCrawlSave.mjs --bundle --format=iife --global-name=FoodCrawlSave --outfile=scripts/.foodCrawlSave.iife.js",
+    "build:book-save-bundle": "esbuild src/utils/bookCrawlSave.mjs --bundle --format=iife --global-name=BookCrawlSave --outfile=scripts/.bookCrawlSave.iife.js",
+    "shot:foods": "npm run build:food-save-bundle && env -u ELECTRON_RUN_AS_NODE electron scripts/shot-foods.cjs",
+    "shot:books": "npm run build:book-save-bundle && env -u ELECTRON_RUN_AS_NODE electron scripts/shot-books.cjs",
+    "fix:weapon-names": "node scripts/fix-weapon-names.mjs",
+    "fix:book-ids": "node scripts/fix-book-ids.mjs",
     "test:windowdrag": "env -u ELECTRON_RUN_AS_NODE electron scripts/test-fullscreen-window-drag.cjs",
     "perf:anim": "env -u ELECTRON_RUN_AS_NODE electron scripts/bench-anim-perf.cjs",
     "shot:changelog": "env -u ELECTRON_RUN_AS_NODE electron scripts/shot-changelog.cjs",
@@ -22,8 +50,11 @@
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder --mac --arm64 && bash scripts/fix-mac-quarantine.sh -y",
     "electron:build:win": "vite build && electron-builder --win --x64",
-    "electron:publish": "vite build && electron-builder --mac --arm64 --win --x64 --publish always && bash scripts/fix-mac-quarantine.sh -y",
-    "start": "electron ."
+    "electron:publish": "npm run build && npm run electron:publish:mac && npm run electron:publish:win",
+    "electron:publish:mac": "electron-builder --mac --arm64 --publish always && bash scripts/fix-mac-quarantine.sh -y",
+    "electron:publish:win": "electron-builder --win --x64 --publish always",
+    "start": "electron .",
+    "test:simulanka": "node scripts/test-wish-simulator.mjs && node scripts/test-wish-sim-data.mjs"
   },
   "dependencies": {
     "bplist-parser": "^0.3.2",
@@ -59,12 +90,6 @@
       "target": [
         {
           "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
           "arch": [
             "arm64"
           ]
@@ -123,5 +148,6 @@
       "releaseType": "release",
       "vPrefixedTagName": true
     }
-  }
+  },
+  "versionTag": "beta"
 }

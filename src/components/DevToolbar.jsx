@@ -1,12 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useDb } from '../context/DbContext'
+import { useFoodCrawler, FoodLeakCheckModal } from './FoodCrawler'
+import { useBookCrawler, BookLeakCheckModal } from './BookCrawler'
+import { computeFoodGaps } from '../utils/foodGaps.mjs'
+import { computeBookGaps } from '../utils/bookGaps.mjs'
+import { buildWeaponUpdate, effectiveWeaponId } from '../utils/weaponCrawlSave.mjs'
 import { useTerminal } from '../context/TerminalContext'
 import useOverlay from '../hooks/useOverlay'
 import { parseTowerDetail, parseTheaterDetail, parseLeylineDetail } from '../utils/challengeCrawl'
 import {
   Database, Download, Upload, Trash2, X, Bug, History, Wrench,
-  Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock, Globe, Check, RefreshCw
+  Loader2, Play, Pause, CheckCircle2, AlertCircle, Clock, Globe, Check, RefreshCw, Search
 } from 'lucide-react'
 
 // ─── 角色爬虫可选的爬取内容分类：勾选后爬取详情页并自动覆盖对应信息 ───
@@ -828,11 +833,13 @@ export default function DevToolbar() {
   const { devMode } = useDb()
   const location = useLocation()
   const { clearSelection } = useTerminal()
-  const { crawlCharacter, crawlWeapon, checkMissingWeapons, crawlArtifact, checkMissingArtifacts, crawlWishes, crawlWishImages, downloadBannerImage, cleanupScrapeWindow, query, downloadMaterialImage } = useDb()
+  const { crawlCharacter, crawlWeapon, checkMissingWeapons, crawlArtifact, checkMissingArtifacts, crawlWishes, crawlWishImages, downloadBannerImage, cleanupScrapeWindow, query, downloadMaterialImage, checkMissingFoods, checkMissingBooks } = useDb()
   // DevToolbar 在 <Routes> 外部，useParams() 不可用，手动从路径提取 id
   const detailId = location.pathname.match(/^\/characters\/(\d+)/)?.[1] || null
   const weaponDetailId = location.pathname.match(/^\/weapons\/(\d+)/)?.[1] || null
   const artifactDetailId = location.pathname.match(/^\/artifacts\/(\d+)/)?.[1] || null
+  const foodDetailId = location.pathname.match(/^\/foods\/(\d+)/)?.[1] || null
+  const bookDetailId = location.pathname.match(/^\/books\/(\d+)/)?.[1] || null
   const [backupListOpen, setBackupListOpen] = useState(false)
   const [backupCreateOpen, setBackupCreateOpen] = useState(false)
   const [crawlerOpen, setCrawlerOpen] = useState(false)
@@ -849,6 +856,8 @@ export default function DevToolbar() {
   const [selectedWeapons, setSelectedWeapons] = useState([])  // 武器页面选中项
   const [selectedMats, setSelectedMats] = useState([])  // 材料页面选中项
   const [selectedArtifacts, setSelectedArtifacts] = useState([])  // 圣遗物页面选中项
+  const [selectedFoods, setSelectedFoods] = useState([])  // 食物页面选中项
+  const [selectedBooks, setSelectedBooks] = useState([])  // 书籍页面选中项
 
   // ── 武器爬虫状态 ──
   const [weaponCrawlerOpen, setWeaponCrawlerOpen] = useState(false)
@@ -891,6 +900,35 @@ export default function DevToolbar() {
   const wishRunningRef = useRef(false)
   const [wishCurrentTask, setWishCurrentTask] = useState(null)
 
+  // ── 食物爬虫 ──
+  // 逻辑（任务队列 / 落库 / 查漏比对）都在 components/FoodCrawler.jsx，
+  // 进度面板复用下面的通用 CrawlerPanel，与武器/圣遗物爬虫保持一致。
+  const foodCrawler = useFoodCrawler({
+    onSaved: () => {
+      // 食物页面用模块级缓存，跨组件写库后要靠这个事件通知它回源
+      window.dispatchEvent(new CustomEvent('food-data-changed'))
+    },
+  })
+  const [foodName, setFoodName] = useState('')
+  const [foodLeakOpen, setFoodLeakOpen] = useState(false)
+  const [foodLeakLoading, setFoodLeakLoading] = useState(false)
+  const [foodLeakGroups, setFoodLeakGroups] = useState([])
+  const [foodLeakWarning, setFoodLeakWarning] = useState(null)
+
+  // ── 书籍爬虫 ──
+  // 与食物爬虫同构：逻辑在 components/BookCrawler.jsx，进度面板复用 CrawlerPanel。
+  const bookCrawler = useBookCrawler({
+    onSaved: () => {
+      // 书籍页面用模块级缓存，跨组件写库后要靠这个事件通知它回源
+      window.dispatchEvent(new CustomEvent('book-data-changed'))
+    },
+  })
+  const [bookName, setBookName] = useState('')
+  const [bookLeakOpen, setBookLeakOpen] = useState(false)
+  const [bookLeakLoading, setBookLeakLoading] = useState(false)
+  const [bookLeakGroups, setBookLeakGroups] = useState([])
+  const [bookLeakWarning, setBookLeakWarning] = useState(null)
+
   // ── 爬虫状态（提升到 DevToolbar 层级，导航不丢失）──
   const [tasks, setTasks] = useState([])
   const [running, setRunning] = useState(false)
@@ -907,6 +945,10 @@ export default function DevToolbar() {
   const isWeaponPage = location.pathname.startsWith('/weapons')
   const isWeaponDetailPage = location.pathname.startsWith('/weapons/') && !!weaponDetailId
   const isMaterialPage = location.pathname.startsWith('/materials')
+  const isFoodPage = location.pathname.startsWith('/foods')
+  const isFoodDetailPage = location.pathname.startsWith('/foods/') && !!foodDetailId
+  const isBookPage = location.pathname.startsWith('/books')
+  const isBookDetailPage = location.pathname.startsWith('/books/') && !!bookDetailId
   const isArtifactPage = location.pathname.startsWith('/artifacts')
   const isArtifactDetailPage = location.pathname.startsWith('/artifacts/') && !!artifactDetailId
   const isWishPage = location.pathname.startsWith('/wishes')
@@ -988,6 +1030,48 @@ export default function DevToolbar() {
     window.addEventListener('devtoolbar-weapon-selection', handleSelection)
     return () => window.removeEventListener('devtoolbar-weapon-selection', handleSelection)
   }, [])
+
+  // Listen for book selection from BooksPage
+  useEffect(() => {
+    const handleSelection = (e) => setSelectedBooks(e.detail || [])
+    window.addEventListener('devtoolbar-book-selection', handleSelection)
+    return () => window.removeEventListener('devtoolbar-book-selection', handleSelection)
+  }, [])
+
+  // 书籍详情页：取书名供爬虫任务列表显示
+  useEffect(() => {
+    if (!isBookDetailPage || !bookDetailId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await query('SELECT name_zh FROM books WHERE id = ?', [bookDetailId])
+        if (!cancelled) setBookName(res.data?.[0]?.name_zh || '')
+      } catch (_) {}
+    })()
+    return () => { cancelled = true }
+  }, [isBookDetailPage, bookDetailId])
+
+  // Listen for food selection from FoodsPage
+  useEffect(() => {
+    function handleSelection(e) {
+      setSelectedFoods(e.detail || [])
+    }
+    window.addEventListener('devtoolbar-food-selection', handleSelection)
+    return () => window.removeEventListener('devtoolbar-food-selection', handleSelection)
+  }, [])
+
+  // 食物详情页：取当前条目的名称，供爬虫任务使用
+  useEffect(() => {
+    if (!isFoodDetailPage || !foodDetailId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await query('SELECT name_zh FROM foods WHERE id = ?', [foodDetailId])
+        if (!cancelled) setFoodName(res.data?.[0]?.name_zh || '')
+      } catch (_) {}
+    })()
+    return () => { cancelled = true }
+  }, [isFoodDetailPage, foodDetailId])
 
   // Load character name for detail page
   useEffect(() => {
@@ -1406,6 +1490,7 @@ export default function DevToolbar() {
           await query('UPDATE character_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
           await query('UPDATE character_talent_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
           await query('UPDATE weapon_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
+          await query('UPDATE food_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
           await query(`UPDATE materials SET id = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
             [m.material_id, m.material_name_en || '', m.type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, oldId])
           await query('PRAGMA foreign_keys = ON')
@@ -1443,6 +1528,164 @@ export default function DevToolbar() {
 
   // ── 武器爬虫逻辑 ──
 
+  // ── 食物爬虫：任务构造 / 打开面板 / 查漏补缺 ──
+
+  function buildFoodTaskList() {
+    if (isFoodDetailPage && foodDetailId) {
+      return [{ id: Number(foodDetailId), name: foodName || `ID:${foodDetailId}` }]
+    }
+    if (selectedFoods.length > 0) {
+      return selectedFoods.map(f => ({ id: f.id, name: f.name_zh }))
+    }
+    return []
+  }
+
+  function openFoodCrawler() {
+    const list = buildFoodTaskList()
+    if (list.length === 0) {
+      alert('请先在食物列表页开启「多选模式」勾选条目，或进入某个食物详情页')
+      return
+    }
+    foodCrawler.start(list, {
+      title: isFoodDetailPage ? `食物爬虫 · ${list[0].name}` : `食物爬虫（${list.length}）`,
+    })
+  }
+
+  async function openFoodLeakCheck() {
+    setFoodLeakOpen(true)
+    setFoodLeakLoading(true)
+    setFoodLeakWarning(null)
+    setFoodLeakGroups([])
+    try {
+      const res = await checkMissingFoods()
+      if (!res || !res.success) {
+        alert('获取食物列表失败：' + ((res && res.error) || '未知错误'))
+        setFoodLeakOpen(false)
+        return
+      }
+      if (res.versionFallback) {
+        setFoodLeakWarning(`未能获取最新数据版本（manifest 请求失败），当前使用 ${res.version || '未知'} 数据检测，结果可能不准确`)
+      }
+      // 缺口口径依赖形态数/材料数，回源查询，避免用到可能过期的列表缓存；
+      // 「缺料理原型」还要角色身上的 dish_name 与各道菜的配方（口径见 foodGaps.mjs）
+      const [foodRes, variantRes, matRes, charRes] = await Promise.all([
+        query('SELECT * FROM foods ORDER BY id'),
+        query('SELECT food_id FROM food_variants'),
+        query('SELECT food_id, material_id, quantity FROM food_materials'),
+        query('SELECT name_zh, dish_name FROM characters'),
+      ])
+      const countBy = (rows) => {
+        const m = new Map()
+        for (const r of rows || []) {
+          const id = Number(r.food_id)
+          if (Number.isFinite(id)) m.set(id, (m.get(id) || 0) + 1)
+        }
+        return m
+      }
+      const vc = countBy(variantRes.data)
+      const mc = countBy(matRes.data)
+      const rows = (foodRes.data || []).map(f => ({
+        ...f,
+        variant_count: vc.get(Number(f.id)) || 0,
+        material_count: mc.get(Number(f.id)) || 0,
+      }))
+      setFoodLeakGroups(computeFoodGaps(res, rows, {
+        characters: charRes.data || [],
+        materials: matRes.data || [],
+      }))
+    } catch (e) {
+      alert('查漏失败：' + (e.message || '未知错误'))
+      setFoodLeakOpen(false)
+    } finally {
+      setFoodLeakLoading(false)
+    }
+  }
+
+  // ── 书籍爬虫：任务构造 / 打开面板 / 查漏补缺 ──
+
+  function buildBookTaskList() {
+    if (isBookDetailPage && bookDetailId) {
+      return [{ id: Number(bookDetailId), name: bookName || `ID:${bookDetailId}` }]
+    }
+    if (selectedBooks.length > 0) {
+      return selectedBooks.map(b => ({ id: b.id, name: b.name_zh }))
+    }
+    return []
+  }
+
+  function openBookCrawler() {
+    const list = buildBookTaskList()
+    if (list.length === 0) {
+      alert('请先在书籍列表页开启「多选模式」勾选条目，或进入某本书的详情页')
+      return
+    }
+    bookCrawler.start(list, {
+      title: isBookDetailPage ? `书籍爬虫 · ${list[0].name}` : `书籍爬虫（${list.length}）`,
+    })
+  }
+
+  async function openBookLeakCheck() {
+    setBookLeakOpen(true)
+    setBookLeakLoading(true)
+    setBookLeakWarning(null)
+    setBookLeakGroups([])
+    try {
+      const res = await checkMissingBooks()
+      if (!res || !res.success) {
+        alert('获取书籍列表失败：' + ((res && res.error) || '未知错误'))
+        setBookLeakOpen(false)
+        return
+      }
+      // 线上目录被反爬拦下时会回退到本地缓存，必须说清楚，别让"已齐全"看起来像真的
+      if (res.stale) {
+        setBookLeakWarning(`未能获取 bilibili wiki 的最新目录（${res.staleReason || '网络或反爬拦截'}），`
+          + `正在使用本地缓存${res.cachedAt ? `（${res.cachedAt}）` : ''}比对，结果可能不是最新`)
+      } else if (res.versionFallback) {
+        setBookLeakWarning(`未能获取最新数据版本（manifest 请求失败），当前使用 ${res.version || '未知'} 数据检测，结果可能不准确`)
+      }
+      // 缺口口径依赖卷数/正文数/插图数，回源查询，避免用到可能过期的列表缓存。
+      // 带 WHERE 的两条只在「有插图 / 有残留标记」时才有行，代价可以忽略；
+      // 不用 SUM/CASE 聚合，是因为双库模式下聚合列不会把 user.db 新插入的行算进去。
+      const [bookRes, volRes, imgRes, artifactRes] = await Promise.all([
+        query('SELECT * FROM books ORDER BY id'),
+        query("SELECT book_id, LENGTH(COALESCE(content, '')) AS content_len FROM book_volumes"),
+        query("SELECT book_id FROM book_volumes WHERE content LIKE '%[img:%'"),
+        query("SELECT book_id FROM book_volumes WHERE content LIKE '%UNIQ--%'"),
+      ])
+      const volumeCounts = new Map()
+      const bodyCounts = new Map()
+      for (const r of volRes.data || []) {
+        const id = Number(r.book_id)
+        if (!Number.isFinite(id)) continue
+        volumeCounts.set(id, (volumeCounts.get(id) || 0) + 1)
+        if (Number(r.content_len) > 0) bodyCounts.set(id, (bodyCounts.get(id) || 0) + 1)
+      }
+      const countBy = (rows) => {
+        const m = new Map()
+        for (const r of rows || []) {
+          const id = Number(r.book_id)
+          if (Number.isFinite(id)) m.set(id, (m.get(id) || 0) + 1)
+        }
+        return m
+      }
+      const imageVols = countBy(imgRes.data)
+      const artifactVols = countBy(artifactRes.data)
+      const rows = (bookRes.data || []).map(b => ({
+        ...b,
+        volume_count: volumeCounts.get(Number(b.id)) || 0,
+        body_count: bodyCounts.get(Number(b.id)) || 0,
+        image_count: imageVols.get(Number(b.id)) || 0,
+        artifact_count: artifactVols.get(Number(b.id)) || 0,
+      }))
+      setBookLeakGroups(computeBookGaps(res, rows))
+    } catch (e) {
+      alert('查漏失败：' + (e.message || '未知错误'))
+      setBookLeakOpen(false)
+    } finally {
+      setBookLeakLoading(false)
+    }
+  }
+
   function buildWeaponTaskList() {
     if (isWeaponDetailPage && weaponName && weaponId) {
       return [{ id: weaponId, name: weaponName, status: 'pending', message: '' }]
@@ -1461,43 +1704,24 @@ export default function DevToolbar() {
   }
 
   async function saveWeaponData(weaponId, data) {
-    const fields = []
-    const values = []
+    // 字段映射规则抽在 utils/weaponCrawlSave.js（纯函数，可单测）：
+    // 中文名/英文名以线上为准，但撞名、占位名、0 值都不覆盖库里的有效值。
+    let takenNames = new Set()
+    try {
+      const existing = await query('SELECT id, name_zh FROM weapons WHERE id != ?', [weaponId])
+      takenNames = new Set((existing.data || []).map(r => String(r.name_zh)))
+    } catch (_) {}
 
-    if (data.name_en) { fields.push('name_en = ?'); values.push(data.name_en) }
-    if (data.rarity) { fields.push('rarity = ?'); values.push(data.rarity) }
-    if (data.weapon_type) { fields.push('weapon_type_id = ?'); values.push(data.weapon_type) }
-    if (data.base_atk != null) { fields.push('base_atk = ?'); values.push(data.base_atk) }
-    if (data.max_base_atk != null) { fields.push('max_base_atk = ?'); values.push(data.max_base_atk) }
-    if (data.secondary_stat) { fields.push('secondary_stat = ?'); values.push(data.secondary_stat) }
-    if (data.secondary_stat_value != null) { fields.push('secondary_stat_value = ?'); values.push(data.secondary_stat_value) }
-    if (data.max_secondary_stat_value != null) { fields.push('max_secondary_stat_value = ?'); values.push(data.max_secondary_stat_value) }
-    if (data.passive_name_zh) { fields.push('passive_name_zh = ?'); values.push(data.passive_name_zh) }
-    if (data.passive_description_zh) { fields.push('passive_description_zh = ?'); values.push(data.passive_description_zh) }
-    if (data.refinement) { fields.push('refinement = ?'); values.push(data.refinement) }
-    if (data.story_zh) { fields.push('story_zh = ?'); values.push(data.story_zh) }
-    if (data.description_zh) { fields.push('description_zh = ?'); values.push(data.description_zh) }
-
-    // 如果 nanoka.cc 返回的 ID 与数据库 ID 不同，同步更新 ID
-    const effectiveId = data.id && data.id !== weaponId ? data.id : weaponId;
-    if (data.id && data.id !== weaponId) {
-      fields.push('id = ?'); values.push(data.id);
+    const { fields, values, skipped } = buildWeaponUpdate(data, { weaponId, takenNames })
+    if (skipped.length > 0) {
+      console.log(`[crawler] 武器 ${weaponId} 跳过字段: ${skipped.join('；')}`)
     }
+    const effectiveId = effectiveWeaponId(data, weaponId)
 
-    // 图片（注意：DB 中 image=武器大图/gacha，simple_art=装备小图标）
+    // 图片文件落盘（字段值本身由 buildWeaponUpdate 生成）
     if (data.images) {
-      if (data.images.simple) {
-        // simple = gacha 大图 → DB image（武器图片）
-        const imgFile = `${data.images.simple}.webp`
-        fields.push('image = ?'); values.push(imgFile)
-        try { await downloadMaterialImage(data.images.simple) } catch (_) {}
-      }
-      if (data.images.icon) {
-        // icon = 装备小图标 → DB simple_art（装备图）
-        const iconFile = `${data.images.icon}.webp`
-        fields.push('simple_art = ?'); values.push(iconFile)
-        try { await downloadMaterialImage(data.images.icon) } catch (_) {}
-      }
+      if (data.images.simple) { try { await downloadMaterialImage(data.images.simple) } catch (_) {} }
+      if (data.images.icon) { try { await downloadMaterialImage(data.images.icon) } catch (_) {} }
     }
 
     if (fields.length > 0) {
@@ -1524,6 +1748,7 @@ export default function DevToolbar() {
             try {
               await query('PRAGMA foreign_keys = OFF')
               await query('UPDATE weapon_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
+          await query('UPDATE food_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
               await query(`UPDATE materials SET id = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
                 [m.material_id, m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, oldId])
               await query('PRAGMA foreign_keys = ON')
@@ -1954,9 +2179,16 @@ export default function DevToolbar() {
           const correctId = res.data.id || task.id;
 
           // 插入新武器记录
+          // name_zh 是 UNIQUE：线上同名多形态（武器幻化等）会让 INSERT 直接失败，
+          // 撞名时补一个 ID 后缀区分
+          let insertName = res.data.name_zh || `武器${correctId}`
+          try {
+            const nameDup = await query('SELECT id FROM weapons WHERE name_zh = ?', [insertName])
+            if (nameDup.data && nameDup.data.length > 0) insertName = `${insertName}（${correctId}）`
+          } catch (_) {}
           await query(
             `INSERT INTO weapons (id, name_zh, name_en, rarity, weapon_type_id, base_atk, max_base_atk, secondary_stat, secondary_stat_value, max_secondary_stat_value, passive_name_zh, passive_description_zh, story_zh, description_zh, image, simple_art) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [correctId, res.data.name_zh, res.data.name_en || '', res.data.rarity || 4, res.data.weapon_type || 0, res.data.base_atk || 0, res.data.max_base_atk || 0, res.data.secondary_stat || '', res.data.secondary_stat_value || 0, res.data.max_secondary_stat_value || 0, res.data.passive_name_zh || '', res.data.passive_description_zh || '', res.data.story_zh || '', res.data.description_zh || '', res.data.images?.simple ? `${res.data.images.simple}.webp` : '', res.data.images?.icon ? `${res.data.images.icon}.webp` : '']
+            [correctId, insertName, res.data.name_en || '', res.data.rarity || 4, res.data.weapon_type || 0, res.data.base_atk || 0, res.data.max_base_atk || 0, res.data.secondary_stat || '', res.data.secondary_stat_value || 0, res.data.max_secondary_stat_value || 0, res.data.passive_name_zh || '', res.data.passive_description_zh || '', res.data.story_zh || '', res.data.description_zh || '', res.data.images?.simple ? `${res.data.images.simple}.webp` : '', res.data.images?.icon ? `${res.data.images.icon}.webp` : '']
           )
 
           // 突破材料
@@ -1972,6 +2204,7 @@ export default function DevToolbar() {
                   try {
                     await query('PRAGMA foreign_keys = OFF')
                     await query('UPDATE weapon_ascension_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
+          await query('UPDATE food_materials SET material_id = ? WHERE material_id = ?', [m.material_id, oldId])
                     await query(`UPDATE materials SET id = ?, name_en = ?, type = ?, rarity = ?, description_zh = ?, source = ?, image = ? WHERE id = ?`,
                       [m.material_id, m.material_name_en || '', m.material_type || '', m.rarity || 1, m.description || '', m.source || '', imgFile, oldId])
                     await query('PRAGMA foreign_keys = ON')
@@ -2523,6 +2756,82 @@ export default function DevToolbar() {
           </button>
         )}
 
+        {/* 食物爬虫按钮 — 食物页面显示（爬虫统一收在开发者工具栏） */}
+        {(isFoodPage || foodCrawler.running) && (
+          <>
+            <button
+              onClick={openFoodCrawler}
+              disabled={foodCrawler.running}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors disabled:cursor-not-allowed ${
+                foodCrawler.running && !foodCrawler.paused ? 'text-primary-300 bg-primary-500/15 hover:bg-primary-500/25' :
+                foodCrawler.running && foodCrawler.paused ? 'text-amber-300 bg-amber-500/10 hover:bg-amber-500/20' :
+                'text-primary-400 hover:text-primary-300 hover:bg-primary-500/10'
+              }`}
+              title={isFoodDetailPage ? '爬取当前食物并覆盖' : '爬取列表页勾选的条目（需先开启多选模式）'}
+            >
+              {foodCrawler.running
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <Bug className="w-3 h-3" />}
+              食物爬虫
+              {foodCrawler.running && foodCrawler.tasks.length > 0 && (
+                <span className="text-[10px]">
+                  ({foodCrawler.tasks.filter(t => t.status === 'done').length}/{foodCrawler.tasks.length})
+                </span>
+              )}
+              {!foodCrawler.running && !isFoodDetailPage && selectedFoods.length > 0 && (
+                <span className="text-[10px]">({selectedFoods.length})</span>
+              )}
+            </button>
+            <button
+              onClick={openFoodLeakCheck}
+              disabled={foodCrawler.running}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+              title="比对 nanoka 线上目录，找出未收录 / 缺烹饪材料 / 形态不全的条目"
+            >
+              <Search className="w-3 h-3" />
+              查漏补缺
+            </button>
+          </>
+        )}
+
+        {/* 书籍爬虫按钮 — 书籍页面显示（爬虫统一收在开发者工具栏） */}
+        {(isBookPage || bookCrawler.running) && (
+          <>
+            <button
+              onClick={openBookCrawler}
+              disabled={bookCrawler.running}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors disabled:cursor-not-allowed ${
+                bookCrawler.running && !bookCrawler.paused ? 'text-primary-300 bg-primary-500/15 hover:bg-primary-500/25' :
+                bookCrawler.running && bookCrawler.paused ? 'text-amber-300 bg-amber-500/10 hover:bg-amber-500/20' :
+                'text-primary-400 hover:text-primary-300 hover:bg-primary-500/10'
+              }`}
+              title={isBookDetailPage ? '爬取当前书籍并覆盖' : '爬取列表页勾选的条目（需先开启多选模式）'}
+            >
+              {bookCrawler.running
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <Bug className="w-3 h-3" />}
+              书籍爬虫
+              {bookCrawler.running && bookCrawler.tasks.length > 0 && (
+                <span className="text-[10px]">
+                  ({bookCrawler.tasks.filter(t => t.status === 'done').length}/{bookCrawler.tasks.length})
+                </span>
+              )}
+              {!bookCrawler.running && !isBookDetailPage && selectedBooks.length > 0 && (
+                <span className="text-[10px]">({selectedBooks.length})</span>
+              )}
+            </button>
+            <button
+              onClick={openBookLeakCheck}
+              disabled={bookCrawler.running}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+              title="比对 bilibili wiki 与米游社观测枢，找出未收录 / 缺筛选元数据 / 缺正文的条目"
+            >
+              <Search className="w-3 h-3" />
+              查漏补缺
+            </button>
+          </>
+        )}
+
         {/* 圣遗物爬虫按钮 — 圣遗物页面显示 */}
         {(isArtifactPage || artifactRunning) && (
           <>
@@ -2696,6 +3005,54 @@ export default function DevToolbar() {
         loading={leakCheckLoading}
         onStart={startWeaponLeakCrawl}
         warning={leakCheckWarning}
+      />
+      <CrawlerPanel
+        isOpen={foodCrawler.open}
+        onClose={() => foodCrawler.setOpen(false)}
+        tasks={foodCrawler.tasks}
+        running={foodCrawler.running}
+        paused={foodCrawler.paused}
+        currentTask={foodCrawler.current}
+        onStart={openFoodCrawler}
+        onPause={foodCrawler.pause}
+        onResume={foodCrawler.resume}
+        onStop={foodCrawler.stop}
+      />
+      <FoodLeakCheckModal
+        isOpen={foodLeakOpen}
+        onClose={() => setFoodLeakOpen(false)}
+        groups={foodLeakGroups}
+        loading={foodLeakLoading}
+        warning={foodLeakWarning}
+        onStart={(items) => {
+          setFoodLeakOpen(false)
+          if (items.length === 0) return
+          foodCrawler.start(items.map(i => ({ id: i.id, name: i.name })), { title: `查漏补缺（${items.length}）` })
+        }}
+      />
+      <CrawlerPanel
+        isOpen={bookCrawler.open}
+        onClose={() => bookCrawler.setOpen(false)}
+        tasks={bookCrawler.tasks}
+        running={bookCrawler.running}
+        paused={bookCrawler.paused}
+        currentTask={bookCrawler.current}
+        onStart={openBookCrawler}
+        onPause={bookCrawler.pause}
+        onResume={bookCrawler.resume}
+        onStop={bookCrawler.stop}
+      />
+      <BookLeakCheckModal
+        isOpen={bookLeakOpen}
+        onClose={() => setBookLeakOpen(false)}
+        groups={bookLeakGroups}
+        loading={bookLeakLoading}
+        warning={bookLeakWarning}
+        onStart={(items) => {
+          setBookLeakOpen(false)
+          if (items.length === 0) return
+          bookCrawler.start(items.map(i => ({ id: i.id, name: i.name })), { title: `查漏补缺（${items.length}）` })
+        }}
       />
       <CrawlerPanel
         isOpen={wishCrawlerOpen}

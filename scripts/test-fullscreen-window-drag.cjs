@@ -23,6 +23,9 @@ const http = require('http')
 const net = require('net')
 const os = require('os')
 const path = require('path')
+// 磁盘安全：见 scripts/lib/sandbox.cjs 顶部的事故说明
+const { installCleanupHook, sweepLeftovers } = require('./lib/sandbox.cjs')
+sweepLeftovers(['silvermoon-drag-test-'])   // 异常信号（SIGTRAP/SIGKILL）会绕过退出钩子，只能靠下次启动自愈
 
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 const REAL_DATA = '/Users/stargomia/Files/GenshinWikiData'
@@ -79,7 +82,7 @@ function cleanup() {
   if (viteProcess && !viteProcess.killed) { try { viteProcess.kill('SIGTERM') } catch (_) {} }
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }) } catch (_) {}
 }
-process.once('exit', cleanup)
+installCleanupHook(cleanup)   // ⚠️ app.exit() 不触发 'exit'，清理必须靠劫持（见 lib/sandbox.cjs）
 function finish(code) {
   if (finished) return
   finished = true
